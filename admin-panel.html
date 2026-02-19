@@ -333,6 +333,8 @@
       const headers = { "Content-Type": "application/json" };
       const token = ui.token.value.trim();
       if (token) headers["x-admin-token"] = token;
+      const hubSession = localStorage.getItem("admin_hub_token_v1") || "";
+      if (hubSession) headers["x-hub-session"] = hubSession;
 
       const res = await fetch(ui.apiBase.value.trim() + path, {
         method,

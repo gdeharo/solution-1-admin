@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-02-19-hub-auth-d1-v1";
+const WORKER_BUILD = "2026-02-19-hub-admin-authz-v1";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -13,6 +13,7 @@ const TAB_KMC_CHAINS = "KMC Chains-Grid view";
 const TAB_CHAIN_TYPES = "Chain Types-Grid view";
 const TAB_LOOKUP_VALUES = "Lookup Values";
 const DEFAULT_LOG_TAB = "Search Log";
+const HUB_ADMIN_PANEL_ID = "kmc-chain-finder-admin";
 const LOOKUP_HEADERS = ["Field", "Value", "Active", "Sort Order", "Group"];
 const HUB_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const CHAIN_TYPE_LOOKUP_FIELDS = new Set([
@@ -425,7 +426,7 @@ export default {
 
       // Existing D1-backed admin and selector endpoints (kept for backwards compatibility)
       if (path.startsWith("/admin")) {
-        const authError = validateAdmin(request, env);
+        const authError = await validateAdmin(request, env);
         if (authError) return authError;
 
         const route = path.split("/").filter(Boolean);
@@ -808,12 +809,26 @@ export default {
   },
 };
 
-function validateAdmin(request, env) {
-  const token = env.ADMIN_TOKEN;
-  if (!token) return null;
-  const provided = request.headers.get("x-admin-token");
-  if (provided !== token) {
+async function validateAdmin(request, env) {
+  const adminToken = toStr(env.ADMIN_TOKEN);
+  const providedAdminToken = toStr(request.headers.get("x-admin-token"));
+  if (adminToken && providedAdminToken && providedAdminToken === adminToken) {
+    return null;
+  }
+
+  const hubSession = await requireHubSession(request, env);
+  if (!hubSession.ok) {
     return json({ error: "Unauthorized" }, 401);
+  }
+
+  const globalRole = normalizeHubGlobalRole(hubSession.user.global_role);
+  if (globalRole === "owner") return null;
+
+  const panelRole = getUserPanelRole(hubSession.user, HUB_ADMIN_PANEL_ID);
+  const roleWeight = { none: 0, viewer: 1, editor: 2, manager: 3 };
+  const requiredWeight = request.method === "GET" ? 1 : 2;
+  if ((roleWeight[panelRole] || 0) < requiredWeight) {
+    return json({ error: "Forbidden" }, 403);
   }
   return null;
 }
