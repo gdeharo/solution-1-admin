@@ -3,9 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>KMC Chain Selector Test</title>
+  <title>Chainsaw Chain Finder</title>
   <style>
-    :root { color-scheme: light; }
+    :root {
+      color-scheme: light;
+      --card-tint-percent: 20%;
+    }
     body {
       margin: 0;
       padding: 32px 16px;
@@ -55,7 +58,11 @@
       border: 1px solid var(--accent-color, rgb(20, 111, 248));
       border-radius: 8px;
       padding: 10px;
-      background: color-mix(in srgb, var(--accent-color, rgb(20, 111, 248)) 50%, #ffffff 50%);
+      background: color-mix(
+        in srgb,
+        var(--accent-color, rgb(20, 111, 248)) var(--card-tint-percent),
+        #ffffff calc(100% - var(--card-tint-percent))
+      );
       color: #0f2850;
     }
     .card-link {
@@ -125,6 +132,7 @@
         form_title: "KMC Chainsaw Chain Finder",
         accent_color: "rgb(20, 111, 248)",
         button_label: "Find Chains",
+        card_tint_percent: "20",
         no_result_message: "we don't offer this chainsaw chain at the moment, please check again in the future",
       };
       let config = { ...defaults };
@@ -153,6 +161,7 @@
         formTitle.textContent = config.form_title || defaults.form_title;
         findBtn.textContent = config.button_label || defaults.button_label;
         document.documentElement.style.setProperty("--accent-color", config.accent_color || defaults.accent_color);
+        document.documentElement.style.setProperty("--card-tint-percent", normalizeTintPercent(config.card_tint_percent));
       }
 
       async function loadConfig() {
@@ -266,6 +275,13 @@
           .replaceAll(">", "&gt;")
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#39;");
+      }
+
+      function normalizeTintPercent(value) {
+        const numeric = Number(String(value == null ? "" : value).replace("%", "").trim());
+        if (!Number.isFinite(numeric)) return `${defaults.card_tint_percent}%`;
+        const clamped = Math.min(100, Math.max(0, numeric));
+        return `${clamped}%`;
       }
 
       loadConfig()
