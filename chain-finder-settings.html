@@ -79,6 +79,19 @@
     .modal p { margin: 0 0 12px; line-height: 1.35; }
     .modal .actions { display: flex; justify-content: flex-end; }
     .modal .actions button { width: auto; min-width: 120px; }
+    .embed-grid { display: grid; gap: 10px; }
+    .embed-card { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+    .embed-card h4 { margin: 0 0 6px; font-size: 14px; }
+    .embed-card p { margin: 0 0 8px; font-size: 12px; color: #666; }
+    .embed-code {
+      width: 100%;
+      min-height: 120px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      resize: vertical;
+      background: #fafafa;
+    }
     .table-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
     .table-actions button { width: auto; min-width: 0; padding: 4px 8px; font-size: 12px; }
     th:last-child, td:last-child { white-space: nowrap; }
@@ -88,6 +101,7 @@
       .menu-grid { grid-template-columns: 1fr; }
       .settings-row { grid-template-columns: 1fr; }
       .settings-actions { grid-template-columns: 1fr; }
+      .toolbar { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -95,6 +109,8 @@
   <div class="wrap">
     <h1>KMC Chainsaw Chain Finder Control Panel</h1>
     <div class="toolbar">
+      <button id="btnMainAdmin" class="secondary hidden">Main Admin Panel</button>
+      <button id="btnEmbedCode" class="secondary">Embed Code</button>
       <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
     </div>
     <p id="accessInfo" class="muted"></p>
@@ -198,14 +214,37 @@
       </div>
     </div>
 
-    <div id="confirmDeleteModalBackdrop" class="modal-backdrop" aria-hidden="true">
+  <div id="confirmDeleteModalBackdrop" class="modal-backdrop" aria-hidden="true">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmDeleteModalTitle">
         <h3 id="confirmDeleteModalTitle">Confirm Delete</h3>
         <p id="confirmDeleteModalMessage"></p>
         <div class="actions">
           <button id="confirmDeleteCancel" class="secondary">Cancel</button>
           <button id="confirmDeleteConfirm" class="danger">Delete</button>
+  </div>
+
+  <div id="embedModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="embedModalTitle">
+      <h3 id="embedModalTitle">Embed Code</h3>
+      <div class="embed-grid">
+        <div class="embed-card">
+          <h4>Quick Embed (Recommended)</h4>
+          <p>Use in Shopify Custom Liquid or any HTML block.</p>
+          <textarea id="embedCodeQuick" class="embed-code" readonly></textarea>
+          <button id="copyEmbedQuick" class="secondary">Copy Quick Embed</button>
         </div>
+        <div class="embed-card">
+          <h4>Reusable Shopify Section</h4>
+          <p>Create one section file and reuse from Theme Customizer.</p>
+          <textarea id="embedCodeSection" class="embed-code" readonly></textarea>
+          <button id="copyEmbedSection" class="secondary">Copy Section Code</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="embedModalClose">Close</button>
+      </div>
+    </div>
+  </div>
       </div>
     </div>
 
@@ -314,6 +353,8 @@
 
     const ui = {
       accessInfo: document.getElementById("accessInfo"),
+      btnMainAdmin: document.getElementById("btnMainAdmin"),
+      btnEmbedCode: document.getElementById("btnEmbedCode"),
       btnPanelLogout: document.getElementById("btnPanelLogout"),
       connectionDetails: document.getElementById("connectionDetails"),
       apiBase: document.getElementById("apiBase"),
@@ -333,8 +374,18 @@
       confirmDeleteModalMessage: document.getElementById("confirmDeleteModalMessage"),
       confirmDeleteCancel: document.getElementById("confirmDeleteCancel"),
       confirmDeleteConfirm: document.getElementById("confirmDeleteConfirm"),
+      embedModalBackdrop: document.getElementById("embedModalBackdrop"),
+      embedModalClose: document.getElementById("embedModalClose"),
+      embedCodeQuick: document.getElementById("embedCodeQuick"),
+      embedCodeSection: document.getElementById("embedCodeSection"),
+      copyEmbedQuick: document.getElementById("copyEmbedQuick"),
+      copyEmbedSection: document.getElementById("copyEmbedSection"),
     };
 
+    document.getElementById("btnMainAdmin").addEventListener("click", () => {
+      window.location.href = "/";
+    });
+    document.getElementById("btnEmbedCode").addEventListener("click", openEmbedModal);
     document.getElementById("saveConn").addEventListener("click", saveConnection);
     document.getElementById("refreshAll").addEventListener("click", refreshAll);
     document.getElementById("saveSettings").addEventListener("click", saveSettings);
@@ -349,6 +400,12 @@
     ui.confirmDeleteConfirm.addEventListener("click", deletePendingRow);
     ui.confirmDeleteModalBackdrop.addEventListener("click", (e) => {
       if (e.target === ui.confirmDeleteModalBackdrop) hideConfirmDeleteModal();
+    });
+    ui.embedModalClose.addEventListener("click", closeEmbedModal);
+    ui.copyEmbedQuick.addEventListener("click", () => copyEmbedCode("quick"));
+    ui.copyEmbedSection.addEventListener("click", () => copyEmbedCode("section"));
+    ui.embedModalBackdrop.addEventListener("click", (e) => {
+      if (e.target === ui.embedModalBackdrop) closeEmbedModal();
     });
 
     for (const slug of Object.keys(ENTITIES)) {
@@ -407,6 +464,7 @@
     function applyAccessUI() {
       if (state.access.fromHub) {
         ui.btnPanelLogout.classList.remove("hidden");
+        ui.btnMainAdmin.classList.remove("hidden");
         ui.connectionDetails.classList.add("hidden");
         ui.accessInfo.textContent = `Access role: ${state.access.panelRole || "none"} (from Admin Hub)`;
         if (!hasPanelReadAccess()) {
@@ -415,7 +473,71 @@
         }
       } else {
         ui.btnPanelLogout.classList.add("hidden");
+        ui.btnMainAdmin.classList.add("hidden");
         ui.accessInfo.textContent = "Access role: full admin (standalone mode)";
+      }
+    }
+
+    function openEmbedModal() {
+      ui.embedCodeQuick.value = `<div style="max-width:1100px;margin:0 auto;padding:16px 0;">
+  <iframe
+    src="https://solution-1-admin.pages.dev/chainsaw-chain-finder/"
+    title="KMC Chainsaw Chain Finder"
+    style="width:100%;min-height:1000px;border:0;border-radius:12px;background:#fff;"
+    loading="lazy"
+    referrerpolicy="no-referrer-when-downgrade"
+  ></iframe>
+</div>`;
+
+      ui.embedCodeSection.value = `{% schema %}
+{
+  "name": "Chainsaw Chain Finder",
+  "tag": "section",
+  "class": "section",
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "KMC Chainsaw Chain Finder" },
+    { "type": "url", "id": "finder_url", "label": "Finder URL", "default": "https://solution-1-admin.pages.dev/chainsaw-chain-finder/" },
+    { "type": "range", "id": "iframe_height", "label": "Iframe height (px)", "min": 600, "max": 1600, "step": 50, "default": 1000 }
+  ],
+  "presets": [{ "name": "Chainsaw Chain Finder" }]
+}
+{% endschema %}
+
+<section class="chainsaw-finder-section">
+  {% if section.settings.title != blank %}<h2>{{ section.settings.title }}</h2>{% endif %}
+  <div style="max-width:1100px;margin:0 auto;">
+    <iframe
+      src="{{ section.settings.finder_url | escape }}"
+      title="KMC Chainsaw Chain Finder"
+      loading="lazy"
+      referrerpolicy="no-referrer-when-downgrade"
+      style="width:100%;min-height:{{ section.settings.iframe_height }}px;border:0;border-radius:12px;background:#fff;"
+    ></iframe>
+  </div>
+</section>`;
+
+      ui.embedModalBackdrop.style.display = "flex";
+      ui.embedModalBackdrop.setAttribute("aria-hidden", "false");
+    }
+
+    function closeEmbedModal() {
+      ui.embedModalBackdrop.style.display = "none";
+      ui.embedModalBackdrop.setAttribute("aria-hidden", "true");
+    }
+
+    async function copyEmbedCode(kind) {
+      const text = kind === "section" ? ui.embedCodeSection.value : ui.embedCodeQuick.value;
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("Embed code copied.", true);
+      } catch {
+        const area = document.createElement("textarea");
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        document.body.removeChild(area);
+        setStatus("Embed code copied.", true);
       }
     }
 
