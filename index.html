@@ -397,6 +397,7 @@
 
     function renderUsersTable() {
       if (accessMode === "owner") {
+        const ownerCount = usersCache.filter((u) => normalizeGlobalRole(u.global_role) === "owner").length;
         ui.usersTableBody.innerHTML = usersCache.map((u) => `
           <tr>
             <td>${escapeHtml(u.username)}${sessionUser && sessionUser.username === u.username ? " (current)" : ""}</td>
@@ -410,7 +411,9 @@
             <td>${renderPanelAccessControls(u)}</td>
             <td>
               <button class="secondary" onclick="setUserPassword('${escapeHtml(u.username)}')">Set Password</button>
-              <button class="danger" onclick="removeUser('${escapeHtml(u.username)}')">Remove</button>
+              ${canRemoveUser(u, ownerCount)
+                ? `<button class="danger" onclick="removeUser('${escapeHtml(u.username)}')">Remove</button>`
+                : `<button class="danger" disabled title="At least one owner must remain assigned.">Remove</button>`}
             </td>
           </tr>
         `).join("");
@@ -490,6 +493,12 @@
 
     async function removeUser(username) {
       if (accessMode !== "owner") return;
+      const target = usersCache.find((u) => u.username === username);
+      const ownerCount = usersCache.filter((u) => normalizeGlobalRole(u.global_role) === "owner").length;
+      if (!canRemoveUser(target, ownerCount)) {
+        setStatus("Cannot remove this owner. At least one owner must remain assigned.", false);
+        return;
+      }
       try {
         await api(`/hub/users/${encodeURIComponent(username)}`, "DELETE");
         await loadUsers();
@@ -564,6 +573,12 @@
       const have = PANEL_ROLE_WEIGHT[getPanelRole(user, panel.id)] || 0;
       const need = PANEL_ROLE_WEIGHT[normalizePanelRole(panel.minPanelRole || "viewer")] || 0;
       return have >= need;
+    }
+
+    function canRemoveUser(user, ownerCount) {
+      if (!user) return false;
+      if (normalizeGlobalRole(user.global_role) !== "owner") return true;
+      return Number(ownerCount || 0) > 1;
     }
 
     function getManageablePanels(user) {
