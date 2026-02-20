@@ -110,12 +110,6 @@
     <h1>KMC Chainsaw Chain Finder Control Panel</h1>
     <div class="toolbar">
       <button id="btnMainAdmin" class="secondary hidden">Main Admin Panel</button>
-      <button
-        id="btnEmbedCode"
-        type="button"
-        class="secondary"
-        onclick="document.getElementById('embedModalBackdrop').style.display='flex';document.getElementById('embedModalBackdrop').setAttribute('aria-hidden','false');"
-      >Embed Code</button>
       <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
     </div>
     <p id="accessInfo" class="muted"></p>
@@ -144,6 +138,11 @@
           <p>Brand/model/bar-length fitment rows.</p>
           <button data-nav="bar-lengths">Open Chainsaw List</button>
         </div>
+      </div>
+      <div class="menu-item" style="margin-top:12px;">
+        <h3>Embed Snippets</h3>
+        <p>Copy website embed code for the finder tool.</p>
+        <button id="btnOpenEmbedSnippets" class="secondary">Open Embed Snippets</button>
       </div>
     </section>
 
@@ -406,7 +405,7 @@
     const ui = {
       accessInfo: document.getElementById("accessInfo"),
       btnMainAdmin: document.getElementById("btnMainAdmin"),
-      btnEmbedCode: document.getElementById("btnEmbedCode"),
+      btnOpenEmbedSnippets: document.getElementById("btnOpenEmbedSnippets"),
       btnPanelLogout: document.getElementById("btnPanelLogout"),
       connectionDetails: document.getElementById("connectionDetails"),
       apiBase: document.getElementById("apiBase"),
@@ -439,8 +438,10 @@
         window.location.href = "/";
       });
     }
-    if (ui.btnEmbedCode) {
-      ui.btnEmbedCode.addEventListener("click", openEmbedModal);
+    if (ui.btnOpenEmbedSnippets) {
+      ui.btnOpenEmbedSnippets.addEventListener("click", () => {
+        window.location.href = "/embed-snippets/";
+      });
     }
     document.getElementById("saveConn").addEventListener("click", saveConnection);
     document.getElementById("refreshAll").addEventListener("click", refreshAll);
