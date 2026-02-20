@@ -103,16 +103,15 @@
       const status = document.getElementById(isQuick ? "quickStatus" : "sectionStatus");
       try {
         await navigator.clipboard.writeText(area.value);
+        if (status) status.textContent = "Copied.";
       } catch {
         area.focus();
         area.select();
         area.setSelectionRange(0, 99999);
-        document.execCommand("copy");
+        if (status) status.textContent = "Clipboard blocked. Select text and copy manually.";
+        return;
       }
-      if (status) {
-        status.textContent = "Copied.";
-        setTimeout(() => { status.textContent = ""; }, 1200);
-      }
+      setTimeout(() => { if (status) status.textContent = ""; }, 1200);
     }
   </script>
 </body>

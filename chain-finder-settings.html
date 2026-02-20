@@ -79,19 +79,6 @@
     .modal p { margin: 0 0 12px; line-height: 1.35; }
     .modal .actions { display: flex; justify-content: flex-end; }
     .modal .actions button { width: auto; min-width: 120px; }
-    .embed-grid { display: grid; gap: 10px; }
-    .embed-card { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
-    .embed-card h4 { margin: 0 0 6px; font-size: 14px; }
-    .embed-card p { margin: 0 0 8px; font-size: 12px; color: #666; }
-    .embed-code {
-      width: 100%;
-      min-height: 120px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 12px;
-      line-height: 1.35;
-      resize: vertical;
-      background: #fafafa;
-    }
     .table-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
     .table-actions button { width: auto; min-width: 0; padding: 4px 8px; font-size: 12px; }
     th:last-child, td:last-child { white-space: nowrap; }
@@ -225,77 +212,19 @@
         <div class="actions">
           <button id="confirmDeleteCancel" class="secondary">Cancel</button>
           <button id="confirmDeleteConfirm" class="danger">Delete</button>
-  </div>
-
-  <div id="embedModalBackdrop" class="modal-backdrop" aria-hidden="true">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="embedModalTitle">
-      <h3 id="embedModalTitle">Embed Code</h3>
-      <div class="embed-grid">
-        <div class="embed-card">
-          <h4>Quick Embed (Recommended)</h4>
-          <p>Use in Shopify Custom Liquid or any HTML block.</p>
-          <textarea id="embedCodeQuick" class="embed-code" readonly>&lt;div style="max-width:1100px;margin:0 auto;padding:16px 0;"&gt;
-  &lt;iframe
-    src="https://solution-1-admin.pages.dev/chainsaw-chain-finder/"
-    title="KMC Chainsaw Chain Finder"
-    style="width:100%;min-height:1000px;border:0;border-radius:12px;background:#fff;"
-    loading="lazy"
-    referrerpolicy="no-referrer-when-downgrade"
-  &gt;&lt;/iframe&gt;
-&lt;/div&gt;</textarea>
-          <button
-            id="copyEmbedQuick"
-            class="secondary"
-            type="button"
-            onclick="(function(){const t=document.getElementById('embedCodeQuick');if(!t)return;t.focus();t.select();t.setSelectionRange(0,99999);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).catch(function(){});}try{document.execCommand('copy');}catch(e){}})();"
-          >Copy Quick Embed</button>
         </div>
-        <div class="embed-card">
-          <h4>Reusable Shopify Section</h4>
-          <p>Create one section file and reuse from Theme Customizer.</p>
-          <textarea id="embedCodeSection" class="embed-code" readonly>{% schema %}
-{
-  "name": "Chainsaw Chain Finder",
-  "tag": "section",
-  "class": "section",
-  "settings": [
-    { "type": "text", "id": "title", "label": "Title", "default": "KMC Chainsaw Chain Finder" },
-    { "type": "url", "id": "finder_url", "label": "Finder URL", "default": "https://solution-1-admin.pages.dev/chainsaw-chain-finder/" },
-    { "type": "range", "id": "iframe_height", "label": "Iframe height (px)", "min": 600, "max": 1600, "step": 50, "default": 1000 }
-  ],
-  "presets": [{ "name": "Chainsaw Chain Finder" }]
-}
-{% endschema %}
-
-&lt;section class="chainsaw-finder-section"&gt;
-  {% if section.settings.title != blank %}&lt;h2&gt;{{ section.settings.title }}&lt;/h2&gt;{% endif %}
-  &lt;div style="max-width:1100px;margin:0 auto;"&gt;
-    &lt;iframe
-      src="{{ section.settings.finder_url | escape }}"
-      title="KMC Chainsaw Chain Finder"
-      loading="lazy"
-      referrerpolicy="no-referrer-when-downgrade"
-      style="width:100%;min-height:{{ section.settings.iframe_height }}px;border:0;border-radius:12px;background:#fff;"
-    &gt;&lt;/iframe&gt;
-  &lt;/div&gt;
-&lt;/section&gt;</textarea>
-          <button
-            id="copyEmbedSection"
-            class="secondary"
-            type="button"
-            onclick="(function(){const t=document.getElementById('embedCodeSection');if(!t)return;t.focus();t.select();t.setSelectionRange(0,99999);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).catch(function(){});}try{document.execCommand('copy');}catch(e){}})();"
-          >Copy Section Code</button>
-        </div>
-      </div>
-      <div class="actions">
-        <button
-          id="embedModalClose"
-          type="button"
-          onclick="document.getElementById('embedModalBackdrop').style.display='none';document.getElementById('embedModalBackdrop').setAttribute('aria-hidden','true');"
-        >Close</button>
       </div>
     </div>
-  </div>
+
+    <div id="lookupModalBackdrop" class="modal-backdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lookupModalTitle">
+        <h3 id="lookupModalTitle">Add Lookup Value</h3>
+        <p id="lookupModalPrompt"></p>
+        <input id="lookupModalInput" placeholder="Enter value" />
+        <div class="actions" style="margin-top:12px;">
+          <button id="lookupModalCancel" class="secondary">Cancel</button>
+          <button id="lookupModalSave">Add Value</button>
+        </div>
       </div>
     </div>
 
@@ -392,6 +321,9 @@
         slug: "",
         rowNumber: 0,
       },
+      lookupPrompt: {
+        resolver: null,
+      },
     };
     const SETTINGS_DEFAULTS = {
       form_title: "KMC Chainsaw Chain Finder",
@@ -425,12 +357,11 @@
       confirmDeleteModalMessage: document.getElementById("confirmDeleteModalMessage"),
       confirmDeleteCancel: document.getElementById("confirmDeleteCancel"),
       confirmDeleteConfirm: document.getElementById("confirmDeleteConfirm"),
-      embedModalBackdrop: document.getElementById("embedModalBackdrop"),
-      embedModalClose: document.getElementById("embedModalClose"),
-      embedCodeQuick: document.getElementById("embedCodeQuick"),
-      embedCodeSection: document.getElementById("embedCodeSection"),
-      copyEmbedQuick: document.getElementById("copyEmbedQuick"),
-      copyEmbedSection: document.getElementById("copyEmbedSection"),
+      lookupModalBackdrop: document.getElementById("lookupModalBackdrop"),
+      lookupModalPrompt: document.getElementById("lookupModalPrompt"),
+      lookupModalInput: document.getElementById("lookupModalInput"),
+      lookupModalCancel: document.getElementById("lookupModalCancel"),
+      lookupModalSave: document.getElementById("lookupModalSave"),
     };
 
     if (ui.btnMainAdmin) {
@@ -458,14 +389,20 @@
     ui.confirmDeleteModalBackdrop.addEventListener("click", (e) => {
       if (e.target === ui.confirmDeleteModalBackdrop) hideConfirmDeleteModal();
     });
-    if (ui.embedModalClose) ui.embedModalClose.addEventListener("click", closeEmbedModal);
-    if (ui.copyEmbedQuick) ui.copyEmbedQuick.addEventListener("click", () => copyEmbedCode("quick"));
-    if (ui.copyEmbedSection) ui.copyEmbedSection.addEventListener("click", () => copyEmbedCode("section"));
-    if (ui.embedModalBackdrop) {
-      ui.embedModalBackdrop.addEventListener("click", (e) => {
-        if (e.target === ui.embedModalBackdrop) closeEmbedModal();
-      });
-    }
+    ui.lookupModalCancel.addEventListener("click", () => closeLookupModal(null));
+    ui.lookupModalSave.addEventListener("click", saveLookupModalValue);
+    ui.lookupModalInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        saveLookupModalValue();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeLookupModal(null);
+      }
+    });
+    ui.lookupModalBackdrop.addEventListener("click", (e) => {
+      if (e.target === ui.lookupModalBackdrop) closeLookupModal(null);
+    });
 
     for (const slug of Object.keys(ENTITIES)) {
       renderEntityScaffold(slug);
@@ -537,79 +474,33 @@
       }
     }
 
-    function openEmbedModal() {
-      if (!ui.embedModalBackdrop || !ui.embedCodeQuick || !ui.embedCodeSection) {
-        showErrorModal("Embed modal is unavailable in this page version. Refresh and try again.");
-        setStatus("Embed modal is unavailable in this page version. Refresh and try again.", false);
+    function promptLookupValue(field) {
+      return new Promise((resolve) => {
+        state.lookupPrompt.resolver = resolve;
+        ui.lookupModalPrompt.textContent = `Add new value for ${field}:`;
+        ui.lookupModalInput.value = "";
+        ui.lookupModalBackdrop.style.display = "flex";
+        ui.lookupModalBackdrop.setAttribute("aria-hidden", "false");
+        ui.lookupModalInput.focus();
+      });
+    }
+
+    function saveLookupModalValue() {
+      const value = String(ui.lookupModalInput.value || "").trim();
+      if (!value) {
+        ui.lookupModalInput.focus();
         return;
       }
-      ui.embedCodeQuick.value = `<div style="max-width:1100px;margin:0 auto;padding:16px 0;">
-  <iframe
-    src="https://solution-1-admin.pages.dev/chainsaw-chain-finder/"
-    title="KMC Chainsaw Chain Finder"
-    style="width:100%;min-height:1000px;border:0;border-radius:12px;background:#fff;"
-    loading="lazy"
-    referrerpolicy="no-referrer-when-downgrade"
-  ></iframe>
-</div>`;
-
-      ui.embedCodeSection.value = `{% schema %}
-{
-  "name": "Chainsaw Chain Finder",
-  "tag": "section",
-  "class": "section",
-  "settings": [
-    { "type": "text", "id": "title", "label": "Title", "default": "KMC Chainsaw Chain Finder" },
-    { "type": "url", "id": "finder_url", "label": "Finder URL", "default": "https://solution-1-admin.pages.dev/chainsaw-chain-finder/" },
-    { "type": "range", "id": "iframe_height", "label": "Iframe height (px)", "min": 600, "max": 1600, "step": 50, "default": 1000 }
-  ],
-  "presets": [{ "name": "Chainsaw Chain Finder" }]
-}
-{% endschema %}
-
-<section class="chainsaw-finder-section">
-  {% if section.settings.title != blank %}<h2>{{ section.settings.title }}</h2>{% endif %}
-  <div style="max-width:1100px;margin:0 auto;">
-    <iframe
-      src="{{ section.settings.finder_url | escape }}"
-      title="KMC Chainsaw Chain Finder"
-      loading="lazy"
-      referrerpolicy="no-referrer-when-downgrade"
-      style="width:100%;min-height:{{ section.settings.iframe_height }}px;border:0;border-radius:12px;background:#fff;"
-    ></iframe>
-  </div>
-</section>`;
-
-      ui.embedModalBackdrop.style.display = "flex";
-      ui.embedModalBackdrop.setAttribute("aria-hidden", "false");
+      closeLookupModal(value);
     }
 
-    function closeEmbedModal() {
-      if (!ui.embedModalBackdrop) return;
-      ui.embedModalBackdrop.style.display = "none";
-      ui.embedModalBackdrop.setAttribute("aria-hidden", "true");
+    function closeLookupModal(valueOrNull) {
+      ui.lookupModalBackdrop.style.display = "none";
+      ui.lookupModalBackdrop.setAttribute("aria-hidden", "true");
+      const resolver = state.lookupPrompt.resolver;
+      state.lookupPrompt.resolver = null;
+      if (resolver) resolver(valueOrNull);
     }
-
-    async function copyEmbedCode(kind) {
-      const text = kind === "section" ? ui.embedCodeSection.value : ui.embedCodeQuick.value;
-      try {
-        await navigator.clipboard.writeText(text);
-        setStatus("Embed code copied.", true);
-      } catch {
-        const area = document.createElement("textarea");
-        area.value = text;
-        document.body.appendChild(area);
-        area.select();
-        document.execCommand("copy");
-        document.body.removeChild(area);
-        setStatus("Embed code copied.", true);
-      }
-    }
-
-    function openEmbedCodeModal() {
-      openEmbedModal();
-    }
-    window.openEmbedCodeModal = openEmbedCodeModal;
 
     async function ensureHubSessionIfRequired() {
       if (!state.access.fromHub) {
@@ -1350,7 +1241,7 @@
         select.value = "";
         return;
       }
-      const newValue = prompt(`Add new value for ${field}:`, "");
+      const newValue = await promptLookupValue(field);
       if (!newValue || !newValue.trim()) {
         select.value = "";
         return;
@@ -1387,7 +1278,7 @@
         renderEntityTable("kmc-chains");
         return;
       }
-      const newValue = prompt(`Add new value for ${field}:`, "");
+      const newValue = await promptLookupValue(field);
       if (!newValue || !newValue.trim()) {
         select.value = "";
         renderEntityTable("kmc-chains");
@@ -1453,7 +1344,7 @@
         return;
       }
 
-      const newValue = prompt(`Add new value for ${field}:`, "");
+      const newValue = await promptLookupValue(field);
       if (!newValue || !newValue.trim()) {
         select.value = "";
         updateBarLengthNameDerived();
