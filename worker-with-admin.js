@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-02-20-kmc-chain-form-v2";
+const WORKER_BUILD = "2026-02-20-delete-enabled-v1";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -532,13 +532,16 @@ export default {
           return json({ ok: true, row_number: updatedRow });
         }
 
-        if (
-          route.length === 4 &&
-          route[0] === "admin" &&
-          route[1] === "gsheet" &&
-          request.method === "DELETE"
-        ) {
-          return json({ error: "Delete is disabled in this admin app. Remove rows directly in Google Sheets." }, 403);
+        if (route.length === 3 && route[0] === "admin" && route[1] === "gsheet" && request.method === "DELETE") {
+          const entity = route[2];
+          const cfg = SHEET_ENTITY_CONFIG[entity];
+          if (!cfg) return json({ error: "Unknown sheet entity" }, 404);
+          const rowNumber = Number(url.searchParams.get("rowNumber") || 0);
+          if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+            return json({ error: "Missing or invalid rowNumber query parameter" }, 400);
+          }
+          await deleteSheetRow(env, cfg.tab, rowNumber);
+          return json({ ok: true, row_number: rowNumber });
         }
 
         if (route.length === 2 && route[0] === "admin" && route[1] === "options" && request.method === "GET") {

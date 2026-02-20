@@ -116,9 +116,9 @@
           <button data-nav="kmc-chains">Open KMC Chains</button>
         </div>
         <div class="menu-item">
-          <h3>Bar Lengths</h3>
+          <h3>Chainsaw List</h3>
           <p>Brand/model/bar-length fitment rows.</p>
-          <button data-nav="bar-lengths">Open Bar Lengths</button>
+          <button data-nav="bar-lengths">Open Chainsaw List</button>
         </div>
       </div>
     </section>
@@ -185,15 +185,26 @@
     <section id="view-bar-lengths" class="view card hidden"></section>
   </div>
 
-  <div id="errorModalBackdrop" class="modal-backdrop" aria-hidden="true">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="errorModalTitle">
-      <h3 id="errorModalTitle">Unable to save</h3>
-      <p id="errorModalMessage"></p>
-      <div class="actions">
-        <button id="errorModalAcknowledge">OK</button>
+    <div id="errorModalBackdrop" class="modal-backdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="errorModalTitle">
+        <h3 id="errorModalTitle">Unable to save</h3>
+        <p id="errorModalMessage"></p>
+        <div class="actions">
+          <button id="errorModalAcknowledge">OK</button>
+        </div>
       </div>
     </div>
-  </div>
+
+    <div id="confirmDeleteModalBackdrop" class="modal-backdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmDeleteModalTitle">
+        <h3 id="confirmDeleteModalTitle">Confirm Delete</h3>
+        <p id="confirmDeleteModalMessage"></p>
+        <div class="actions">
+          <button id="confirmDeleteCancel" class="secondary">Cancel</button>
+          <button id="confirmDeleteConfirm" class="danger">Delete</button>
+        </div>
+      </div>
+    </div>
 
   <script>
     const HUB_PANEL_SESSION_KEY = "admin_hub_panel_session_v1";
@@ -221,7 +232,7 @@
         ],
       },
       "bar-lengths": {
-        title: "Bar Lengths",
+        title: "Chainsaw List",
         fields: ["Chainsaw Brand", "Chainsaw Model", "Bar Length", "Chain Type Code", "Gauge", "Pitch", "Drive Links", "Name", "KMC Chain URL"],
       },
     };
@@ -284,6 +295,10 @@
         no_result_message: "",
         chain_brand_fallback: "",
       },
+      deletePending: {
+        slug: "",
+        rowNumber: 0,
+      },
     };
     const SETTINGS_DEFAULTS = {
       form_title: "KMC Chainsaw Chain Finder",
@@ -311,6 +326,10 @@
       errorModalBackdrop: document.getElementById("errorModalBackdrop"),
       errorModalMessage: document.getElementById("errorModalMessage"),
       errorModalAcknowledge: document.getElementById("errorModalAcknowledge"),
+      confirmDeleteModalBackdrop: document.getElementById("confirmDeleteModalBackdrop"),
+      confirmDeleteModalMessage: document.getElementById("confirmDeleteModalMessage"),
+      confirmDeleteCancel: document.getElementById("confirmDeleteCancel"),
+      confirmDeleteConfirm: document.getElementById("confirmDeleteConfirm"),
     };
 
     document.getElementById("saveConn").addEventListener("click", saveConnection);
@@ -322,6 +341,11 @@
     ui.errorModalAcknowledge.addEventListener("click", hideErrorModal);
     ui.errorModalBackdrop.addEventListener("click", (e) => {
       if (e.target === ui.errorModalBackdrop) hideErrorModal();
+    });
+    ui.confirmDeleteCancel.addEventListener("click", hideConfirmDeleteModal);
+    ui.confirmDeleteConfirm.addEventListener("click", deletePendingRow);
+    ui.confirmDeleteModalBackdrop.addEventListener("click", (e) => {
+      if (e.target === ui.confirmDeleteModalBackdrop) hideConfirmDeleteModal();
     });
 
     for (const slug of Object.keys(ENTITIES)) {
@@ -856,8 +880,12 @@
         const cols = visibleFields.map((f) => `<td>${escapeHtml(r[f])}</td>`).join("");
         const rowNum = Number(r.__row || 0);
         const rowClass = rowNum && rowNum === highlightRow ? ` class="row-highlight"` : "";
+        const canDelete = ["chain-types", "kmc-chains", "bar-lengths"].includes(slug);
+        const actions = readonly
+          ? `<span class="muted">Read only</span>`
+          : `<button class="secondary" onclick="editRow('${slug}', ${Number(r.__row)})">Edit</button> ${canDelete ? `<button class="danger" onclick="confirmDeleteRow('${slug}', ${Number(r.__row)})">Delete</button>` : ""}`;
         return `<tr${rowClass}>${cols}${showRowColumn ? `<td>${escapeHtml(r.__row)}</td>` : ""}<td>${
-          readonly ? `<span class="muted">Read only</span>` : `<button class="secondary" onclick="editRow('${slug}', ${Number(r.__row)})">Edit</button>`
+          actions
         }</td></tr>`;
       }).join("");
 
@@ -1008,6 +1036,52 @@
     }
 
     window.editRow = editRow;
+    window.confirmDeleteRow = confirmDeleteRow;
+
+    function confirmDeleteRow(slug, rowNumber) {
+      if (!assertCanWrite("delete rows")) return;
+      if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 2) return;
+      state.deletePending = {
+        slug: String(slug || ""),
+        rowNumber: Number(rowNumber),
+      };
+      const entity = ENTITIES[slug];
+      const label = entity ? entity.title : "Record";
+      ui.confirmDeleteModalMessage.textContent = `Delete ${label} row ${Number(rowNumber)}? This action cannot be undone.`;
+      ui.confirmDeleteModalBackdrop.style.display = "flex";
+      ui.confirmDeleteModalBackdrop.setAttribute("aria-hidden", "false");
+      ui.confirmDeleteConfirm.focus();
+    }
+
+    function hideConfirmDeleteModal() {
+      ui.confirmDeleteModalBackdrop.style.display = "none";
+      ui.confirmDeleteModalBackdrop.setAttribute("aria-hidden", "true");
+      state.deletePending = { slug: "", rowNumber: 0 };
+    }
+
+    async function deletePendingRow() {
+      if (!assertCanWrite("delete rows")) return;
+      const slug = state.deletePending.slug;
+      const rowNumber = Number(state.deletePending.rowNumber || 0);
+      if (!slug || rowNumber < 2) {
+        hideConfirmDeleteModal();
+        return;
+      }
+      try {
+        await api(`/admin/gsheet/${slug}?rowNumber=${rowNumber}`, "DELETE");
+        hideConfirmDeleteModal();
+        await loadEntity(slug);
+        if (slug === "bar-lengths") {
+          populateBarLengthLookupOptions();
+          updateBarLengthNameDerived();
+        }
+        setStatus(`${ENTITIES[slug].title}: row deleted.`, true);
+      } catch (err) {
+        hideConfirmDeleteModal();
+        showErrorModal(err.message || "Delete failed.");
+        setStatus(err.message || "Delete failed.", false);
+      }
+    }
 
     function fieldInputId(slug, fieldName) {
       const k = fieldName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
