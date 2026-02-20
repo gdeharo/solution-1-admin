@@ -382,10 +382,14 @@
       copyEmbedSection: document.getElementById("copyEmbedSection"),
     };
 
-    document.getElementById("btnMainAdmin").addEventListener("click", () => {
-      window.location.href = "/";
-    });
-    document.getElementById("btnEmbedCode").addEventListener("click", openEmbedModal);
+    if (ui.btnMainAdmin) {
+      ui.btnMainAdmin.addEventListener("click", () => {
+        window.location.href = "/";
+      });
+    }
+    if (ui.btnEmbedCode) {
+      ui.btnEmbedCode.addEventListener("click", openEmbedModal);
+    }
     document.getElementById("saveConn").addEventListener("click", saveConnection);
     document.getElementById("refreshAll").addEventListener("click", refreshAll);
     document.getElementById("saveSettings").addEventListener("click", saveSettings);
@@ -401,12 +405,14 @@
     ui.confirmDeleteModalBackdrop.addEventListener("click", (e) => {
       if (e.target === ui.confirmDeleteModalBackdrop) hideConfirmDeleteModal();
     });
-    ui.embedModalClose.addEventListener("click", closeEmbedModal);
-    ui.copyEmbedQuick.addEventListener("click", () => copyEmbedCode("quick"));
-    ui.copyEmbedSection.addEventListener("click", () => copyEmbedCode("section"));
-    ui.embedModalBackdrop.addEventListener("click", (e) => {
-      if (e.target === ui.embedModalBackdrop) closeEmbedModal();
-    });
+    if (ui.embedModalClose) ui.embedModalClose.addEventListener("click", closeEmbedModal);
+    if (ui.copyEmbedQuick) ui.copyEmbedQuick.addEventListener("click", () => copyEmbedCode("quick"));
+    if (ui.copyEmbedSection) ui.copyEmbedSection.addEventListener("click", () => copyEmbedCode("section"));
+    if (ui.embedModalBackdrop) {
+      ui.embedModalBackdrop.addEventListener("click", (e) => {
+        if (e.target === ui.embedModalBackdrop) closeEmbedModal();
+      });
+    }
 
     for (const slug of Object.keys(ENTITIES)) {
       renderEntityScaffold(slug);
@@ -479,6 +485,10 @@
     }
 
     function openEmbedModal() {
+      if (!ui.embedModalBackdrop || !ui.embedCodeQuick || !ui.embedCodeSection) {
+        setStatus("Embed modal is unavailable in this page version. Refresh and try again.", false);
+        return;
+      }
       ui.embedCodeQuick.value = `<div style="max-width:1100px;margin:0 auto;padding:16px 0;">
   <iframe
     src="https://solution-1-admin.pages.dev/chainsaw-chain-finder/"
@@ -521,6 +531,7 @@
     }
 
     function closeEmbedModal() {
+      if (!ui.embedModalBackdrop) return;
       ui.embedModalBackdrop.style.display = "none";
       ui.embedModalBackdrop.setAttribute("aria-hidden", "true");
     }
