@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Product Selector Admin</title>
+  <title>Chain Finder Settings</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; background: #f4f5f7; color: #111; }
     .wrap { max-width: 1100px; margin: 20px auto; padding: 0 12px 28px; }
@@ -18,6 +18,7 @@
     input, select, button { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #bbb; border-radius: 6px; font-size: 14px; }
     button { cursor: pointer; background: #146ff8; border-color: #146ff8; color: #fff; }
     button.secondary { background: #fff; color: #111; border-color: #bbb; }
+    button.danger { background: #d62828; border-color: #d62828; color: #fff; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
     th, td { border: 1px solid #ddd; padding: 6px; text-align: left; vertical-align: top; }
     tr.row-highlight td { background: #fff2b8; }
@@ -42,6 +43,21 @@
     details.subtle-connection > summary::before { content: "▸ "; color: #888; }
     details.subtle-connection[open] > summary::before { content: "▾ "; }
     .card.connection-card { border-color: #e6e6e6; background: #fbfbfc; }
+    .settings-grid { display: grid; gap: 8px; margin-bottom: 8px; }
+    .settings-row {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+    }
+    .settings-row label { font-size: 13px; color: #222; }
+    .settings-current { font-size: 12px; color: #666; }
+    .settings-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
 
     .modal-backdrop {
       position: fixed;
@@ -67,12 +83,14 @@
     @media (max-width: 980px) {
       .row { grid-template-columns: 1fr 1fr; }
       .menu-grid { grid-template-columns: 1fr; }
+      .settings-row { grid-template-columns: 1fr; }
+      .settings-actions { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Product Selector Admin</h1>
+    <h1>KMC Chainsaw Chain Finder Control Panel</h1>
     <div class="toolbar">
       <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
     </div>
@@ -83,9 +101,9 @@
       <p class="muted">Choose an area to manage.</p>
       <div class="menu-grid">
         <div class="menu-item">
-          <h3>UI Settings</h3>
+          <h3>Settings</h3>
           <p>Title, colors, button label, fallback text.</p>
-          <button data-nav="settings">Open UI Settings</button>
+          <button data-nav="settings">Open Settings</button>
         </div>
         <div class="menu-item">
           <h3>Chain Types</h3>
@@ -122,16 +140,43 @@
       <div class="toolbar">
         <button class="secondary" data-nav="home">Back To Menu</button>
       </div>
-      <h2>UI Settings</h2>
-      <div class="row">
-        <input id="s_form_title" placeholder="Form title" />
-        <input id="s_accent_color" placeholder="Accent color (e.g. rgb(20, 111, 248))" />
-        <input id="s_button_label" placeholder="Button label" />
-        <input id="s_chain_brand_fallback" placeholder="Chain brand fallback" />
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <div class="settings-row">
+          <label for="s_form_title">Form title</label>
+          <input id="s_form_title" placeholder="Form title" />
+          <div class="settings-current">Current: <span id="cur_form_title">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_accent_color">Accent color</label>
+          <input id="s_accent_color" placeholder="Accent color (e.g. rgb(20, 111, 248))" />
+          <div class="settings-current">Current: <span id="cur_accent_color">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_button_label">Button label</label>
+          <input id="s_button_label" placeholder="Button label" />
+          <div class="settings-current">Current: <span id="cur_button_label">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_card_tint_percent">Card tint percent</label>
+          <input id="s_card_tint_percent" placeholder="Card tint percent (0-100)" />
+          <div class="settings-current">Current: <span id="cur_card_tint_percent">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_chain_brand_fallback">Chain brand fallback</label>
+          <input id="s_chain_brand_fallback" placeholder="Chain brand fallback" />
+          <div class="settings-current">Current: <span id="cur_chain_brand_fallback">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_no_result_message">No-result message</label>
+          <input id="s_no_result_message" placeholder="No-result message" />
+          <div class="settings-current">Current: <span id="cur_no_result_message">-</span></div>
+        </div>
       </div>
-      <div class="row-2">
-        <input id="s_no_result_message" placeholder="No-result message" />
+      <div class="settings-actions">
         <button id="saveSettings">Save Settings</button>
+        <button id="clearSettingsForm" class="secondary">Clear Form</button>
+        <button id="restoreSettingsForm" class="danger">Restore Current</button>
       </div>
     </section>
 
@@ -219,6 +264,14 @@
         "kmc-chains": 0,
         "bar-lengths": 0,
       },
+      settingsCurrent: {
+        form_title: "",
+        accent_color: "",
+        button_label: "",
+        card_tint_percent: "",
+        no_result_message: "",
+        chain_brand_fallback: "",
+      },
     };
 
     const ui = {
@@ -243,6 +296,8 @@
     document.getElementById("saveConn").addEventListener("click", saveConnection);
     document.getElementById("refreshAll").addEventListener("click", refreshAll);
     document.getElementById("saveSettings").addEventListener("click", saveSettings);
+    document.getElementById("clearSettingsForm").addEventListener("click", clearSettingsForm);
+    document.getElementById("restoreSettingsForm").addEventListener("click", restoreSettingsForm);
     ui.btnPanelLogout.addEventListener("click", logoutFromPanel);
     ui.errorModalAcknowledge.addEventListener("click", hideErrorModal);
     ui.errorModalBackdrop.addEventListener("click", (e) => {
@@ -562,8 +617,12 @@
     function applyRoleAccessToSettings() {
       if (!state.access.fromHub || canWrite()) return;
       const saveBtn = document.getElementById("saveSettings");
+      const clearBtn = document.getElementById("clearSettingsForm");
+      const restoreBtn = document.getElementById("restoreSettingsForm");
       if (saveBtn) saveBtn.disabled = true;
-      ["s_form_title", "s_accent_color", "s_button_label", "s_chain_brand_fallback", "s_no_result_message"].forEach((id) => {
+      if (clearBtn) clearBtn.disabled = true;
+      if (restoreBtn) restoreBtn.disabled = true;
+      ["s_form_title", "s_accent_color", "s_button_label", "s_card_tint_percent", "s_chain_brand_fallback", "s_no_result_message"].forEach((id) => {
         const el = document.getElementById(id);
         if (el) el.disabled = true;
       });
@@ -572,30 +631,80 @@
     async function loadSettings() {
       const data = await api("/admin/settings", "GET");
       const s = data.settings || {};
-      setVal("s_form_title", s.form_title || "");
-      setVal("s_accent_color", s.accent_color || "");
-      setVal("s_button_label", s.button_label || "");
-      setVal("s_no_result_message", s.no_result_message || "");
-      setVal("s_chain_brand_fallback", s.chain_brand_fallback || "");
+      state.settingsCurrent = {
+        form_title: s.form_title || "",
+        accent_color: s.accent_color || "",
+        button_label: s.button_label || "",
+        card_tint_percent: s.card_tint_percent || "",
+        no_result_message: s.no_result_message || "",
+        chain_brand_fallback: s.chain_brand_fallback || "",
+      };
+      fillSettingsForm(state.settingsCurrent);
+      renderSettingsCurrent(state.settingsCurrent);
       applyRoleAccessToSettings();
     }
 
     async function saveSettings() {
       if (!assertCanWrite("save settings")) return;
       try {
+        const payload = getSettingsDraft();
         await api("/admin/settings", "POST", {
-          settings: {
-            form_title: val("s_form_title"),
-            accent_color: val("s_accent_color"),
-            button_label: val("s_button_label"),
-            no_result_message: val("s_no_result_message"),
-            chain_brand_fallback: val("s_chain_brand_fallback"),
-          },
+          settings: payload,
         });
+        state.settingsCurrent = { ...payload };
+        renderSettingsCurrent(state.settingsCurrent);
         setStatus("Settings saved.", true);
       } catch (err) {
         setStatus(err.message, false);
       }
+    }
+
+    function clearSettingsForm() {
+      if (!assertCanWrite("clear settings form")) return;
+      fillSettingsForm({
+        form_title: "",
+        accent_color: "",
+        button_label: "",
+        card_tint_percent: "",
+        no_result_message: "",
+        chain_brand_fallback: "",
+      });
+      setStatus("Settings form cleared.", true);
+    }
+
+    function restoreSettingsForm() {
+      if (!assertCanWrite("restore settings form")) return;
+      fillSettingsForm(state.settingsCurrent);
+      setStatus("Settings restored to current saved values.", true);
+    }
+
+    function getSettingsDraft() {
+      return {
+        form_title: val("s_form_title"),
+        accent_color: val("s_accent_color"),
+        button_label: val("s_button_label"),
+        card_tint_percent: val("s_card_tint_percent"),
+        no_result_message: val("s_no_result_message"),
+        chain_brand_fallback: val("s_chain_brand_fallback"),
+      };
+    }
+
+    function fillSettingsForm(settings) {
+      setVal("s_form_title", settings.form_title || "");
+      setVal("s_accent_color", settings.accent_color || "");
+      setVal("s_button_label", settings.button_label || "");
+      setVal("s_card_tint_percent", settings.card_tint_percent || "");
+      setVal("s_no_result_message", settings.no_result_message || "");
+      setVal("s_chain_brand_fallback", settings.chain_brand_fallback || "");
+    }
+
+    function renderSettingsCurrent(settings) {
+      setText("cur_form_title", settings.form_title);
+      setText("cur_accent_color", settings.accent_color);
+      setText("cur_button_label", settings.button_label);
+      setText("cur_card_tint_percent", settings.card_tint_percent);
+      setText("cur_no_result_message", settings.no_result_message);
+      setText("cur_chain_brand_fallback", settings.chain_brand_fallback);
     }
 
     async function loadLookups() {
@@ -1282,6 +1391,11 @@
     function setVal(id, value) {
       const el = document.getElementById(id);
       if (el) el.value = value;
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value || "-";
     }
 
     function escapeHtml(v) {

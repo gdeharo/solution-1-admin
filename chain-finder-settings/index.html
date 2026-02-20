@@ -1,0 +1,1423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chain Finder Settings</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f5f7; color: #111; }
+    .wrap { max-width: 1100px; margin: 20px auto; padding: 0 12px 28px; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 19px; }
+    h3 { font-size: 15px; }
+    .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .row-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .row > *, .row-2 > * { min-width: 0; }
+    input, select, button { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #bbb; border-radius: 6px; font-size: 14px; }
+    button { cursor: pointer; background: #146ff8; border-color: #146ff8; color: #fff; }
+    button.secondary { background: #fff; color: #111; border-color: #bbb; }
+    button.danger { background: #d62828; border-color: #d62828; color: #fff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; vertical-align: top; }
+    tr.row-highlight td { background: #fff2b8; }
+    .muted { color: #666; font-size: 12px; }
+    .ok { color: #0a7d2f; }
+    .err { color: #b00020; }
+    .hidden { display: none; }
+    .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .menu-item { border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fff; }
+    .menu-item p { margin: 6px 0 10px; color: #555; font-size: 13px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .toolbar button { width: auto; min-width: 120px; }
+    details.subtle-connection { margin-bottom: 12px; }
+    details.subtle-connection > summary {
+      cursor: pointer;
+      color: #666;
+      font-size: 13px;
+      user-select: none;
+      list-style: none;
+    }
+    details.subtle-connection > summary::-webkit-details-marker { display: none; }
+    details.subtle-connection > summary::before { content: "▸ "; color: #888; }
+    details.subtle-connection[open] > summary::before { content: "▾ "; }
+    .card.connection-card { border-color: #e6e6e6; background: #fbfbfc; }
+    .settings-grid { display: grid; gap: 8px; margin-bottom: 8px; }
+    .settings-row {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+    }
+    .settings-row label { font-size: 13px; color: #222; }
+    .settings-current { font-size: 12px; color: #666; }
+    .settings-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal {
+      width: min(480px, 92vw);
+      background: #fff;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      padding: 16px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+    }
+    .modal p { margin: 0 0 12px; line-height: 1.35; }
+    .modal .actions { display: flex; justify-content: flex-end; }
+    .modal .actions button { width: auto; min-width: 120px; }
+
+    @media (max-width: 980px) {
+      .row { grid-template-columns: 1fr 1fr; }
+      .menu-grid { grid-template-columns: 1fr; }
+      .settings-row { grid-template-columns: 1fr; }
+      .settings-actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>KMC Chainsaw Chain Finder Control Panel</h1>
+    <div class="toolbar">
+      <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
+    </div>
+    <p id="accessInfo" class="muted"></p>
+
+    <section id="view-home" class="view card">
+      <h2>Menu</h2>
+      <p class="muted">Choose an area to manage.</p>
+      <div class="menu-grid">
+        <div class="menu-item">
+          <h3>Settings</h3>
+          <p>Title, colors, button label, fallback text.</p>
+          <button data-nav="settings">Open Settings</button>
+        </div>
+        <div class="menu-item">
+          <h3>Chain Types</h3>
+          <p>Chain type profile definitions and lookup values.</p>
+          <button data-nav="chain-types">Open Chain Types</button>
+        </div>
+        <div class="menu-item">
+          <h3>KMC Chains</h3>
+          <p>KMC chain catalog rows and pricing.</p>
+          <button data-nav="kmc-chains">Open KMC Chains</button>
+        </div>
+        <div class="menu-item">
+          <h3>Bar Lengths</h3>
+          <p>Brand/model/bar-length fitment rows.</p>
+          <button data-nav="bar-lengths">Open Bar Lengths</button>
+        </div>
+      </div>
+    </section>
+
+    <details class="subtle-connection" id="connectionDetails">
+      <summary>Connection (advanced)</summary>
+      <div class="card connection-card">
+        <div class="row">
+          <input id="apiBase" value="https://product-selector-api.gdeharo.workers.dev" />
+          <input id="token" placeholder="Admin token" />
+          <button id="saveConn">Save Connection</button>
+          <button id="refreshAll" class="secondary">Refresh All</button>
+        </div>
+        <div id="status" class="muted">Ready.</div>
+      </div>
+    </details>
+
+    <section id="view-settings" class="view card hidden">
+      <div class="toolbar">
+        <button class="secondary" data-nav="home">Back To Menu</button>
+      </div>
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <div class="settings-row">
+          <label for="s_form_title">Form title</label>
+          <input id="s_form_title" placeholder="Form title" />
+          <div class="settings-current">Current: <span id="cur_form_title">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_accent_color">Accent color</label>
+          <input id="s_accent_color" placeholder="Accent color (e.g. rgb(20, 111, 248))" />
+          <div class="settings-current">Current: <span id="cur_accent_color">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_button_label">Button label</label>
+          <input id="s_button_label" placeholder="Button label" />
+          <div class="settings-current">Current: <span id="cur_button_label">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_card_tint_percent">Card tint percent</label>
+          <input id="s_card_tint_percent" placeholder="Card tint percent (0-100)" />
+          <div class="settings-current">Current: <span id="cur_card_tint_percent">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_chain_brand_fallback">Chain brand fallback</label>
+          <input id="s_chain_brand_fallback" placeholder="Chain brand fallback" />
+          <div class="settings-current">Current: <span id="cur_chain_brand_fallback">-</span></div>
+        </div>
+        <div class="settings-row">
+          <label for="s_no_result_message">No-result message</label>
+          <input id="s_no_result_message" placeholder="No-result message" />
+          <div class="settings-current">Current: <span id="cur_no_result_message">-</span></div>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button id="saveSettings">Save Settings</button>
+        <button id="clearSettingsForm" class="secondary">Clear Form</button>
+        <button id="restoreSettingsForm" class="danger">Restore Current</button>
+      </div>
+    </section>
+
+    <section id="view-chain-types" class="view card hidden"></section>
+    <section id="view-kmc-chains" class="view card hidden"></section>
+    <section id="view-bar-lengths" class="view card hidden"></section>
+  </div>
+
+  <div id="errorModalBackdrop" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="errorModalTitle">
+      <h3 id="errorModalTitle">Unable to save</h3>
+      <p id="errorModalMessage"></p>
+      <div class="actions">
+        <button id="errorModalAcknowledge">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const HUB_PANEL_SESSION_KEY = "admin_hub_panel_session_v1";
+    const PANEL_ID = "kmc-chain-finder-admin";
+
+    const ENTITIES = {
+      "chain-types": {
+        title: "Chain Types",
+        fields: ["Chain Type", "Gauge", "Pitch", "Chisel Style", "ANSI Low Kickback", "Profile Class", "Kerf Type", "Sequence Type"],
+      },
+      "kmc-chains": {
+        title: "KMC Chains",
+        fields: ["Chain Type", "Gauge", "Pitch", "Links", "Type+Links", "Part Reference", "UPC", "Retail Price", "MSRP", "URL"],
+      },
+      "bar-lengths": {
+        title: "Bar Lengths",
+        fields: ["Chainsaw Brand", "Chainsaw Model", "Bar Length", "Chain Type Code", "Gauge", "Pitch", "Drive Links", "Name", "KMC Chain URL"],
+      },
+    };
+
+    const CHAIN_TYPE_LOOKUP_FIELDS = [
+      "Gauge",
+      "Pitch",
+      "Chisel Style",
+      "ANSI Low Kickback",
+      "Profile Class",
+      "Kerf Type",
+      "Sequence Type",
+    ];
+    const BAR_LOOKUP_FIELDS = ["Chainsaw Brand", "Chainsaw Model", "Bar Length"];
+
+    // Hide these in forms only; values are still preserved in payloads.
+    const FORM_HIDDEN_FIELDS = {
+      "chain-types": new Set(["Chain Type"]),
+      "kmc-chains": new Set(["Chain Type", "Type+Links"]),
+      "bar-lengths": new Set(["Chain Type Code"]),
+    };
+
+    // Hide these in table display only.
+    const TABLE_HIDDEN_FIELDS = {
+      "kmc-chains": new Set(["Type+Links"]),
+    };
+
+    const state = {
+      access: {
+        panelRole: "manager",
+        hubRole: "",
+        fromHub: false,
+      },
+      entities: {
+        "chain-types": [],
+        "kmc-chains": [],
+        "bar-lengths": [],
+      },
+      loaded: {
+        "chain-types": false,
+        "kmc-chains": false,
+        "bar-lengths": false,
+        settings: false,
+        lookups: false,
+      },
+      lookupsByGroupField: {
+        "chain-types": {},
+        "bar-lengths": {},
+      },
+      highlightedRowBySlug: {
+        "chain-types": 0,
+        "kmc-chains": 0,
+        "bar-lengths": 0,
+      },
+      settingsCurrent: {
+        form_title: "",
+        accent_color: "",
+        button_label: "",
+        card_tint_percent: "",
+        no_result_message: "",
+        chain_brand_fallback: "",
+      },
+    };
+
+    const ui = {
+      accessInfo: document.getElementById("accessInfo"),
+      btnPanelLogout: document.getElementById("btnPanelLogout"),
+      connectionDetails: document.getElementById("connectionDetails"),
+      apiBase: document.getElementById("apiBase"),
+      token: document.getElementById("token"),
+      status: document.getElementById("status"),
+      views: {
+        home: document.getElementById("view-home"),
+        settings: document.getElementById("view-settings"),
+        "chain-types": document.getElementById("view-chain-types"),
+        "kmc-chains": document.getElementById("view-kmc-chains"),
+        "bar-lengths": document.getElementById("view-bar-lengths"),
+      },
+      errorModalBackdrop: document.getElementById("errorModalBackdrop"),
+      errorModalMessage: document.getElementById("errorModalMessage"),
+      errorModalAcknowledge: document.getElementById("errorModalAcknowledge"),
+    };
+
+    document.getElementById("saveConn").addEventListener("click", saveConnection);
+    document.getElementById("refreshAll").addEventListener("click", refreshAll);
+    document.getElementById("saveSettings").addEventListener("click", saveSettings);
+    document.getElementById("clearSettingsForm").addEventListener("click", clearSettingsForm);
+    document.getElementById("restoreSettingsForm").addEventListener("click", restoreSettingsForm);
+    ui.btnPanelLogout.addEventListener("click", logoutFromPanel);
+    ui.errorModalAcknowledge.addEventListener("click", hideErrorModal);
+    ui.errorModalBackdrop.addEventListener("click", (e) => {
+      if (e.target === ui.errorModalBackdrop) hideErrorModal();
+    });
+
+    for (const slug of Object.keys(ENTITIES)) {
+      renderEntityScaffold(slug);
+    }
+
+    document.querySelectorAll("[data-nav]").forEach((btn) => {
+      btn.addEventListener("click", () => navigate(btn.getAttribute("data-nav")));
+    });
+
+    init();
+
+    async function init() {
+      restoreConnection();
+      restorePanelAccess();
+      const ok = await ensureHubSessionIfRequired();
+      applyAccessUI();
+      applyRoleAccessToSettings();
+      for (const slug of Object.keys(ENTITIES)) {
+        applyRoleAccessToEntity(slug);
+      }
+      if (ok) await navigate("home");
+    }
+
+    function restorePanelAccess() {
+      try {
+        const raw = localStorage.getItem(HUB_PANEL_SESSION_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        const panelId = String(parsed.panelId || "").trim();
+        const panelRole = normalizePanelRole(parsed.panelRole);
+        const hubRole = String(parsed.hubRole || "").trim().toLowerCase();
+        if (!panelId || panelId !== PANEL_ID) return;
+        state.access = {
+          panelRole: panelRole || "none",
+          hubRole,
+          fromHub: true,
+        };
+      } catch {}
+    }
+
+    function normalizePanelRole(value) {
+      const r = String(value || "").trim().toLowerCase();
+      if (r === "viewer" || r === "editor" || r === "manager") return r;
+      return "";
+    }
+
+    function canWrite() {
+      return state.access.panelRole === "editor" || state.access.panelRole === "manager";
+    }
+
+    function hasPanelReadAccess() {
+      return state.access.panelRole === "viewer" || state.access.panelRole === "editor" || state.access.panelRole === "manager";
+    }
+
+    function applyAccessUI() {
+      if (state.access.fromHub) {
+        ui.btnPanelLogout.classList.remove("hidden");
+        ui.connectionDetails.classList.add("hidden");
+        ui.accessInfo.textContent = `Access role: ${state.access.panelRole || "none"} (from Admin Hub)`;
+        if (!hasPanelReadAccess()) {
+          Object.values(ui.views).forEach((v) => v.classList.add("hidden"));
+          setStatus("No panel access. Contact your manager.", false);
+        }
+      } else {
+        ui.btnPanelLogout.classList.add("hidden");
+        ui.accessInfo.textContent = "Access role: full admin (standalone mode)";
+      }
+    }
+
+    async function ensureHubSessionIfRequired() {
+      if (!state.access.fromHub) {
+        if (requiresHubAuth()) {
+          lockPanelAndRedirect("Please sign in from Admin Hub.");
+          return false;
+        }
+        return true;
+      }
+      const token = localStorage.getItem("admin_hub_token_v1") || "";
+      if (!token) {
+        lockPanelAndRedirect("Session expired. Please sign in again.");
+        return false;
+      }
+      try {
+        const res = await fetch(ui.apiBase.value.trim() + "/hub/me", {
+          method: "GET",
+          headers: { "x-hub-session": token },
+        });
+        if (!res.ok) {
+          lockPanelAndRedirect("Session expired. Please sign in again.");
+          return false;
+        }
+        return true;
+      } catch {
+        lockPanelAndRedirect("Unable to verify session. Please sign in again.");
+        return false;
+      }
+    }
+
+    function lockPanelAndRedirect(message) {
+      state.access.panelRole = "none";
+      setStatus(message, false);
+      Object.values(ui.views).forEach((v) => v.classList.add("hidden"));
+      localStorage.removeItem(HUB_PANEL_SESSION_KEY);
+      setTimeout(() => { window.location.href = "/"; }, 800);
+    }
+
+    function requiresHubAuth() {
+      return window.location.protocol !== "file:";
+    }
+
+    async function logoutFromPanel() {
+      const token = localStorage.getItem("admin_hub_token_v1") || "";
+      try {
+        if (token) {
+          await fetch(ui.apiBase.value.trim() + "/hub/auth/logout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-hub-session": token },
+            body: "{}",
+          });
+        }
+      } catch {}
+      localStorage.removeItem("admin_hub_token_v1");
+      localStorage.removeItem(HUB_PANEL_SESSION_KEY);
+      window.location.href = "/";
+    }
+
+    function assertCanWrite(actionLabel) {
+      if (canWrite() || !state.access.fromHub) return true;
+      setStatus(`Read-only access (${state.access.panelRole}). Cannot ${actionLabel}.`, false);
+      return false;
+    }
+
+    function restoreConnection() {
+      const savedBase = localStorage.getItem("ps_api_base");
+      const savedToken = localStorage.getItem("ps_admin_token");
+      if (savedBase) ui.apiBase.value = savedBase;
+      if (savedToken) ui.token.value = savedToken;
+    }
+
+    function saveConnection() {
+      localStorage.setItem("ps_api_base", ui.apiBase.value.trim());
+      localStorage.setItem("ps_admin_token", ui.token.value.trim());
+      setStatus("Connection saved.", true);
+    }
+
+    function setStatus(msg, ok) {
+      ui.status.className = ok ? "ok" : "err";
+      ui.status.textContent = msg;
+    }
+
+    async function api(path, method = "GET", body) {
+      const headers = { "Content-Type": "application/json" };
+      const hubSession = localStorage.getItem("admin_hub_token_v1") || "";
+      if (state.access.fromHub) {
+        if (hubSession) headers["x-hub-session"] = hubSession;
+      } else {
+        const token = ui.token.value.trim();
+        if (token) headers["x-admin-token"] = token;
+        if (hubSession) headers["x-hub-session"] = hubSession;
+      }
+
+      const res = await fetch(ui.apiBase.value.trim() + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      return data;
+    }
+
+    async function refreshAll() {
+      try {
+        await Promise.all([
+          loadSettings(),
+          loadLookups(),
+          loadEntity("chain-types"),
+          loadEntity("kmc-chains"),
+          loadEntity("bar-lengths"),
+        ]);
+        state.loaded.settings = true;
+        state.loaded.lookups = true;
+        state.loaded["chain-types"] = true;
+        state.loaded["kmc-chains"] = true;
+        state.loaded["bar-lengths"] = true;
+        setStatus("Data refreshed.", true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function navigate(viewName) {
+      if (state.access.fromHub && !hasPanelReadAccess()) return;
+      for (const key of Object.keys(ui.views)) {
+        ui.views[key].classList.toggle("hidden", key !== viewName);
+      }
+
+      try {
+        if (viewName === "settings" && !state.loaded.settings) {
+          await loadSettings();
+          state.loaded.settings = true;
+        }
+        if (["chain-types", "bar-lengths"].includes(viewName) && !state.loaded.lookups) {
+          await loadLookups();
+          state.loaded.lookups = true;
+        }
+        if (viewName === "kmc-chains" && !state.loaded["chain-types"]) {
+          await loadEntity("chain-types");
+          state.loaded["chain-types"] = true;
+        }
+        if (ENTITIES[viewName] && !state.loaded[viewName]) {
+          await loadEntity(viewName);
+          state.loaded[viewName] = true;
+        }
+
+        if (viewName === "kmc-chains") {
+          updateKmcTypeLinksDerived();
+        }
+        if (viewName === "chain-types") {
+          populateChainTypeLookupOptions();
+        }
+        if (viewName === "bar-lengths") {
+          populateChainTypeLookupOptions();
+          populateBarLengthLookupOptions();
+          updateBarLengthNameDerived();
+        }
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    function renderEntityScaffold(slug) {
+      const cfg = ENTITIES[slug];
+      const host = ui.views[slug];
+      const hiddenFields = FORM_HIDDEN_FIELDS[slug] || new Set();
+      const visibleFields = cfg.fields.filter((f) => !hiddenFields.has(f));
+      const hiddenInputs = cfg.fields.filter((f) => hiddenFields.has(f)).map((f) => renderFieldInput(slug, f)).join("");
+      const inputs = visibleFields.map((f) => renderFieldInput(slug, f)).join("");
+
+      host.innerHTML = `
+        <div class="toolbar">
+          <button class="secondary" data-nav="home">Back To Menu</button>
+          <button id="reload-${slug}" class="secondary">Reload</button>
+        </div>
+        <h2>${escapeHtml(cfg.title)}</h2>
+        <div class="muted">Edit a row: click Edit. New row: leave edit row blank and Save.</div>
+        <div class="row">${inputs}</div>
+        ${hiddenInputs}
+        <div class="row">
+          ${["chain-types", "kmc-chains", "bar-lengths"].includes(slug)
+            ? `<input id="edit-row-${slug}" type="hidden" />`
+            : `<input id="edit-row-${slug}" placeholder="Editing row # (optional)" readonly />`}
+          <button id="save-${slug}">Save Row</button>
+          <button id="clear-${slug}" class="secondary">Clear Form</button>
+          <span></span>
+        </div>
+        <table id="table-${slug}"></table>
+      `;
+
+      host.querySelectorAll("[data-nav]").forEach((btn) => {
+        btn.addEventListener("click", () => navigate(btn.getAttribute("data-nav")));
+      });
+
+      document.getElementById(`save-${slug}`).addEventListener("click", () => saveEntityRow(slug));
+      document.getElementById(`clear-${slug}`).addEventListener("click", () => clearEntityForm(slug));
+      document.getElementById(`reload-${slug}`).addEventListener("click", async () => {
+        await loadEntity(slug);
+        if (slug === "bar-lengths") {
+          populateBarLengthLookupOptions();
+          updateBarLengthNameDerived();
+        }
+        setStatus(`${cfg.title} reloaded.`, true);
+      });
+
+      if (slug === "kmc-chains") {
+        const links = document.getElementById(fieldInputId("kmc-chains", "Links"));
+        if (links) links.addEventListener("input", updateKmcTypeLinksDerived);
+      }
+
+      if (slug === "chain-types") {
+        for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
+          const sel = document.getElementById(fieldInputId("chain-types", field));
+          if (sel) sel.addEventListener("change", () => handleChainTypeLookupChange(field, sel));
+        }
+      }
+
+      if (slug === "bar-lengths") {
+        for (const field of BAR_LOOKUP_FIELDS) {
+          const sel = document.getElementById(fieldInputId("bar-lengths", field));
+          if (sel) sel.addEventListener("change", () => handleBarLookupChange(field, sel));
+        }
+        const modelEl = document.getElementById(fieldInputId("bar-lengths", "Chainsaw Model"));
+        if (modelEl) modelEl.addEventListener("change", applyBarModelDefaultsFromSelection);
+      }
+
+      applyRoleAccessToEntity(slug);
+    }
+
+    function applyRoleAccessToEntity(slug) {
+      if (!state.access.fromHub || canWrite()) return;
+      const saveBtn = document.getElementById(`save-${slug}`);
+      if (saveBtn) saveBtn.disabled = true;
+      const view = ui.views[slug];
+      if (!view) return;
+      view.querySelectorAll("input[id^='f_'], select[id^='f_']").forEach((el) => {
+        if (el.type === "hidden") return;
+        el.disabled = true;
+      });
+    }
+
+    function applyRoleAccessToSettings() {
+      if (!state.access.fromHub || canWrite()) return;
+      const saveBtn = document.getElementById("saveSettings");
+      const clearBtn = document.getElementById("clearSettingsForm");
+      const restoreBtn = document.getElementById("restoreSettingsForm");
+      if (saveBtn) saveBtn.disabled = true;
+      if (clearBtn) clearBtn.disabled = true;
+      if (restoreBtn) restoreBtn.disabled = true;
+      ["s_form_title", "s_accent_color", "s_button_label", "s_card_tint_percent", "s_chain_brand_fallback", "s_no_result_message"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = true;
+      });
+    }
+
+    async function loadSettings() {
+      const data = await api("/admin/settings", "GET");
+      const s = data.settings || {};
+      state.settingsCurrent = {
+        form_title: s.form_title || "",
+        accent_color: s.accent_color || "",
+        button_label: s.button_label || "",
+        card_tint_percent: s.card_tint_percent || "",
+        no_result_message: s.no_result_message || "",
+        chain_brand_fallback: s.chain_brand_fallback || "",
+      };
+      fillSettingsForm(state.settingsCurrent);
+      renderSettingsCurrent(state.settingsCurrent);
+      applyRoleAccessToSettings();
+    }
+
+    async function saveSettings() {
+      if (!assertCanWrite("save settings")) return;
+      try {
+        const payload = getSettingsDraft();
+        await api("/admin/settings", "POST", {
+          settings: payload,
+        });
+        state.settingsCurrent = { ...payload };
+        renderSettingsCurrent(state.settingsCurrent);
+        setStatus("Settings saved.", true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    function clearSettingsForm() {
+      if (!assertCanWrite("clear settings form")) return;
+      fillSettingsForm({
+        form_title: "",
+        accent_color: "",
+        button_label: "",
+        card_tint_percent: "",
+        no_result_message: "",
+        chain_brand_fallback: "",
+      });
+      setStatus("Settings form cleared.", true);
+    }
+
+    function restoreSettingsForm() {
+      if (!assertCanWrite("restore settings form")) return;
+      fillSettingsForm(state.settingsCurrent);
+      setStatus("Settings restored to current saved values.", true);
+    }
+
+    function getSettingsDraft() {
+      return {
+        form_title: val("s_form_title"),
+        accent_color: val("s_accent_color"),
+        button_label: val("s_button_label"),
+        card_tint_percent: val("s_card_tint_percent"),
+        no_result_message: val("s_no_result_message"),
+        chain_brand_fallback: val("s_chain_brand_fallback"),
+      };
+    }
+
+    function fillSettingsForm(settings) {
+      setVal("s_form_title", settings.form_title || "");
+      setVal("s_accent_color", settings.accent_color || "");
+      setVal("s_button_label", settings.button_label || "");
+      setVal("s_card_tint_percent", settings.card_tint_percent || "");
+      setVal("s_no_result_message", settings.no_result_message || "");
+      setVal("s_chain_brand_fallback", settings.chain_brand_fallback || "");
+    }
+
+    function renderSettingsCurrent(settings) {
+      setText("cur_form_title", settings.form_title);
+      setText("cur_accent_color", settings.accent_color);
+      setText("cur_button_label", settings.button_label);
+      setText("cur_card_tint_percent", settings.card_tint_percent);
+      setText("cur_no_result_message", settings.no_result_message);
+      setText("cur_chain_brand_fallback", settings.chain_brand_fallback);
+    }
+
+    async function loadLookups() {
+      const data = await api("/admin/lookups", "GET");
+      const lookups = Array.isArray(data.lookups) ? data.lookups : [];
+      const grouped = {
+        "chain-types": {},
+        "bar-lengths": {},
+      };
+      for (const item of lookups) {
+        const field = String(item.field || "").trim();
+        const value = String(item.value || "").trim();
+        if (!field || !value) continue;
+        const group = normalizeLookupGroup(
+          item.group ||
+          (CHAIN_TYPE_LOOKUP_FIELDS.includes(field) ? "chain-types" : BAR_LOOKUP_FIELDS.includes(field) ? "bar-lengths" : "")
+        );
+        if (!grouped[group]) continue;
+        if (!grouped[group][field]) grouped[group][field] = [];
+        grouped[group][field].push({
+          value,
+          sort_order: Number(item.sort_order || 0),
+          active: Number(item.active || 0),
+        });
+      }
+      for (const group of Object.keys(grouped)) {
+        for (const key of Object.keys(grouped[group])) {
+          grouped[group][key].sort((a, b) => {
+            if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+            return a.value.localeCompare(b.value, undefined, { sensitivity: "base" });
+          });
+        }
+      }
+      state.lookupsByGroupField = grouped;
+      populateChainTypeLookupOptions();
+      populateBarLengthLookupOptions();
+    }
+
+    async function loadEntity(slug) {
+      const data = await api(`/admin/gsheet/${slug}`, "GET");
+      state.entities[slug] = data.rows || [];
+      renderEntityTable(slug);
+
+      if (slug === "chain-types") {
+        populateChainTypeLookupOptions();
+      }
+
+      if (slug === "bar-lengths") {
+        populateBarLengthLookupOptions();
+        updateBarLengthNameDerived();
+      }
+
+      if (slug === "kmc-chains") {
+        updateKmcTypeLinksDerived();
+      }
+    }
+
+    function renderEntityTable(slug) {
+      const cfg = ENTITIES[slug];
+      const table = document.getElementById(`table-${slug}`);
+      let rows = state.entities[slug] || [];
+      if (slug === "bar-lengths") {
+        const filters = getBarLengthFilters();
+        let narrowed = rows.filter((r) => {
+          if (filters.brand && !eqNormStr(r["Chainsaw Brand"], filters.brand)) return false;
+          if (filters.model && !eqNormStr(r["Chainsaw Model"], filters.model)) return false;
+          return true;
+        });
+        if (filters.barLength) {
+          const hasExistingLength = narrowed.some((r) => eqNormStr(r["Bar Length"], filters.barLength));
+          if (hasExistingLength) {
+            narrowed = narrowed.filter((r) => eqNormStr(r["Bar Length"], filters.barLength));
+          }
+        }
+        rows = narrowed;
+        rows = [...rows].sort((a, b) =>
+          String(a["Bar Length"] || "").localeCompare(String(b["Bar Length"] || ""), undefined, {
+            sensitivity: "base",
+            numeric: true,
+          })
+        );
+      }
+      if (slug === "chain-types") {
+        const filters = getChainTypeFilters();
+        rows = rows.filter((r) => {
+          if (filters.gauge && !eqNormStr(r["Gauge"], filters.gauge)) return false;
+          if (filters.pitch && !eqNormStr(r["Pitch"], filters.pitch)) return false;
+          return true;
+        });
+      }
+      const hiddenCols = TABLE_HIDDEN_FIELDS[slug] || new Set();
+      const visibleFields = cfg.fields.filter((f) => !hiddenCols.has(f));
+
+      const showRowColumn = !["kmc-chains", "chain-types", "bar-lengths"].includes(slug);
+      const header = `<tr>${visibleFields.map((f) => `<th>${escapeHtml(f)}</th>`).join("")}${showRowColumn ? "<th>Row</th>" : ""}<th>Actions</th></tr>`;
+      const highlightRow = Number(state.highlightedRowBySlug[slug] || 0);
+      const readonly = state.access.fromHub && !canWrite();
+      const body = rows.map((r) => {
+        const cols = visibleFields.map((f) => `<td>${escapeHtml(r[f])}</td>`).join("");
+        const rowNum = Number(r.__row || 0);
+        const rowClass = rowNum && rowNum === highlightRow ? ` class="row-highlight"` : "";
+        return `<tr${rowClass}>${cols}${showRowColumn ? `<td>${escapeHtml(r.__row)}</td>` : ""}<td>${
+          readonly ? `<span class="muted">Read only</span>` : `<button class="secondary" onclick="editRow('${slug}', ${Number(r.__row)})">Edit</button>`
+        }</td></tr>`;
+      }).join("");
+
+      table.innerHTML = header + body;
+    }
+
+    async function saveEntityRow(slug) {
+      if (!assertCanWrite("save rows")) return;
+      const cfg = ENTITIES[slug];
+      const row = {};
+      const rowNumber = Number(document.getElementById(`edit-row-${slug}`).value || 0);
+      for (const f of cfg.fields) row[f] = val(fieldInputId(slug, f));
+      state.highlightedRowBySlug[slug] = 0;
+
+      if (slug === "kmc-chains") {
+        row["Type+Links"] = buildTypeLinks(row["Chain Type"], row["Links"]);
+      }
+      if (slug === "chain-types") {
+        const dup = findDuplicateChainTypeRow(row, state.entities["chain-types"] || [], rowNumber);
+        if (dup) {
+          state.highlightedRowBySlug["chain-types"] = Number(dup.__row || 0);
+          renderEntityTable("chain-types");
+          const existingCode = toStr(dup["Chain Type"]).trim() || "(blank)";
+          showErrorModal(`Duplicate chain type values found (existing code: ${existingCode}). Use Edit on the highlighted row.`);
+          setStatus("Duplicate chain type values found.", false);
+          return;
+        }
+        if (!row["Chain Type"]) {
+          row["Chain Type"] = generateChainTypeCode(row, state.entities["chain-types"] || [], rowNumber);
+        }
+      }
+      if (slug === "bar-lengths") {
+        row["Name"] = buildBarLengthName(row["Chainsaw Model"], row["Bar Length"]);
+      }
+
+      try {
+        await api(`/admin/gsheet/${slug}`, "POST", {
+          row,
+          rowNumber: rowNumber || undefined,
+        });
+        if (slug === "bar-lengths") {
+          const keep = {
+            brand: toStr(row["Chainsaw Brand"]).trim(),
+            model: toStr(row["Chainsaw Model"]).trim(),
+            barLength: "",
+          };
+          document.getElementById(`edit-row-${slug}`).value = "";
+          await loadEntity(slug);
+          populateBarLengthLookupOptions();
+          setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Brand")), keep.brand);
+          populateBarModelOptions();
+          setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Model")), keep.model);
+          populateBarLengthValueOptions();
+          setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Bar Length")), keep.barLength);
+          applyBarModelDefaultsFromSelection();
+          renderEntityTable("bar-lengths");
+        } else if (slug === "chain-types") {
+          const keep = {
+            gauge: toStr(row["Gauge"]).trim(),
+            pitch: toStr(row["Pitch"]).trim(),
+          };
+          document.getElementById(`edit-row-${slug}`).value = "";
+          await loadEntity(slug);
+          const gaugeEl = document.getElementById(fieldInputId("chain-types", "Gauge"));
+          const pitchEl = document.getElementById(fieldInputId("chain-types", "Pitch"));
+          setSelectValueWithOption(gaugeEl, keep.gauge);
+          setSelectValueWithOption(pitchEl, keep.pitch);
+          renderEntityTable("chain-types");
+        } else {
+          clearEntityForm(slug);
+          await loadEntity(slug);
+        }
+        setStatus(`${cfg.title}: row saved.`, true);
+      } catch (err) {
+        const errorText = String(err.message || "").toLowerCase();
+        if (slug === "chain-types" && errorText.includes("duplicate chain type variables")) {
+          const dup = findDuplicateChainTypeRow(row, state.entities["chain-types"] || [], rowNumber);
+          if (dup) {
+            state.highlightedRowBySlug["chain-types"] = Number(dup.__row || 0);
+            renderEntityTable("chain-types");
+          }
+          showErrorModal("Duplicate chain type values detected. Use Edit on the highlighted row.");
+        }
+        if (slug === "kmc-chains" && errorText.includes("duplicate part reference")) {
+          showErrorModal("Part reference allready exists, it can not be saved");
+        } else if (slug === "kmc-chains" && errorText.includes("duplicate upc")) {
+          showErrorModal("UPC code already exists, it can not be saved");
+        } else if (slug === "kmc-chains" && errorText.includes("invalid upc")) {
+          showErrorModal("UPC code is invalid. Please enter a valid 12-digit UPC-A.");
+        }
+        setStatus(err.message, false);
+      }
+    }
+
+    function clearEntityForm(slug) {
+      const cfg = ENTITIES[slug];
+      for (const f of cfg.fields) {
+        setVal(fieldInputId(slug, f), "");
+      }
+      document.getElementById(`edit-row-${slug}`).value = "";
+
+      if (slug === "kmc-chains") updateKmcTypeLinksDerived();
+      if (slug === "chain-types") {
+        state.highlightedRowBySlug["chain-types"] = 0;
+      }
+      if (slug === "bar-lengths") {
+        populateBarLengthLookupOptions();
+        updateBarLengthNameDerived();
+        renderEntityTable("bar-lengths");
+      }
+      if (slug === "chain-types") {
+        renderEntityTable("chain-types");
+      }
+    }
+
+    function editRow(slug, rowNumber) {
+      const cfg = ENTITIES[slug];
+      const row = (state.entities[slug] || []).find((r) => Number(r.__row) === Number(rowNumber));
+      if (!row) return;
+
+      for (const f of cfg.fields) {
+        setVal(fieldInputId(slug, f), row[f] || "");
+      }
+      document.getElementById(`edit-row-${slug}`).value = String(rowNumber);
+
+      if (slug === "kmc-chains") updateKmcTypeLinksDerived();
+      if (slug === "bar-lengths") {
+        populateBarLengthLookupOptions();
+        setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Brand")), row["Chainsaw Brand"] || "");
+        populateBarModelOptions();
+        setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Model")), row["Chainsaw Model"] || "");
+        populateBarLengthValueOptions();
+        setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Bar Length")), row["Bar Length"] || "");
+        updateBarLengthNameDerived();
+        renderEntityTable("bar-lengths");
+      }
+
+      window.scrollTo({ top: document.getElementById(`view-${slug}`).offsetTop - 20, behavior: "smooth" });
+    }
+
+    window.editRow = editRow;
+
+    function fieldInputId(slug, fieldName) {
+      const k = fieldName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      return `f_${slug}_${k}`;
+    }
+
+    function renderFieldInput(slug, fieldName) {
+      const id = fieldInputId(slug, fieldName);
+      if (FORM_HIDDEN_FIELDS[slug] && FORM_HIDDEN_FIELDS[slug].has(fieldName)) {
+        return `<input id="${id}" type="hidden" />`;
+      }
+      if (slug === "chain-types" && CHAIN_TYPE_LOOKUP_FIELDS.includes(fieldName)) {
+        return `<select id="${id}"><option value="">Select ${escapeHtml(fieldName)}</option></select>`;
+      }
+      if (["kmc-chains", "bar-lengths"].includes(slug) && CHAIN_TYPE_LOOKUP_FIELDS.includes(fieldName)) {
+        return `<select id="${id}"><option value="">Select ${escapeHtml(fieldName)}</option></select>`;
+      }
+      if (slug === "bar-lengths" && BAR_LOOKUP_FIELDS.includes(fieldName)) {
+        return `<select id="${id}"><option value="">Select ${escapeHtml(fieldName)}</option></select>`;
+      }
+      if (slug === "kmc-chains" && fieldName === "Links") {
+        return `<input id="${id}" type="number" step="1" placeholder="${escapeHtml(fieldName)}" />`;
+      }
+      if (slug === "bar-lengths" && fieldName === "Name") {
+        return `<input id="${id}" placeholder="${escapeHtml(fieldName)}" readonly />`;
+      }
+      return `<input id="${id}" placeholder="${escapeHtml(fieldName)}" />`;
+    }
+
+    function populateChainTypeLookupOptions() {
+      const targets = ["chain-types", "kmc-chains", "bar-lengths"];
+      for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
+        for (const slug of targets) {
+          const select = document.getElementById(fieldInputId(slug, field));
+          if (!select) continue;
+          const prev = select.value;
+          const items = [...getLookupItems("chain-types", field)];
+          if (prev && prev !== "__add_new__" && !items.some((i) => i.value === prev)) {
+            items.unshift({ value: prev, sort_order: -1, active: 1 });
+          }
+
+          const addNew = slug === "chain-types";
+          select.innerHTML =
+            `<option value="">Select ${escapeHtml(field)}</option>` +
+            items.map((i) => `<option value="${escapeHtml(i.value)}">${escapeHtml(i.value)}</option>`).join("") +
+            (addNew ? `<option value="__add_new__">+ Add new value...</option>` : "");
+
+          if (prev && items.some((i) => i.value === prev)) select.value = prev;
+        }
+      }
+    }
+
+    async function handleChainTypeLookupChange(field, select) {
+      if (!select || select.value !== "__add_new__") {
+        if (field === "Gauge" || field === "Pitch") renderEntityTable("chain-types");
+        return;
+      }
+      if (!assertCanWrite("add lookup values")) {
+        select.value = "";
+        return;
+      }
+      const newValue = prompt(`Add new value for ${field}:`, "");
+      if (!newValue || !newValue.trim()) {
+        select.value = "";
+        return;
+      }
+      const cleanValue = newValue.trim();
+      const current = getLookupItems("chain-types", field);
+      const maxSort = current.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
+
+      try {
+        await api("/admin/lookups", "POST", {
+          field,
+          group: "chain-types",
+          value: cleanValue,
+          active: 1,
+          sort_order: maxSort + 10,
+        });
+        await loadLookups();
+        const target = document.getElementById(fieldInputId("chain-types", field));
+        if (target) target.value = cleanValue;
+        setStatus(`Added new lookup value for ${field}.`, true);
+      } catch (err) {
+        setStatus(err.message, false);
+        select.value = "";
+      }
+    }
+
+    function populateBarLengthLookupOptions() {
+      populateBarBrandOptions();
+      populateBarModelOptions();
+      populateBarLengthValueOptions();
+    }
+
+    async function handleBarLookupChange(field, select) {
+      if (!select || select.value !== "__add_new__") {
+        if (field === "Chainsaw Brand") {
+          populateBarModelOptions();
+          populateBarLengthValueOptions();
+          applyBarModelDefaultsFromSelection();
+          renderEntityTable("bar-lengths");
+          return;
+        }
+        if (field === "Chainsaw Model") {
+          populateBarLengthValueOptions();
+          applyBarModelDefaultsFromSelection();
+          renderEntityTable("bar-lengths");
+          return;
+        }
+        if (field === "Bar Length") {
+          updateBarLengthNameDerived();
+          renderEntityTable("bar-lengths");
+          return;
+        } else {
+          updateBarLengthNameDerived();
+        }
+        return;
+      }
+      if (!assertCanWrite("add lookup values")) {
+        select.value = "";
+        updateBarLengthNameDerived();
+        return;
+      }
+
+      const newValue = prompt(`Add new value for ${field}:`, "");
+      if (!newValue || !newValue.trim()) {
+        select.value = "";
+        updateBarLengthNameDerived();
+        return;
+      }
+
+      const cleanValue = newValue.trim();
+      const current = getLookupItems("bar-lengths", field);
+      const maxSort = current.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
+
+      try {
+        await api("/admin/lookups", "POST", {
+          field,
+          group: "bar-lengths",
+          value: cleanValue,
+          active: 1,
+          sort_order: maxSort + 10,
+        });
+        await loadLookups();
+        populateBarLengthLookupOptions();
+        const target = document.getElementById(fieldInputId("bar-lengths", field));
+        if (target) setSelectValueWithOption(target, cleanValue);
+        if (field === "Chainsaw Brand") {
+          populateBarModelOptions();
+          populateBarLengthValueOptions();
+          const modelEl = document.getElementById(fieldInputId("bar-lengths", "Chainsaw Model"));
+          if (modelEl) modelEl.value = "";
+          const barLenEl = document.getElementById(fieldInputId("bar-lengths", "Bar Length"));
+          if (barLenEl) barLenEl.value = "";
+          setVal(fieldInputId("bar-lengths", "Gauge"), "");
+          setVal(fieldInputId("bar-lengths", "Pitch"), "");
+        }
+        setStatus(`Added new lookup value for ${field}.`, true);
+      } catch (err) {
+        setStatus(err.message, false);
+        select.value = "";
+      }
+
+      if (field === "Chainsaw Model") {
+        populateBarLengthValueOptions();
+        applyBarModelDefaultsFromSelection();
+      } else if (field === "Bar Length") {
+        updateBarLengthNameDerived();
+      } else {
+        updateBarLengthNameDerived();
+      }
+      renderEntityTable("bar-lengths");
+    }
+
+    function normalizeLookupGroup(value) {
+      const v = String(value || "").trim().toLowerCase();
+      if (v === "chain-types" || v === "bar-lengths") return v;
+      return "";
+    }
+
+    function getLookupItems(group, field) {
+      const safeGroup = normalizeLookupGroup(group);
+      if (!safeGroup) return [];
+      const byField = state.lookupsByGroupField[safeGroup] || {};
+      return Array.isArray(byField[field]) ? byField[field] : [];
+    }
+
+    function setSelectValueWithOption(select, value) {
+      if (!select) return;
+      const clean = String(value || "").trim();
+      if (!clean) {
+        select.value = "";
+        return;
+      }
+      const exists = Array.from(select.options || []).some((o) => o.value === clean);
+      if (!exists) {
+        const opt = document.createElement("option");
+        opt.value = clean;
+        opt.textContent = clean;
+        const addNewOpt = Array.from(select.options || []).find((o) => o.value === "__add_new__");
+        if (addNewOpt) select.insertBefore(opt, addNewOpt);
+        else select.appendChild(opt);
+      }
+      select.value = clean;
+    }
+
+    function populateBarBrandOptions() {
+      const field = "Chainsaw Brand";
+      const select = document.getElementById(fieldInputId("bar-lengths", field));
+      if (!select) return;
+      const prev = select.value;
+      const fromLookups = getLookupItems("bar-lengths", field).map((i) => i.value);
+      const fromRows = Array.from(
+        new Set((state.entities["bar-lengths"] || []).map((r) => String(r[field] || "").trim()).filter(Boolean))
+      );
+      const merged = Array.from(new Set([...fromLookups, ...fromRows])).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" })
+      );
+      select.innerHTML =
+        `<option value="">Select ${escapeHtml(field)}</option>` +
+        merged.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("") +
+        `<option value="__add_new__">+ Add new value...</option>`;
+      if (merged.includes(prev)) select.value = prev;
+    }
+
+    function populateBarModelOptions() {
+      const field = "Chainsaw Model";
+      const select = document.getElementById(fieldInputId("bar-lengths", field));
+      if (!select) return;
+      const prev = select.value;
+      const selectedBrand = val(fieldInputId("bar-lengths", "Chainsaw Brand"));
+      const fromLookupsAll = getLookupItems("bar-lengths", field).map((i) => i.value);
+      const rows = state.entities["bar-lengths"] || [];
+      const fromRows = Array.from(
+        new Set(
+          rows
+            .filter((r) => !selectedBrand || eqNormStr(r["Chainsaw Brand"], selectedBrand))
+            .map((r) => String(r[field] || "").trim())
+            .filter(Boolean)
+        )
+      );
+      const mergedBase = selectedBrand ? fromRows : Array.from(new Set([...fromLookupsAll, ...fromRows]));
+      const merged = mergedBase.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      if (prev && prev !== "__add_new__" && !merged.includes(prev)) {
+        merged.unshift(prev);
+      }
+
+      select.innerHTML =
+        `<option value="">Select ${escapeHtml(field)}</option>` +
+        merged.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("") +
+        `<option value="__add_new__">+ Add new value...</option>`;
+
+      if (merged.includes(prev)) select.value = prev;
+      else select.value = "";
+    }
+
+    function populateBarLengthValueOptions() {
+      const field = "Bar Length";
+      const select = document.getElementById(fieldInputId("bar-lengths", field));
+      if (!select) return;
+      const prev = select.value;
+      const selectedBrand = val(fieldInputId("bar-lengths", "Chainsaw Brand"));
+      const selectedModel = val(fieldInputId("bar-lengths", "Chainsaw Model"));
+      const fromLookupsAll = getLookupItems("bar-lengths", field).map((i) => i.value);
+      const rows = state.entities["bar-lengths"] || [];
+      const fromRows = Array.from(
+        new Set(
+          rows
+            .filter((r) => !selectedBrand || eqNormStr(r["Chainsaw Brand"], selectedBrand))
+            .filter((r) => !selectedModel || eqNormStr(r["Chainsaw Model"], selectedModel))
+            .map((r) => String(r[field] || "").trim())
+            .filter(Boolean)
+        )
+      );
+      const mergedBase = (selectedBrand || selectedModel)
+        ? fromRows
+        : Array.from(new Set([...fromLookupsAll, ...fromRows]));
+      const merged = mergedBase.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      if (prev && prev !== "__add_new__" && !merged.includes(prev)) {
+        merged.unshift(prev);
+      }
+
+      select.innerHTML =
+        `<option value="">Select ${escapeHtml(field)}</option>` +
+        merged.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("") +
+        `<option value="__add_new__">+ Add new value...</option>`;
+
+      if (merged.includes(prev)) select.value = prev;
+      else select.value = "";
+    }
+
+    function applyBarModelDefaultsFromSelection() {
+      const brand = val(fieldInputId("bar-lengths", "Chainsaw Brand"));
+      const model = val(fieldInputId("bar-lengths", "Chainsaw Model"));
+      const row = findExistingBarLengthRow(brand, model);
+      if (row) {
+        setVal(fieldInputId("bar-lengths", "Gauge"), toStr(row["Gauge"]));
+        setVal(fieldInputId("bar-lengths", "Pitch"), toStr(row["Pitch"]));
+      }
+      updateBarLengthNameDerived();
+    }
+
+    function findExistingBarLengthRow(brand, model) {
+      const m = toStr(model).trim();
+      if (!m || m === "__add_new__") return null;
+      const rows = state.entities["bar-lengths"] || [];
+      if (brand) {
+        const exact = rows.find(
+          (r) => eqNormStr(r["Chainsaw Brand"], brand) && eqNormStr(r["Chainsaw Model"], m)
+        );
+        if (exact) return exact;
+      }
+      return rows.find((r) => eqNormStr(r["Chainsaw Model"], m)) || null;
+    }
+
+    function eqNormStr(a, b) {
+      return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+    }
+
+    function toStr(value) {
+      return value == null ? "" : String(value);
+    }
+
+    function buildTypeLinks(chainType, links) {
+      const type = String(chainType || "").trim();
+      const num = String(links || "").trim();
+      if (!type && !num) return "";
+      if (!type) return num;
+      if (!num) return type;
+      return `${type}-${num}`;
+    }
+
+    function updateKmcTypeLinksDerived() {
+      const chainType = val(fieldInputId("kmc-chains", "Chain Type"));
+      const links = val(fieldInputId("kmc-chains", "Links"));
+      setVal(fieldInputId("kmc-chains", "Type+Links"), buildTypeLinks(chainType, links));
+    }
+
+    function buildBarLengthName(model, barLength) {
+      const m = String(model || "").trim();
+      const b = String(barLength || "").trim();
+      if (!m && !b) return "";
+      if (!m) return b;
+      if (!b) return m;
+      return `${m} - ${b}`;
+    }
+
+    function updateBarLengthNameDerived() {
+      const model = val(fieldInputId("bar-lengths", "Chainsaw Model"));
+      const barLength = val(fieldInputId("bar-lengths", "Bar Length"));
+      setVal(fieldInputId("bar-lengths", "Name"), buildBarLengthName(model, barLength));
+    }
+
+    function getBarLengthFilters() {
+      return {
+        brand: normalizeFilterValue(val(fieldInputId("bar-lengths", "Chainsaw Brand"))),
+        model: normalizeFilterValue(val(fieldInputId("bar-lengths", "Chainsaw Model"))),
+        barLength: normalizeFilterValue(val(fieldInputId("bar-lengths", "Bar Length"))),
+      };
+    }
+
+    function getChainTypeFilters() {
+      return {
+        gauge: normalizeFilterValue(val(fieldInputId("chain-types", "Gauge"))),
+        pitch: normalizeFilterValue(val(fieldInputId("chain-types", "Pitch"))),
+      };
+    }
+
+    function findDuplicateChainTypeRow(row, existingRows, currentRowNumber) {
+      const fields = [
+        "Gauge",
+        "Pitch",
+        "Chisel Style",
+        "ANSI Low Kickback",
+        "Profile Class",
+        "Kerf Type",
+        "Sequence Type",
+      ];
+      const sig = fields.map((f) => normalizeFilterValue(toStr(row[f]))).join("|");
+      if (!sig || sig === "||||||") return null;
+      return (existingRows || []).find((r) => {
+        if (currentRowNumber && Number(r.__row) === Number(currentRowNumber)) return false;
+        const otherSig = fields.map((f) => normalizeFilterValue(toStr(r[f]))).join("|");
+        return sig === otherSig;
+      }) || null;
+    }
+
+    function normalizeFilterValue(value) {
+      const v = String(value || "").trim();
+      if (!v || v === "__add_new__") return "";
+      return v;
+    }
+
+    const CHAIN_TYPE_GAUGE_CODE_MAP = {
+      '.043"': "A",
+      '.050"': "B",
+      '.058"': "C",
+      '.063"': "D",
+    };
+    const CHAIN_TYPE_PITCH_CODE_MAP = {
+      '1/4"': "A",
+      '3/8"': "B",
+      '3/8" LP': "C",
+      '.325"': "D",
+    };
+
+    function generateChainTypeCode(row, existingRows, currentRowNumber) {
+      const gauge = toStr(row["Gauge"]).trim();
+      const pitch = toStr(row["Pitch"]).trim();
+      if (!gauge || !pitch) return "";
+
+      const gaugeLetter = CHAIN_TYPE_GAUGE_CODE_MAP[gauge];
+      const pitchLetter = CHAIN_TYPE_PITCH_CODE_MAP[pitch];
+      if (!gaugeLetter || !pitchLetter) return "";
+      const prefix = `${gaugeLetter}${pitchLetter}`;
+
+      const samePairRows = (existingRows || []).filter((r) => {
+        if (currentRowNumber && Number(r.__row) === Number(currentRowNumber)) return false;
+        return eqNormStr(r["Gauge"], gauge) && eqNormStr(r["Pitch"], pitch);
+      });
+
+      const nums = samePairRows
+        .map((r) => {
+          const code = toStr(r["Chain Type"]).trim().toUpperCase();
+          if (!code.startsWith(prefix)) return 0;
+          const m = code.slice(prefix.length).match(/^\d+$/);
+          return m ? Number(m[0]) : 0;
+        })
+        .filter((n) => Number.isFinite(n) && n > 0);
+
+      const next = (nums.length ? Math.max(...nums) : 0) + 1;
+      return `${prefix}${String(next).padStart(2, "0")}`;
+    }
+
+    function val(id) {
+      const el = document.getElementById(id);
+      return el ? el.value.trim() : "";
+    }
+
+    function setVal(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.value = value;
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value || "-";
+    }
+
+    function escapeHtml(v) {
+      return String(v == null ? "" : v)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function showErrorModal(message) {
+      ui.errorModalMessage.textContent = message;
+      ui.errorModalBackdrop.style.display = "flex";
+      ui.errorModalBackdrop.setAttribute("aria-hidden", "false");
+      ui.errorModalAcknowledge.focus();
+    }
+
+    function hideErrorModal() {
+      ui.errorModalBackdrop.style.display = "none";
+      ui.errorModalBackdrop.setAttribute("aria-hidden", "true");
+    }
+  </script>
+</body>
+</html>
