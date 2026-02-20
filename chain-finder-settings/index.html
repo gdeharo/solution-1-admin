@@ -110,7 +110,7 @@
     <h1>KMC Chainsaw Chain Finder Control Panel</h1>
     <div class="toolbar">
       <button id="btnMainAdmin" class="secondary hidden">Main Admin Panel</button>
-      <button id="btnEmbedCode" class="secondary">Embed Code</button>
+      <button id="btnEmbedCode" type="button" class="secondary" onclick="openEmbedCodeModal()">Embed Code</button>
       <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
     </div>
     <p id="accessInfo" class="muted"></p>
@@ -486,6 +486,7 @@
 
     function openEmbedModal() {
       if (!ui.embedModalBackdrop || !ui.embedCodeQuick || !ui.embedCodeSection) {
+        showErrorModal("Embed modal is unavailable in this page version. Refresh and try again.");
         setStatus("Embed modal is unavailable in this page version. Refresh and try again.", false);
         return;
       }
@@ -551,6 +552,11 @@
         setStatus("Embed code copied.", true);
       }
     }
+
+    function openEmbedCodeModal() {
+      openEmbedModal();
+    }
+    window.openEmbedCodeModal = openEmbedCodeModal;
 
     async function ensureHubSessionIfRequired() {
       if (!state.access.fromHub) {
