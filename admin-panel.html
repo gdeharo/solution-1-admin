@@ -73,6 +73,9 @@
 <body>
   <div class="wrap">
     <h1>Product Selector Admin</h1>
+    <div class="toolbar">
+      <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
+    </div>
     <p id="accessInfo" class="muted"></p>
 
     <section id="view-home" class="view card">
@@ -220,6 +223,7 @@
 
     const ui = {
       accessInfo: document.getElementById("accessInfo"),
+      btnPanelLogout: document.getElementById("btnPanelLogout"),
       connectionDetails: document.getElementById("connectionDetails"),
       apiBase: document.getElementById("apiBase"),
       token: document.getElementById("token"),
@@ -239,6 +243,7 @@
     document.getElementById("saveConn").addEventListener("click", saveConnection);
     document.getElementById("refreshAll").addEventListener("click", refreshAll);
     document.getElementById("saveSettings").addEventListener("click", saveSettings);
+    ui.btnPanelLogout.addEventListener("click", logoutFromPanel);
     ui.errorModalAcknowledge.addEventListener("click", hideErrorModal);
     ui.errorModalBackdrop.addEventListener("click", (e) => {
       if (e.target === ui.errorModalBackdrop) hideErrorModal();
@@ -252,14 +257,19 @@
       btn.addEventListener("click", () => navigate(btn.getAttribute("data-nav")));
     });
 
-    restoreConnection();
-    restorePanelAccess();
-    applyAccessUI();
-    applyRoleAccessToSettings();
-    for (const slug of Object.keys(ENTITIES)) {
-      applyRoleAccessToEntity(slug);
+    init();
+
+    async function init() {
+      restoreConnection();
+      restorePanelAccess();
+      const ok = await ensureHubSessionIfRequired();
+      applyAccessUI();
+      applyRoleAccessToSettings();
+      for (const slug of Object.keys(ENTITIES)) {
+        applyRoleAccessToEntity(slug);
+      }
+      if (ok) await navigate("home");
     }
-    navigate("home");
 
     function restorePanelAccess() {
       try {
@@ -294,6 +304,7 @@
 
     function applyAccessUI() {
       if (state.access.fromHub) {
+        ui.btnPanelLogout.classList.remove("hidden");
         ui.connectionDetails.classList.add("hidden");
         ui.accessInfo.textContent = `Access role: ${state.access.panelRole || "none"} (from Admin Hub)`;
         if (!hasPanelReadAccess()) {
@@ -301,8 +312,66 @@
           setStatus("No panel access. Contact your manager.", false);
         }
       } else {
+        ui.btnPanelLogout.classList.add("hidden");
         ui.accessInfo.textContent = "Access role: full admin (standalone mode)";
       }
+    }
+
+    async function ensureHubSessionIfRequired() {
+      if (!state.access.fromHub) {
+        if (requiresHubAuth()) {
+          lockPanelAndRedirect("Please sign in from Admin Hub.");
+          return false;
+        }
+        return true;
+      }
+      const token = localStorage.getItem("admin_hub_token_v1") || "";
+      if (!token) {
+        lockPanelAndRedirect("Session expired. Please sign in again.");
+        return false;
+      }
+      try {
+        const res = await fetch(ui.apiBase.value.trim() + "/hub/me", {
+          method: "GET",
+          headers: { "x-hub-session": token },
+        });
+        if (!res.ok) {
+          lockPanelAndRedirect("Session expired. Please sign in again.");
+          return false;
+        }
+        return true;
+      } catch {
+        lockPanelAndRedirect("Unable to verify session. Please sign in again.");
+        return false;
+      }
+    }
+
+    function lockPanelAndRedirect(message) {
+      state.access.panelRole = "none";
+      setStatus(message, false);
+      Object.values(ui.views).forEach((v) => v.classList.add("hidden"));
+      localStorage.removeItem(HUB_PANEL_SESSION_KEY);
+      setTimeout(() => { window.location.href = "/"; }, 800);
+    }
+
+    function requiresHubAuth() {
+      return window.location.protocol !== "file:";
+    }
+
+    async function logoutFromPanel() {
+      const token = localStorage.getItem("admin_hub_token_v1") || "";
+      try {
+        if (token) {
+          await fetch(ui.apiBase.value.trim() + "/hub/auth/logout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-hub-session": token },
+            body: "{}",
+          });
+        }
+      } catch {}
+      localStorage.removeItem("admin_hub_token_v1");
+      localStorage.removeItem(HUB_PANEL_SESSION_KEY);
+      window.location.href = "/";
     }
 
     function assertCanWrite(actionLabel) {
@@ -331,10 +400,14 @@
 
     async function api(path, method = "GET", body) {
       const headers = { "Content-Type": "application/json" };
-      const token = ui.token.value.trim();
-      if (token) headers["x-admin-token"] = token;
       const hubSession = localStorage.getItem("admin_hub_token_v1") || "";
-      if (hubSession) headers["x-hub-session"] = hubSession;
+      if (state.access.fromHub) {
+        if (hubSession) headers["x-hub-session"] = hubSession;
+      } else {
+        const token = ui.token.value.trim();
+        if (token) headers["x-admin-token"] = token;
+        if (hubSession) headers["x-hub-session"] = hubSession;
+      }
 
       const res = await fetch(ui.apiBase.value.trim() + path, {
         method,
