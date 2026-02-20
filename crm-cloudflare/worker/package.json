@@ -1,0 +1,15 @@
+{
+  "name": "crm-cloudflare-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply CRM_DB --local"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260208.0",
+    "typescript": "^5.8.2",
+    "wrangler": "^4.9.0"
+  }
+}

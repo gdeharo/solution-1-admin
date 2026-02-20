@@ -1,0 +1,15 @@
+name = "crm-api"
+main = "src/index.ts"
+compatibility_date = "2026-02-20"
+
+[[d1_databases]]
+binding = "CRM_DB"
+database_name = "crm-db"
+database_id = "e1de61af-be16-403e-a750-5ecca23a081a"
+
+[[r2_buckets]]
+binding = "CRM_FILES"
+bucket_name = "crm-files"
+
+[vars]
+SESSION_TTL_HOURS = "24"
