@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-02-19-hub-admin-authz-v1";
+const WORKER_BUILD = "2026-02-20-kmc-chain-form-v2";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -56,15 +56,16 @@ const SHEET_ENTITY_CONFIG = {
   "kmc-chains": {
     tab: TAB_KMC_CHAINS,
     headers: [
-      "Chain Type",
       "Gauge",
       "Pitch",
+      "Chisel Style",
+      "ANSI Low Kickback",
+      "Profile Class",
+      "Kerf Type",
+      "Sequence Type",
       "Links",
-      "Type+Links",
       "Part Reference",
       "UPC",
-      "Retail Price",
-      "MSRP",
       "URL",
     ],
   },
@@ -104,6 +105,7 @@ export default {
           form_title: settings.form_title || "KMC Chainsaw Chain Finder",
           accent_color: settings.accent_color || "rgb(20, 111, 248)",
           button_label: settings.button_label || "Find Chains",
+          card_tint_percent: settings.card_tint_percent || "20",
           no_result_message:
             settings.no_result_message ||
             "we don't offer this chainsaw chain at the moment, please check again in the future",
@@ -202,6 +204,11 @@ export default {
             const chainTypeInfo = chainTypeMap.get(norm(kmc["Chain Type"])) || {};
             const pitch = toStr(kmc.Pitch || chainTypeInfo.pitch);
             const gauge = toStr(kmc.Gauge || chainTypeInfo.gauge);
+            const chiselStyle = toStr(kmc["Chisel Style"] || chainTypeInfo.chisel_style);
+            const ansiLowKickback = toStr(kmc["ANSI Low Kickback"] || chainTypeInfo.ansi_low_kickback);
+            const profileClass = toStr(kmc["Profile Class"] || chainTypeInfo.profile_class);
+            const kerfType = toStr(kmc["Kerf Type"] || chainTypeInfo.kerf_type);
+            const sequenceType = toStr(kmc["Sequence Type"] || chainTypeInfo.sequence_type);
             const chainModel =
               pitch && gauge
                 ? `Pitch ${pitch} / Gauge ${gauge}`
@@ -217,23 +224,20 @@ export default {
               chain_type: toStr(kmc["Chain Type"]),
               pitch,
               gauge,
-              chisel_style: toStr(chainTypeInfo.chisel_style),
-              ansi_low_kickback: toStr(chainTypeInfo.ansi_low_kickback),
-              profile_class: toStr(chainTypeInfo.profile_class),
-              kerf_type: toStr(chainTypeInfo.kerf_type),
-              sequence_type: toStr(chainTypeInfo.sequence_type),
+              chisel_style: chiselStyle,
+              ansi_low_kickback: ansiLowKickback,
+              profile_class: profileClass,
+              kerf_type: kerfType,
+              sequence_type: sequenceType,
               links: toStr(kmc["Links"]),
-              type_links: toStr(kmc["Type+Links"]),
               part_reference: toStr(kmc["Part Reference"]),
               upc: toStr(kmc["UPC"]),
-              retail_price: toStr(kmc["Retail Price"]),
-              msrp: toStr(kmc["MSRP"]),
               url: toStr(kmc["URL"]),
             });
           }
         }
 
-        const uniqueResults = dedupeByKey(results, (r) => `${r.part_reference}|${r.chain_type}|${r.links}|${r.url}`);
+        const uniqueResults = dedupeByKey(results, (r) => `${r.part_reference}|${r.pitch}|${r.gauge}|${r.links}|${r.url}`);
 
         const payload = {
           query: { brand, model, bar_length: barLength },
@@ -500,7 +504,8 @@ export default {
           const cfg = SHEET_ENTITY_CONFIG[entity];
           if (!cfg) return json({ error: "Unknown sheet entity" }, 404);
 
-          const rows = await loadEntityRowsWithHeaderRepair(env, entity);
+          // Read-only admin view should not mutate sheet headers.
+          const rows = await loadEntityRowsWithoutHeaderRepair(env, entity);
           return json({ entity, tab: cfg.tab, headers: cfg.headers, rows });
         }
 
@@ -958,6 +963,7 @@ async function upsertSettings(env, input) {
     "form_title",
     "accent_color",
     "button_label",
+    "card_tint_percent",
     "no_result_message",
     "chain_brand_fallback",
   ]);
@@ -1389,6 +1395,12 @@ async function loadEntityRowsWithHeaderRepair(env, entity) {
   return getSheetRows(env, cfg.tab, { includeRowNumber: true });
 }
 
+async function loadEntityRowsWithoutHeaderRepair(env, entity) {
+  const cfg = SHEET_ENTITY_CONFIG[entity];
+  if (!cfg) throw new Error("Unknown sheet entity");
+  return getSheetRows(env, cfg.tab, { includeRowNumber: true });
+}
+
 async function maybeRepairHeadersForCatalog(env) {
   // Keep catalog reads resilient even if headers were changed manually in Sheets.
   await validateManagedSheetHeaders(env);
@@ -1777,6 +1789,23 @@ function chainTypeSignature(row) {
 
 async function enforceKmcChainUniqueness(env, row, rowNumber) {
   const rows = await getSheetRows(env, TAB_KMC_CHAINS, { includeRowNumber: true });
+  const requiredFields = [
+    "Gauge",
+    "Pitch",
+    "Chisel Style",
+    "ANSI Low Kickback",
+    "Profile Class",
+    "Kerf Type",
+    "Sequence Type",
+    "Links",
+    "Part Reference",
+    "UPC",
+    "URL",
+  ];
+  const missing = requiredFields.filter((f) => !toStr(row && row[f]).trim());
+  if (missing.length) {
+    throw new Error(`Missing required fields: ${missing.join(", ")}`);
+  }
   const incomingPartRef = norm(row && row["Part Reference"]);
   const incomingUpc = normalizeUpc(row && row.UPC);
   const incomingSig = kmcChainRowSignature(row);
@@ -1805,15 +1834,16 @@ async function enforceKmcChainUniqueness(env, row, rowNumber) {
 
 function kmcChainRowSignature(row) {
   const fields = [
-    "Chain Type",
     "Gauge",
     "Pitch",
+    "Chisel Style",
+    "ANSI Low Kickback",
+    "Profile Class",
+    "Kerf Type",
+    "Sequence Type",
     "Links",
-    "Type+Links",
     "Part Reference",
     "UPC",
-    "Retail Price",
-    "MSRP",
     "URL",
   ];
   return fields.map((f) => norm(row && row[f])).join("|");

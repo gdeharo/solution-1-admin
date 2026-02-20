@@ -206,7 +206,19 @@
       },
       "kmc-chains": {
         title: "KMC Chains",
-        fields: ["Chain Type", "Gauge", "Pitch", "Links", "Type+Links", "Part Reference", "UPC", "Retail Price", "MSRP", "URL"],
+        fields: [
+          "Gauge",
+          "Pitch",
+          "Chisel Style",
+          "ANSI Low Kickback",
+          "Profile Class",
+          "Kerf Type",
+          "Sequence Type",
+          "Links",
+          "Part Reference",
+          "UPC",
+          "URL",
+        ],
       },
       "bar-lengths": {
         title: "Bar Lengths",
@@ -228,13 +240,13 @@
     // Hide these in forms only; values are still preserved in payloads.
     const FORM_HIDDEN_FIELDS = {
       "chain-types": new Set(["Chain Type"]),
-      "kmc-chains": new Set(["Chain Type", "Type+Links"]),
+      "kmc-chains": new Set(),
       "bar-lengths": new Set(["Chain Type Code"]),
     };
 
     // Hide these in table display only.
     const TABLE_HIDDEN_FIELDS = {
-      "kmc-chains": new Set(["Type+Links"]),
+      "kmc-chains": new Set(),
     };
 
     const state = {
@@ -518,6 +530,10 @@
           await loadLookups();
           state.loaded.lookups = true;
         }
+        if (viewName === "kmc-chains" && !state.loaded.lookups) {
+          await loadLookups();
+          state.loaded.lookups = true;
+        }
         if (viewName === "kmc-chains" && !state.loaded["chain-types"]) {
           await loadEntity("chain-types");
           state.loaded["chain-types"] = true;
@@ -528,7 +544,7 @@
         }
 
         if (viewName === "kmc-chains") {
-          updateKmcTypeLinksDerived();
+          renderEntityTable("kmc-chains");
         }
         if (viewName === "chain-types") {
           populateChainTypeLookupOptions();
@@ -588,7 +604,11 @@
 
       if (slug === "kmc-chains") {
         const links = document.getElementById(fieldInputId("kmc-chains", "Links"));
-        if (links) links.addEventListener("input", updateKmcTypeLinksDerived);
+        if (links) links.addEventListener("input", () => renderEntityTable("kmc-chains"));
+        for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
+          const sel = document.getElementById(fieldInputId("kmc-chains", field));
+          if (sel) sel.addEventListener("change", () => handleKmcLookupChange(field, sel));
+        }
       }
 
       if (slug === "chain-types") {
@@ -778,7 +798,7 @@
       }
 
       if (slug === "kmc-chains") {
-        updateKmcTypeLinksDerived();
+        renderEntityTable("kmc-chains");
       }
     }
 
@@ -815,6 +835,16 @@
           return true;
         });
       }
+      if (slug === "kmc-chains") {
+        const filters = getKmcChainFilters();
+        rows = rows.filter((r) => {
+          for (const [field, value] of Object.entries(filters)) {
+            if (!value) continue;
+            if (!eqNormStr(r[field], value)) return false;
+          }
+          return true;
+        });
+      }
       const hiddenCols = TABLE_HIDDEN_FIELDS[slug] || new Set();
       const visibleFields = cfg.fields.filter((f) => !hiddenCols.has(f));
 
@@ -843,7 +873,12 @@
       state.highlightedRowBySlug[slug] = 0;
 
       if (slug === "kmc-chains") {
-        row["Type+Links"] = buildTypeLinks(row["Chain Type"], row["Links"]);
+        const missing = findMissingKmcRequiredFields(row);
+        if (missing.length) {
+          showErrorModal(`Please complete required fields: ${missing.join(", ")}`);
+          setStatus("Missing required KMC chain fields.", false);
+          return;
+        }
       }
       if (slug === "chain-types") {
         const dup = findDuplicateChainTypeRow(row, state.entities["chain-types"] || [], rowNumber);
@@ -915,8 +950,12 @@
           showErrorModal("Part reference allready exists, it can not be saved");
         } else if (slug === "kmc-chains" && errorText.includes("duplicate upc")) {
           showErrorModal("UPC code already exists, it can not be saved");
+        } else if (slug === "kmc-chains" && errorText.includes("duplicate kmc chain row")) {
+          showErrorModal("This exact chain row already exists, it can not be saved");
         } else if (slug === "kmc-chains" && errorText.includes("invalid upc")) {
           showErrorModal("UPC code is invalid. Please enter a valid 12-digit UPC-A.");
+        } else if (slug === "kmc-chains" && errorText.includes("missing required fields")) {
+          showErrorModal(err.message);
         }
         setStatus(err.message, false);
       }
@@ -929,7 +968,7 @@
       }
       document.getElementById(`edit-row-${slug}`).value = "";
 
-      if (slug === "kmc-chains") updateKmcTypeLinksDerived();
+      if (slug === "kmc-chains") renderEntityTable("kmc-chains");
       if (slug === "chain-types") {
         state.highlightedRowBySlug["chain-types"] = 0;
       }
@@ -953,7 +992,7 @@
       }
       document.getElementById(`edit-row-${slug}`).value = String(rowNumber);
 
-      if (slug === "kmc-chains") updateKmcTypeLinksDerived();
+      if (slug === "kmc-chains") renderEntityTable("kmc-chains");
       if (slug === "bar-lengths") {
         populateBarLengthLookupOptions();
         setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Brand")), row["Chainsaw Brand"] || "");
@@ -1001,16 +1040,30 @@
     function populateChainTypeLookupOptions() {
       const targets = ["chain-types", "kmc-chains", "bar-lengths"];
       for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
+        const fromLookups = getLookupItems("chain-types", field).map((i) => ({ ...i }));
+        const fromChainTypeRows = Array.from(
+          new Set((state.entities["chain-types"] || []).map((r) => String(r[field] || "").trim()).filter(Boolean))
+        ).map((v) => ({ value: v, sort_order: 0, active: 1 }));
+        const mergedByValue = new Map();
+        for (const item of [...fromLookups, ...fromChainTypeRows]) {
+          if (!item || !item.value) continue;
+          if (!mergedByValue.has(item.value)) mergedByValue.set(item.value, item);
+        }
+        const baseItems = Array.from(mergedByValue.values()).sort((a, b) => {
+          if (a.sort_order !== b.sort_order) return Number(a.sort_order || 0) - Number(b.sort_order || 0);
+          return String(a.value || "").localeCompare(String(b.value || ""), undefined, { sensitivity: "base" });
+        });
+
         for (const slug of targets) {
           const select = document.getElementById(fieldInputId(slug, field));
           if (!select) continue;
           const prev = select.value;
-          const items = [...getLookupItems("chain-types", field)];
+          const items = [...baseItems];
           if (prev && prev !== "__add_new__" && !items.some((i) => i.value === prev)) {
             items.unshift({ value: prev, sort_order: -1, active: 1 });
           }
 
-          const addNew = slug === "chain-types";
+          const addNew = slug === "chain-types" || slug === "kmc-chains";
           select.innerHTML =
             `<option value="">Select ${escapeHtml(field)}</option>` +
             items.map((i) => `<option value="${escapeHtml(i.value)}">${escapeHtml(i.value)}</option>`).join("") +
@@ -1055,6 +1108,46 @@
         setStatus(err.message, false);
         select.value = "";
       }
+    }
+
+    async function handleKmcLookupChange(field, select) {
+      if (!select || select.value !== "__add_new__") {
+        renderEntityTable("kmc-chains");
+        return;
+      }
+      if (!assertCanWrite("add lookup values")) {
+        select.value = "";
+        renderEntityTable("kmc-chains");
+        return;
+      }
+      const newValue = prompt(`Add new value for ${field}:`, "");
+      if (!newValue || !newValue.trim()) {
+        select.value = "";
+        renderEntityTable("kmc-chains");
+        return;
+      }
+
+      const cleanValue = newValue.trim();
+      const current = getLookupItems("chain-types", field);
+      const maxSort = current.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
+
+      try {
+        await api("/admin/lookups", "POST", {
+          field,
+          group: "chain-types",
+          value: cleanValue,
+          active: 1,
+          sort_order: maxSort + 10,
+        });
+        await loadLookups();
+        const target = document.getElementById(fieldInputId("kmc-chains", field));
+        if (target) target.value = cleanValue;
+        setStatus(`Added new lookup value for ${field}.`, true);
+      } catch (err) {
+        setStatus(err.message, false);
+        select.value = "";
+      }
+      renderEntityTable("kmc-chains");
     }
 
     function populateBarLengthLookupOptions() {
@@ -1292,21 +1385,6 @@
       return value == null ? "" : String(value);
     }
 
-    function buildTypeLinks(chainType, links) {
-      const type = String(chainType || "").trim();
-      const num = String(links || "").trim();
-      if (!type && !num) return "";
-      if (!type) return num;
-      if (!num) return type;
-      return `${type}-${num}`;
-    }
-
-    function updateKmcTypeLinksDerived() {
-      const chainType = val(fieldInputId("kmc-chains", "Chain Type"));
-      const links = val(fieldInputId("kmc-chains", "Links"));
-      setVal(fieldInputId("kmc-chains", "Type+Links"), buildTypeLinks(chainType, links));
-    }
-
     function buildBarLengthName(model, barLength) {
       const m = String(model || "").trim();
       const b = String(barLength || "").trim();
@@ -1335,6 +1413,31 @@
         gauge: normalizeFilterValue(val(fieldInputId("chain-types", "Gauge"))),
         pitch: normalizeFilterValue(val(fieldInputId("chain-types", "Pitch"))),
       };
+    }
+
+    function getKmcChainFilters() {
+      const out = {};
+      for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
+        out[field] = normalizeFilterValue(val(fieldInputId("kmc-chains", field)));
+      }
+      return out;
+    }
+
+    function findMissingKmcRequiredFields(row) {
+      const required = [
+        "Gauge",
+        "Pitch",
+        "Chisel Style",
+        "ANSI Low Kickback",
+        "Profile Class",
+        "Kerf Type",
+        "Sequence Type",
+        "Links",
+        "Part Reference",
+        "UPC",
+        "URL",
+      ];
+      return required.filter((f) => !toStr(row && row[f]).trim());
     }
 
     function findDuplicateChainTypeRow(row, existingRows, currentRowNumber) {
