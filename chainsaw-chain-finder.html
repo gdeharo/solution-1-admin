@@ -27,11 +27,6 @@
       font-size: 22px;
       color: var(--accent-color, rgb(20, 111, 248));
     }
-    .sub {
-      margin: 0 0 16px;
-      color: #555;
-      font-size: 13px;
-    }
     .row { margin-bottom: 10px; }
     select, button {
       width: 100%;
@@ -60,7 +55,40 @@
       border: 1px solid var(--accent-color, rgb(20, 111, 248));
       border-radius: 8px;
       padding: 10px;
-      background: #f5f9ff;
+      background: color-mix(in srgb, var(--accent-color, rgb(20, 111, 248)) 50%, #ffffff 50%);
+      color: #0f2850;
+    }
+    .card-link {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      transition: box-shadow 0.12s ease, transform 0.12s ease;
+    }
+    .card-link:hover,
+    .card-link:focus-visible {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(20, 111, 248, 0.22);
+    }
+    .card-columns {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+    }
+    .card-col {
+      display: grid;
+      gap: 8px;
+    }
+    .card-row strong {
+      display: block;
+      font-size: 12px;
+      line-height: 1.2;
+      opacity: 0.9;
+    }
+    .card-row span {
+      display: block;
+      margin-top: 2px;
+      font-size: 14px;
+      line-height: 1.2;
     }
     .error { color: #b00020; }
     .hint {
@@ -73,7 +101,6 @@
 <body>
   <div class="page">
     <h1 id="formTitle">KMC Chainsaw Chain Finder</h1>
-    <p class="sub">Brand -> Model -> Bar Length -> Matching KMC chains</p>
 
     <div id="widget">
       <div class="row"><select id="brand"><option value="">Select Brand</option></select></div>
@@ -192,18 +219,39 @@
             results.innerHTML = `<div class='card'>${escapeHtml(config.no_result_message || defaults.no_result_message)}</div>`;
           } else {
             results.innerHTML = chains.map((c) => `
-              <div class="card">
-                <strong>Chain Brand:</strong> ${escapeHtml(c.chain_brand || "KMC")}<br/>
-                <strong>Chain Model:</strong> ${escapeHtml(c.chain_model || "N/A")}<br/>
-                <strong>Pitch:</strong> ${escapeHtml(c.pitch || "N/A")}<br/>
-                <strong>Gauge:</strong> ${escapeHtml(c.gauge || "N/A")}<br/>
-                <strong>Chisel Style:</strong> ${escapeHtml(c.chisel_style || "N/A")}<br/>
-                <strong>ANSI Low Kickback:</strong> ${escapeHtml(c.ansi_low_kickback || "N/A")}<br/>
-                <strong>Profile Class:</strong> ${escapeHtml(c.profile_class || "N/A")}<br/>
-                <strong>Kerf Type:</strong> ${escapeHtml(c.kerf_type || "N/A")}<br/>
-                <strong>Sequence Type:</strong> ${escapeHtml(c.sequence_type || "N/A")}<br/>
-                ${c.url ? `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener">URL link</a>` : "URL link not available"}
-              </div>
+              ${c.url ? `
+                <a class="card card-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">
+                  <div class="card-columns">
+                    <div class="card-col">
+                      <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(c.pitch || "N/A")}</span></div>
+                      <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(c.gauge || "N/A")}</span></div>
+                      <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(c.chisel_style || "N/A")}</span></div>
+                    </div>
+                    <div class="card-col">
+                      <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(c.ansi_low_kickback || "N/A")}</span></div>
+                      <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(c.profile_class || "N/A")}</span></div>
+                      <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(c.kerf_type || "N/A")}</span></div>
+                      <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(c.sequence_type || "N/A")}</span></div>
+                    </div>
+                  </div>
+                </a>
+              ` : `
+                <div class="card">
+                  <div class="card-columns">
+                    <div class="card-col">
+                      <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(c.pitch || "N/A")}</span></div>
+                      <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(c.gauge || "N/A")}</span></div>
+                      <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(c.chisel_style || "N/A")}</span></div>
+                    </div>
+                    <div class="card-col">
+                      <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(c.ansi_low_kickback || "N/A")}</span></div>
+                      <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(c.profile_class || "N/A")}</span></div>
+                      <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(c.kerf_type || "N/A")}</span></div>
+                      <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(c.sequence_type || "N/A")}</span></div>
+                    </div>
+                  </div>
+                </div>
+              `}
             `).join("");
           }
         } catch (err) {
