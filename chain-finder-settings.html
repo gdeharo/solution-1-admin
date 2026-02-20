@@ -673,10 +673,18 @@
       setStatus("Settings form cleared.", true);
     }
 
-    function restoreSettingsForm() {
+    async function restoreSettingsForm() {
       if (!assertCanWrite("restore settings form")) return;
-      fillSettingsForm(state.settingsCurrent);
-      setStatus("Settings restored to current values.", true);
+      try {
+        const data = await api("/catalog/config", "GET");
+        state.settingsCurrent = getEffectiveSettings(data || {});
+        fillSettingsForm(state.settingsCurrent);
+        renderSettingsCurrent(state.settingsCurrent);
+        setStatus("Settings restored to live values.", true);
+      } catch (_err) {
+        fillSettingsForm(state.settingsCurrent);
+        setStatus("Restored from loaded values (live fetch unavailable).", true);
+      }
     }
 
     function getEffectiveSettings(source) {
