@@ -176,7 +176,7 @@
       <div class="settings-actions">
         <button id="saveSettings">Save Settings</button>
         <button id="clearSettingsForm" class="secondary">Clear Form</button>
-        <button id="restoreSettingsForm" class="danger">Restore Current</button>
+        <button id="restoreSettingsForm" class="danger">Restore Values</button>
       </div>
     </section>
 
@@ -272,6 +272,14 @@
         no_result_message: "",
         chain_brand_fallback: "",
       },
+    };
+    const SETTINGS_DEFAULTS = {
+      form_title: "KMC Chainsaw Chain Finder",
+      accent_color: "rgb(20, 111, 248)",
+      button_label: "Find Chains",
+      card_tint_percent: "20",
+      no_result_message: "we don't offer this chainsaw chain at the moment, please check again in the future",
+      chain_brand_fallback: "KMC",
     };
 
     const ui = {
@@ -631,14 +639,7 @@
     async function loadSettings() {
       const data = await api("/admin/settings", "GET");
       const s = data.settings || {};
-      state.settingsCurrent = {
-        form_title: s.form_title || "",
-        accent_color: s.accent_color || "",
-        button_label: s.button_label || "",
-        card_tint_percent: s.card_tint_percent || "",
-        no_result_message: s.no_result_message || "",
-        chain_brand_fallback: s.chain_brand_fallback || "",
-      };
+      state.settingsCurrent = getEffectiveSettings(s);
       fillSettingsForm(state.settingsCurrent);
       renderSettingsCurrent(state.settingsCurrent);
       applyRoleAccessToSettings();
@@ -651,7 +652,7 @@
         await api("/admin/settings", "POST", {
           settings: payload,
         });
-        state.settingsCurrent = { ...payload };
+        state.settingsCurrent = getEffectiveSettings(payload);
         renderSettingsCurrent(state.settingsCurrent);
         setStatus("Settings saved.", true);
       } catch (err) {
@@ -675,7 +676,18 @@
     function restoreSettingsForm() {
       if (!assertCanWrite("restore settings form")) return;
       fillSettingsForm(state.settingsCurrent);
-      setStatus("Settings restored to current saved values.", true);
+      setStatus("Settings restored to current values.", true);
+    }
+
+    function getEffectiveSettings(source) {
+      return {
+        form_title: source.form_title || SETTINGS_DEFAULTS.form_title,
+        accent_color: source.accent_color || SETTINGS_DEFAULTS.accent_color,
+        button_label: source.button_label || SETTINGS_DEFAULTS.button_label,
+        card_tint_percent: source.card_tint_percent || SETTINGS_DEFAULTS.card_tint_percent,
+        no_result_message: source.no_result_message || SETTINGS_DEFAULTS.no_result_message,
+        chain_brand_fallback: source.chain_brand_fallback || SETTINGS_DEFAULTS.chain_brand_fallback,
+      };
     }
 
     function getSettingsDraft() {
