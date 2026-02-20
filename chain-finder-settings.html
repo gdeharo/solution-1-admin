@@ -110,7 +110,12 @@
     <h1>KMC Chainsaw Chain Finder Control Panel</h1>
     <div class="toolbar">
       <button id="btnMainAdmin" class="secondary hidden">Main Admin Panel</button>
-      <button id="btnEmbedCode" type="button" class="secondary" onclick="openEmbedCodeModal()">Embed Code</button>
+      <button
+        id="btnEmbedCode"
+        type="button"
+        class="secondary"
+        onclick="document.getElementById('embedModalBackdrop').style.display='flex';document.getElementById('embedModalBackdrop').setAttribute('aria-hidden','false');"
+      >Embed Code</button>
       <button id="btnPanelLogout" class="secondary hidden">Log Out</button>
     </div>
     <p id="accessInfo" class="muted"></p>
@@ -230,18 +235,65 @@
         <div class="embed-card">
           <h4>Quick Embed (Recommended)</h4>
           <p>Use in Shopify Custom Liquid or any HTML block.</p>
-          <textarea id="embedCodeQuick" class="embed-code" readonly></textarea>
-          <button id="copyEmbedQuick" class="secondary">Copy Quick Embed</button>
+          <textarea id="embedCodeQuick" class="embed-code" readonly>&lt;div style="max-width:1100px;margin:0 auto;padding:16px 0;"&gt;
+  &lt;iframe
+    src="https://solution-1-admin.pages.dev/chainsaw-chain-finder/"
+    title="KMC Chainsaw Chain Finder"
+    style="width:100%;min-height:1000px;border:0;border-radius:12px;background:#fff;"
+    loading="lazy"
+    referrerpolicy="no-referrer-when-downgrade"
+  &gt;&lt;/iframe&gt;
+&lt;/div&gt;</textarea>
+          <button
+            id="copyEmbedQuick"
+            class="secondary"
+            type="button"
+            onclick="(function(){const t=document.getElementById('embedCodeQuick');if(!t)return;t.focus();t.select();t.setSelectionRange(0,99999);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).catch(function(){});}try{document.execCommand('copy');}catch(e){}})();"
+          >Copy Quick Embed</button>
         </div>
         <div class="embed-card">
           <h4>Reusable Shopify Section</h4>
           <p>Create one section file and reuse from Theme Customizer.</p>
-          <textarea id="embedCodeSection" class="embed-code" readonly></textarea>
-          <button id="copyEmbedSection" class="secondary">Copy Section Code</button>
+          <textarea id="embedCodeSection" class="embed-code" readonly>{% schema %}
+{
+  "name": "Chainsaw Chain Finder",
+  "tag": "section",
+  "class": "section",
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "KMC Chainsaw Chain Finder" },
+    { "type": "url", "id": "finder_url", "label": "Finder URL", "default": "https://solution-1-admin.pages.dev/chainsaw-chain-finder/" },
+    { "type": "range", "id": "iframe_height", "label": "Iframe height (px)", "min": 600, "max": 1600, "step": 50, "default": 1000 }
+  ],
+  "presets": [{ "name": "Chainsaw Chain Finder" }]
+}
+{% endschema %}
+
+&lt;section class="chainsaw-finder-section"&gt;
+  {% if section.settings.title != blank %}&lt;h2&gt;{{ section.settings.title }}&lt;/h2&gt;{% endif %}
+  &lt;div style="max-width:1100px;margin:0 auto;"&gt;
+    &lt;iframe
+      src="{{ section.settings.finder_url | escape }}"
+      title="KMC Chainsaw Chain Finder"
+      loading="lazy"
+      referrerpolicy="no-referrer-when-downgrade"
+      style="width:100%;min-height:{{ section.settings.iframe_height }}px;border:0;border-radius:12px;background:#fff;"
+    &gt;&lt;/iframe&gt;
+  &lt;/div&gt;
+&lt;/section&gt;</textarea>
+          <button
+            id="copyEmbedSection"
+            class="secondary"
+            type="button"
+            onclick="(function(){const t=document.getElementById('embedCodeSection');if(!t)return;t.focus();t.select();t.setSelectionRange(0,99999);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t.value).catch(function(){});}try{document.execCommand('copy');}catch(e){}})();"
+          >Copy Section Code</button>
         </div>
       </div>
       <div class="actions">
-        <button id="embedModalClose">Close</button>
+        <button
+          id="embedModalClose"
+          type="button"
+          onclick="document.getElementById('embedModalBackdrop').style.display='none';document.getElementById('embedModalBackdrop').setAttribute('aria-hidden','true');"
+        >Close</button>
       </div>
     </div>
   </div>
