@@ -206,12 +206,6 @@ tr.clickable:hover {
   margin: 0;
 }
 
-.address-stack {
-  display: grid;
-  gap: 0.45rem;
-  margin-top: 0.45rem;
-}
-
 .company-top-row {
   display: grid;
   gap: 0.6rem;
@@ -234,15 +228,61 @@ tr.clickable:hover {
   margin-bottom: 0.45rem;
 }
 
-.company-box label {
-  margin-top: 0.45rem;
-}
-
 .company-box input,
 .company-box select,
 .company-box textarea {
-  min-height: 40px;
+  min-height: 42px;
   padding: 0.55rem 0.6rem;
+}
+
+.field-stack {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
+.documents-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr;
+  gap: 0.9rem;
+  align-items: start;
+  margin-top: 0.55rem;
+}
+
+.documents-controls {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: start;
+}
+
+.docs-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  direction: rtl;
+}
+
+.doc-card {
+  direction: ltr;
+  width: 170px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem;
+  background: #f8fbf8;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.doc-name {
+  font-size: 0.84rem;
+  word-break: break-word;
+}
+
+.small-btn {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.76rem;
+  justify-self: start;
 }
 
 .toast {
@@ -268,5 +308,12 @@ tr.clickable:hover {
   .company-top-row,
   .company-box-grid {
     grid-template-columns: 1fr;
+  }
+  .documents-layout {
+    grid-template-columns: 1fr;
+  }
+  .docs-grid {
+    justify-content: flex-start;
+    direction: ltr;
   }
 }

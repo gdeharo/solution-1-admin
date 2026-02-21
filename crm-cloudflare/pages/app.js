@@ -202,7 +202,7 @@ function renderCompanyDetail() {
     <div class="company-box-grid full">
       <div class="card company-box">
         <strong>Address</strong>
-        <div class="address-stack">
+        <div class="field-stack">
           <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
           <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
           <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
@@ -211,10 +211,12 @@ function renderCompanyDetail() {
       </div>
       <div class="card company-box">
         <strong>Details</strong>
-        <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
-        <label>Segment <select name="segment" ${readOnly}>${segmentOptions}</select></label>
-        <label>Type <select name="customerType" ${readOnly}>${typeOptions}</select></label>
-        <label>Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
+        <div class="field-stack">
+          <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
+          <label>Segment <select name="segment" ${readOnly}>${segmentOptions}</select></label>
+          <label>Type <select name="customerType" ${readOnly}>${typeOptions}</select></label>
+          <label>Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
+        </div>
       </div>
       <div class="card company-box">
         <strong>Comments</strong>
@@ -224,12 +226,14 @@ function renderCompanyDetail() {
     <div class="card full">
       <div class="row between wrap">
         <strong>Documents</strong>
-        <div class="row wrap">
+      </div>
+      <div class="documents-layout">
+        <div class="documents-controls">
           <input id="companyFileInput" type="file" ${readOnly} />
           <button type="button" id="uploadCompanyFileBtn" ${readOnly}>Add File</button>
         </div>
+        <div id="companyFilesList" class="docs-grid"></div>
       </div>
-      <ul id="companyFilesList" class="list"></ul>
     </div>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Company</button>
@@ -274,15 +278,15 @@ async function loadCompanyAttachments(companyId) {
     document.getElementById('companyFilesList').innerHTML = data.attachments
       .map(
         (file) =>
-          `<li class="row between wrap">
-            <span>
+          `<div class="doc-card">
+            <div class="doc-name">
               <a href="${API_BASE}/api/files/${encodeURIComponent(file.file_key)}?token=${encodeURIComponent(
                 state.token || ''
               )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a>
-              <span class="muted">${escapeHtml(file.mime_type || '')}</span>
-            </span>
-            ${canWrite() ? `<button type="button" class="danger" data-delete-company-file="${file.id}">Delete</button>` : ''}
-          </li>`
+            </div>
+            <div class="muted">${escapeHtml(file.mime_type || '')}</div>
+            ${canWrite() ? `<button type="button" class="danger small-btn" data-delete-company-file="${file.id}">Delete</button>` : ''}
+          </div>`
       )
       .join('');
 
@@ -301,7 +305,7 @@ async function loadCompanyAttachments(companyId) {
       });
     }
   } catch {
-    document.getElementById('companyFilesList').innerHTML = '<li class="muted">Could not load files.</li>';
+    document.getElementById('companyFilesList').innerHTML = '<div class="muted">Could not load files.</div>';
   }
 }
 
