@@ -484,6 +484,7 @@ addRoute(
       lastName: string;
       email?: string;
       phone?: string;
+      otherPhone?: string;
       photoKey?: string;
       notes?: string;
       repIds?: number[];
@@ -492,8 +493,8 @@ addRoute(
     if (!body?.companyId || !body.firstName || !body.lastName) return err('companyId, firstName, and lastName are required');
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO customers (company_id, first_name, last_name, email, phone, photo_key, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+      `INSERT INTO customers (company_id, first_name, last_name, email, phone, other_phone, photo_key, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
     )
       .bind(
         body.companyId,
@@ -501,6 +502,7 @@ addRoute(
         body.lastName,
         body.email ?? null,
         body.phone ?? null,
+        body.otherPhone ?? null,
         body.photoKey ?? null,
         body.notes ?? null
       )
@@ -1085,6 +1087,7 @@ addRoute(
       lastName: string;
       email?: string;
       phone?: string;
+      otherPhone?: string;
       notes?: string;
       photoKey?: string;
     }>(request);
@@ -1094,8 +1097,8 @@ addRoute(
 
     await env.CRM_DB.prepare(
       `UPDATE customers
-       SET company_id = ?1, first_name = ?2, last_name = ?3, email = ?4, phone = ?5, notes = ?6, photo_key = ?7, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?8 AND deleted_at IS NULL`
+       SET company_id = ?1, first_name = ?2, last_name = ?3, email = ?4, phone = ?5, other_phone = ?6, notes = ?7, photo_key = ?8, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?9 AND deleted_at IS NULL`
     )
       .bind(
         body.companyId,
@@ -1103,6 +1106,7 @@ addRoute(
         body.lastName,
         body.email ?? null,
         body.phone ?? null,
+        body.otherPhone ?? null,
         body.notes ?? null,
         body.photoKey ?? null,
         customerId

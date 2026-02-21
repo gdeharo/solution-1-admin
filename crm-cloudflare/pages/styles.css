@@ -302,6 +302,18 @@ tr.clickable:hover {
   justify-self: start;
 }
 
+.photo-preview {
+  margin-top: 0.5rem;
+}
+
+.contact-photo {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+}
+
 .toast {
   position: fixed;
   right: 1rem;

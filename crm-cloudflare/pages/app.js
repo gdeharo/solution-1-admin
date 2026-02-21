@@ -484,6 +484,7 @@ async function openContactCreate(companyId) {
     <label>Last name <input name="lastName" required /></label>
     <label>Email <input name="email" type="email" /></label>
     <label>Phone <input name="phone" /></label>
+    <label>Other <input name="otherPhone" /></label>
     <label class="full">Notes <textarea name="notes"></textarea></label>
     <div class="row wrap full">
       <button type="submit">Create Contact</button>
@@ -502,6 +503,7 @@ async function openContactCreate(companyId) {
           lastName: fd.get('lastName'),
           email: fd.get('email'),
           phone: fd.get('phone'),
+          otherPhone: fd.get('otherPhone'),
           notes: fd.get('notes')
         })
       });
@@ -526,7 +528,24 @@ async function openContactDetail(contactId) {
     <label>Last name <input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required /></label>
     <label>Email <input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} /></label>
     <label>Phone <input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} /></label>
+    <label>Other <input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} /></label>
     <label class="full">Notes <textarea name="notes" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea></label>
+    <div class="card full">
+      <strong>Photo</strong>
+      <div class="row wrap">
+        <input id="contactPhotoInput" type="file" accept="image/*" ${readOnly} />
+        <button id="uploadContactPhotoBtn" type="button" ${readOnly}>Upload Photo</button>
+      </div>
+      <div id="contactPhotoPreview" class="photo-preview"></div>
+    </div>
+    <div class="card full">
+      <strong>Files</strong>
+      <div class="row wrap">
+        <input id="contactFileInput" type="file" ${readOnly} />
+        <button id="uploadContactFileBtn" type="button" ${readOnly}>Add File</button>
+      </div>
+      <div id="contactFilesList" class="docs-grid"></div>
+    </div>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Contact</button>
       <button id="deleteContactBtn" type="button" class="danger" ${readOnly}>Delete Contact</button>
@@ -545,6 +564,7 @@ async function openContactDetail(contactId) {
           lastName: fd.get('lastName'),
           email: fd.get('email'),
           phone: fd.get('phone'),
+          otherPhone: fd.get('otherPhone'),
           notes: fd.get('notes')
         })
       });
@@ -566,6 +586,115 @@ async function openContactDetail(contactId) {
       showToast(error.message, true);
     }
   };
+
+  const renderContactAssets = async () => {
+    const photoContainer = document.getElementById('contactPhotoPreview');
+    if (customer.photo_key) {
+      photoContainer.innerHTML = `<img src="${API_BASE}/api/files/${encodeURIComponent(customer.photo_key)}?token=${encodeURIComponent(
+        state.token || ''
+      )}" alt="Contact photo" class="contact-photo" />`;
+    } else {
+      photoContainer.innerHTML = '<span class="muted">No photo uploaded.</span>';
+    }
+
+    try {
+      const files = await api(`/api/attachments?entityType=customer&entityId=${contactId}`);
+      document.getElementById('contactFilesList').innerHTML = files.attachments
+        .map(
+          (file) => `<div class="doc-card">
+            <div class="doc-name">
+              <a href="${API_BASE}/api/files/${encodeURIComponent(file.file_key)}?token=${encodeURIComponent(
+                state.token || ''
+              )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a>
+            </div>
+            <div class="muted">${escapeHtml(file.mime_type || '')}</div>
+            ${canWrite() ? `<button type="button" class="danger small-btn" data-delete-contact-file="${file.id}">Delete</button>` : ''}
+          </div>`
+        )
+        .join('');
+
+      if (canWrite()) {
+        document.querySelectorAll('[data-delete-contact-file]').forEach((btn) => {
+          btn.onclick = async () => {
+            if (!confirm('Delete this file?')) return;
+            try {
+              await api(`/api/attachments/${Number(btn.dataset.deleteContactFile)}`, { method: 'DELETE' });
+              await renderContactAssets();
+              showToast('File deleted');
+            } catch (error) {
+              showToast(error.message, true);
+            }
+          };
+        });
+      }
+    } catch {
+      document.getElementById('contactFilesList').innerHTML = '<div class="muted">Could not load files.</div>';
+    }
+  };
+
+  const uploadContactFileBtn = document.getElementById('uploadContactFileBtn');
+  if (uploadContactFileBtn) {
+    uploadContactFileBtn.onclick = async () => {
+      const input = document.getElementById('contactFileInput');
+      const file = input.files?.[0];
+      if (!file) {
+        showToast('Choose a file first', true);
+        return;
+      }
+      const formData = new FormData();
+      formData.set('entityType', 'customer');
+      formData.set('entityId', String(contactId));
+      formData.set('file', file);
+      try {
+        await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        input.value = '';
+        await renderContactAssets();
+        showToast('File uploaded');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
+
+  const uploadContactPhotoBtn = document.getElementById('uploadContactPhotoBtn');
+  if (uploadContactPhotoBtn) {
+    uploadContactPhotoBtn.onclick = async () => {
+      const input = document.getElementById('contactPhotoInput');
+      const file = input.files?.[0];
+      if (!file) {
+        showToast('Choose a photo first', true);
+        return;
+      }
+      const formData = new FormData();
+      formData.set('entityType', 'customer');
+      formData.set('entityId', String(contactId));
+      formData.set('file', file);
+      try {
+        const uploaded = await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        await api(`/api/customers/${contactId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            companyId: customer.company_id,
+            firstName: customer.first_name,
+            lastName: customer.last_name,
+            email: customer.email || '',
+            phone: customer.phone || '',
+            otherPhone: customer.other_phone || '',
+            notes: customer.notes || '',
+            photoKey: uploaded.key
+          })
+        });
+        customer.photo_key = uploaded.key;
+        input.value = '';
+        await renderContactAssets();
+        showToast('Photo updated');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
+
+  await renderContactAssets();
 
   setView('contactDetailView', `Contact • ${customer.first_name} ${customer.last_name}`);
 }
