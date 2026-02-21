@@ -212,6 +212,23 @@ tr.clickable:hover {
   margin-top: 0.45rem;
 }
 
+.company-top-row {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 2fr 1fr;
+}
+
+.company-box-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: start;
+}
+
+.company-box {
+  min-height: 100%;
+}
+
 .toast {
   position: fixed;
   right: 1rem;
@@ -231,5 +248,9 @@ tr.clickable:hover {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.6rem;
+  }
+  .company-top-row,
+  .company-box-grid {
+    grid-template-columns: 1fr;
   }
 }

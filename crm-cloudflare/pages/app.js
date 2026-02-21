@@ -195,22 +195,42 @@ function renderCompanyDetail() {
     .join('');
 
   document.getElementById('companyEditForm').innerHTML = `
-    <label>Name <input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required /></label>
-    <label>Main phone <input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} /></label>
-    <div class="card full">
-      <strong>Address</strong>
-      <div class="address-stack">
-        <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
-        <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
-        <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
-        <label>Zip <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+    <div class="company-top-row full">
+      <label>Name <input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required /></label>
+      <label>Main phone <input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} /></label>
+    </div>
+    <div class="company-box-grid full">
+      <div class="card company-box">
+        <strong>Address</strong>
+        <div class="address-stack">
+          <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
+          <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
+          <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
+          <label>Zip <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+        </div>
+      </div>
+      <div class="card company-box">
+        <strong>Details</strong>
+        <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
+        <label>Segment <select name="segment" ${readOnly}>${segmentOptions}</select></label>
+        <label>Type <select name="customerType" ${readOnly}>${typeOptions}</select></label>
+        <label>Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
+      </div>
+      <div class="card company-box">
+        <strong>Comments</strong>
+        <label>Comments <textarea name="notes" rows="10" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
       </div>
     </div>
-    <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
-    <label>Segment <select name="segment" ${readOnly}>${segmentOptions}</select></label>
-    <label>Type <select name="customerType" ${readOnly}>${typeOptions}</select></label>
-    <label class="full">Notes <textarea name="notes" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
-    <label class="full">Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
+    <div class="card full">
+      <div class="row between wrap">
+        <strong>Documents</strong>
+        <div class="row wrap">
+          <input id="companyFileInput" type="file" ${readOnly} />
+          <button type="button" id="uploadCompanyFileBtn" ${readOnly}>Add File</button>
+        </div>
+      </div>
+      <ul id="companyFilesList" class="list"></ul>
+    </div>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Company</button>
       <button type="button" id="deleteCompanyBtn" class="danger" ${readOnly}>Delete Company</button>
@@ -245,6 +265,25 @@ function renderCompanyDetail() {
   document.getElementById('newInteractionBtn').disabled = !canWrite();
 
   bindCompanyDetailEvents();
+  loadCompanyAttachments(c.id);
+}
+
+async function loadCompanyAttachments(companyId) {
+  try {
+    const data = await api(`/api/attachments?entityType=company&entityId=${companyId}`);
+    document.getElementById('companyFilesList').innerHTML = data.attachments
+      .map(
+        (file) =>
+          `<li><a href="${API_BASE}/api/files/${encodeURIComponent(file.file_key)}?token=${encodeURIComponent(
+            state.token || ''
+          )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a> <span class="muted">${escapeHtml(
+            file.mime_type || ''
+          )}</span></li>`
+      )
+      .join('');
+  } catch {
+    document.getElementById('companyFilesList').innerHTML = '<li class="muted">Could not load files.</li>';
+  }
 }
 
 function bindCompanyDetailEvents() {
@@ -287,6 +326,31 @@ function bindCompanyDetailEvents() {
       showToast(error.message, true);
     }
   };
+
+  const uploadBtn = document.getElementById('uploadCompanyFileBtn');
+  if (uploadBtn) {
+    uploadBtn.onclick = async () => {
+      const fileInput = document.getElementById('companyFileInput');
+      const file = fileInput.files?.[0];
+      if (!file) {
+        showToast('Choose a file first', true);
+        return;
+      }
+      const formData = new FormData();
+      formData.set('entityType', 'company');
+      formData.set('entityId', String(state.currentCompany.id));
+      formData.set('file', file);
+
+      try {
+        await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        fileInput.value = '';
+        await loadCompanyAttachments(state.currentCompany.id);
+        showToast('File uploaded');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
 
   document.getElementById('newContactBtn').onclick = () => openContactCreate(state.currentCompany.id);
   document.getElementById('newInteractionBtn').onclick = () => openInteractionCreate(state.currentCompany.id);
