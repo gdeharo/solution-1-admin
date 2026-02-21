@@ -85,12 +85,12 @@
       </section>
 
       <section id="companyDetailView" class="hidden">
-        <details open class="panel">
+        <details id="companyMainSection" class="panel">
           <summary>Main Company Information</summary>
           <form id="companyEditForm" class="form-grid"></form>
         </details>
 
-        <details open class="panel">
+        <details id="companyContactsSection" class="panel">
           <summary>Contacts</summary>
           <div class="row between">
             <p class="muted">Click a contact row to open details.</p>
@@ -108,7 +108,7 @@
           </table>
         </details>
 
-        <details open class="panel">
+        <details id="companyInteractionsSection" class="panel">
           <summary>Interactions (Newest First)</summary>
           <div class="row between">
             <p class="muted">Click an interaction row to open details.</p>
@@ -118,7 +118,7 @@
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Rep</th>
+                <th>Editor</th>
                 <th>Type</th>
                 <th>Notes</th>
                 <th>Next action</th>

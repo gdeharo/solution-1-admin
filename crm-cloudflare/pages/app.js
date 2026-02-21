@@ -13,7 +13,8 @@ const state = {
   companyFilter: '',
   history: [],
   companyEditMode: false,
-  contactEditMode: false
+  contactEditMode: false,
+  companySectionState: {}
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -337,6 +338,13 @@ async function openCompany(companyId, pushHistory = true) {
   state.companyContacts = contactsData.customers;
   state.companyInteractions = interactionsData.interactions;
   state.companyEditMode = false;
+  if (!state.companySectionState[companyId]) {
+    state.companySectionState[companyId] = {
+      main: false,
+      contacts: false,
+      interactions: true
+    };
+  }
 
   renderCompanyDetail();
   setView('companyDetailView', state.currentCompany.name, pushHistory);
@@ -501,6 +509,7 @@ function renderCompanyDetail() {
   document.getElementById('newInteractionBtn').disabled = !canWrite();
 
   bindCompanyDetailEvents();
+  bindCompanySectionState();
   if (isEditing) {
     const initialStateField = buildStateField('company', c.country || 'US', c.state || '', !canWrite());
     document.getElementById(initialStateField.wrapId).innerHTML = initialStateField.inner;
@@ -515,6 +524,31 @@ function renderCompanyDetail() {
     document.getElementById('companyStateWrap').innerHTML = `State/Province <div class="readonly-value">${escapeHtml(c.state || '-')}</div>`;
   }
   loadCompanyAttachments(c.id);
+}
+
+function bindCompanySectionState() {
+  const companyId = state.currentCompany?.id;
+  if (!companyId) return;
+  const current = state.companySectionState[companyId] || { main: false, contacts: false, interactions: true };
+
+  const mainSection = document.getElementById('companyMainSection');
+  const contactsSection = document.getElementById('companyContactsSection');
+  const interactionsSection = document.getElementById('companyInteractionsSection');
+  if (!mainSection || !contactsSection || !interactionsSection) return;
+
+  mainSection.open = !!current.main;
+  contactsSection.open = !!current.contacts;
+  interactionsSection.open = !!current.interactions;
+
+  mainSection.ontoggle = () => {
+    state.companySectionState[companyId].main = mainSection.open;
+  };
+  contactsSection.ontoggle = () => {
+    state.companySectionState[companyId].contacts = contactsSection.open;
+  };
+  interactionsSection.ontoggle = () => {
+    state.companySectionState[companyId].interactions = interactionsSection.open;
+  };
 }
 
 async function loadCompanyAttachments(companyId) {
