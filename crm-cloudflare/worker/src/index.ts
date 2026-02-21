@@ -278,9 +278,6 @@ addRoute(
       city?: string;
       state?: string;
       zip?: string;
-      contactName?: string;
-      contactEmail?: string;
-      contactPhone?: string;
       url?: string;
       segment?: string;
       customerType?: string;
@@ -291,8 +288,8 @@ addRoute(
     if (!body?.name) return err('Company name is required');
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO companies (name, address, city, state, zip, contact_name, contact_email, contact_phone, url, segment, customer_type, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
+      `INSERT INTO companies (name, address, city, state, zip, url, segment, customer_type, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
     )
       .bind(
         body.name,
@@ -300,9 +297,6 @@ addRoute(
         body.city ?? null,
         body.state ?? null,
         body.zip ?? null,
-        body.contactName ?? null,
-        body.contactEmail ?? null,
-        body.contactPhone ?? null,
         body.url ?? null,
         body.segment ?? null,
         body.customerType ?? null,
@@ -485,6 +479,28 @@ addRoute(
 
 addRoute(
   'GET',
+  /^\/api\/customers\/(\d+)$/,
+  withAuth(async (request, env) => {
+    const match = request.url.match(/\/api\/customers\/(\d+)$/);
+    const customerId = Number(match?.[1]);
+    if (!customerId) return err('customer id is required');
+
+    const customer = await env.CRM_DB.prepare(
+      `SELECT cu.*, c.name AS company_name
+       FROM customers cu
+       JOIN companies c ON c.id = cu.company_id
+       WHERE cu.id = ?1 AND cu.deleted_at IS NULL`
+    )
+      .bind(customerId)
+      .first();
+    if (!customer) return err('Contact not found', 404);
+
+    return json({ customer });
+  }) as any
+);
+
+addRoute(
+  'GET',
   /^\/api\/reps$/,
   withAuth(async (_request, env) => {
     const rows = await env.CRM_DB.prepare(
@@ -549,6 +565,34 @@ addRoute(
 
     await audit(env, user, 'create', 'rep', String(result.meta.last_row_id), body);
     return json({ id: result.meta.last_row_id }, 201);
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/interactions\/(\d+)$/,
+  withAuth(async (request, env) => {
+    const match = request.url.match(/\/api\/interactions\/(\d+)$/);
+    const interactionId = Number(match?.[1]);
+    if (!interactionId) return err('interaction id is required');
+
+    const interaction = await env.CRM_DB.prepare(
+      `SELECT i.*, c.name AS company_name,
+              (cu.first_name || ' ' || cu.last_name) AS customer_name,
+              r.full_name AS rep_name,
+              u.full_name AS created_by_name
+       FROM interactions i
+       JOIN companies c ON c.id = i.company_id
+       LEFT JOIN customers cu ON cu.id = i.customer_id
+       LEFT JOIN reps r ON r.id = i.rep_id
+       JOIN users u ON u.id = i.created_by_user_id
+       WHERE i.id = ?1 AND i.deleted_at IS NULL`
+    )
+      .bind(interactionId)
+      .first();
+    if (!interaction) return err('Interaction not found', 404);
+
+    return json({ interaction });
   }) as any
 );
 
@@ -894,9 +938,6 @@ addRoute(
       city?: string;
       state?: string;
       zip?: string;
-      contactName?: string;
-      contactEmail?: string;
-      contactPhone?: string;
       url?: string;
       segment?: string;
       customerType?: string;
@@ -906,9 +947,9 @@ addRoute(
 
     await env.CRM_DB.prepare(
       `UPDATE companies
-       SET name = ?1, address = ?2, city = ?3, state = ?4, zip = ?5, contact_name = ?6, contact_email = ?7, contact_phone = ?8, url = ?9,
-           segment = ?10, customer_type = ?11, notes = ?12, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?13 AND deleted_at IS NULL`
+       SET name = ?1, address = ?2, city = ?3, state = ?4, zip = ?5, url = ?6,
+           segment = ?7, customer_type = ?8, notes = ?9, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?10 AND deleted_at IS NULL`
     )
       .bind(
         body.name,
@@ -916,9 +957,6 @@ addRoute(
         body.city ?? null,
         body.state ?? null,
         body.zip ?? null,
-        body.contactName ?? null,
-        body.contactEmail ?? null,
-        body.contactPhone ?? null,
         body.url ?? null,
         body.segment ?? null,
         body.customerType ?? null,

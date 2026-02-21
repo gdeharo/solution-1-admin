@@ -200,6 +200,12 @@ tr.clickable:hover {
   display: none !important;
 }
 
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 .toast {
   position: fixed;
   right: 1rem;

@@ -8,20 +8,27 @@ const state = {
   companyInteractions: [],
   repAssignments: [],
   repTerritories: [],
-  companyFilter: ''
+  companyFilter: '',
+  history: []
 };
 
 const API_BASE = window.CRM_API_BASE || '';
 
+const VIEW_IDS = [
+  'authView',
+  'companyListView',
+  'companyDetailView',
+  'contactDetailView',
+  'contactCreateView',
+  'interactionDetailView',
+  'interactionCreateView',
+  'repsView'
+];
+
 const els = {
-  authView: document.getElementById('authView'),
-  companyListView: document.getElementById('companyListView'),
-  companyDetailView: document.getElementById('companyDetailView'),
-  repsView: document.getElementById('repsView'),
   pageHint: document.getElementById('pageHint'),
-  backToListBtn: document.getElementById('backToListBtn'),
+  backBtn: document.getElementById('backBtn'),
   manageRepsBtn: document.getElementById('manageRepsBtn'),
-  backFromRepsBtn: document.getElementById('backFromRepsBtn'),
   whoami: document.getElementById('whoami'),
   logoutBtn: document.getElementById('logoutBtn'),
   toast: document.getElementById('toast')
@@ -42,23 +49,28 @@ function showToast(message, isError = false) {
   setTimeout(() => els.toast.classList.add('hidden'), 2200);
 }
 
-function setView(view) {
-  const views = ['authView', 'companyListView', 'companyDetailView', 'repsView'];
-  views.forEach((v) => els[v].classList.add('hidden'));
-  els[view].classList.remove('hidden');
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
-  if (view === 'companyListView') {
-    els.pageHint.textContent = 'Company list';
-    els.backToListBtn.classList.add('hidden');
+function setView(viewId, hint, pushHistory = true) {
+  if (!VIEW_IDS.includes(viewId)) return;
+
+  const active = VIEW_IDS.find((v) => !document.getElementById(v).classList.contains('hidden'));
+  if (pushHistory && active && active !== viewId && active !== 'authView') {
+    state.history.push(active);
   }
-  if (view === 'companyDetailView') {
-    els.pageHint.textContent = state.currentCompany ? state.currentCompany.name : 'Company';
-    els.backToListBtn.classList.remove('hidden');
-  }
-  if (view === 'repsView') {
-    els.pageHint.textContent = 'Manage reps';
-    els.backToListBtn.classList.add('hidden');
-  }
+
+  VIEW_IDS.forEach((v) => document.getElementById(v).classList.add('hidden'));
+  document.getElementById(viewId).classList.remove('hidden');
+
+  els.pageHint.textContent = hint;
+  els.backBtn.classList.toggle('hidden', viewId === 'companyListView' || viewId === 'authView');
 }
 
 async function api(path, options = {}) {
@@ -69,26 +81,15 @@ async function api(path, options = {}) {
   if (state.token) headers.set('authorization', `Bearer ${state.token}`);
 
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
-  let data;
+  let data = null;
   try {
     data = await response.json();
   } catch {
     data = null;
   }
 
-  if (!response.ok) {
-    throw new Error(data?.error || `Request failed (${response.status})`);
-  }
+  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
   return data;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 async function loadCompanies() {
@@ -105,10 +106,7 @@ async function loadReps() {
 function filteredCompanies() {
   const q = state.companyFilter.trim().toLowerCase();
   if (!q) return state.companies;
-  return state.companies.filter((c) => {
-    const haystack = `${c.name || ''} ${c.city || ''} ${c.state || ''}`.toLowerCase();
-    return haystack.includes(q);
-  });
+  return state.companies.filter((c) => `${c.name || ''} ${c.city || ''} ${c.state || ''}`.toLowerCase().includes(q));
 }
 
 function renderCompanies() {
@@ -117,10 +115,10 @@ function renderCompanies() {
   body.innerHTML = rows
     .map(
       (c) => `<tr class="clickable" data-company-id="${c.id}">
-        <td>${escapeHtml(c.name)}</td>
-        <td>${escapeHtml(c.city || '')}</td>
-        <td>${escapeHtml(c.state || '')}</td>
-      </tr>`
+      <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.city || '')}</td>
+      <td>${escapeHtml(c.state || '')}</td>
+    </tr>`
     )
     .join('');
 
@@ -128,9 +126,7 @@ function renderCompanies() {
   document.getElementById('quickAddCompanyBtn').classList.toggle('hidden', !canWrite());
 
   body.querySelectorAll('tr[data-company-id]').forEach((row) => {
-    row.addEventListener('click', () => {
-      openCompany(Number(row.dataset.companyId));
-    });
+    row.onclick = () => openCompany(Number(row.dataset.companyId));
   });
 }
 
@@ -140,8 +136,8 @@ function repOptions(selectedIds = []) {
     .join('');
 }
 
-async function openCompany(companyId) {
-  const [companyData, customersData, interactionsData] = await Promise.all([
+async function openCompany(companyId, pushHistory = true) {
+  const [companyData, contactsData, interactionsData] = await Promise.all([
     api(`/api/companies/${companyId}`),
     api(`/api/customers?companyId=${companyId}`),
     api(`/api/interactions?companyId=${companyId}`)
@@ -149,33 +145,30 @@ async function openCompany(companyId) {
 
   state.currentCompany = companyData.company;
   state.currentCompany.assignedReps = companyData.assignedReps;
-  state.companyContacts = customersData.customers;
+  state.companyContacts = contactsData.customers;
   state.companyInteractions = interactionsData.interactions;
 
   renderCompanyDetail();
-  setView('companyDetailView');
+  setView('companyDetailView', state.currentCompany.name, pushHistory);
 }
 
 function renderCompanyDetail() {
   const c = state.currentCompany;
-  const assignedRepIds = (c.assignedReps || []).map((r) => r.id);
+  const assignedIds = (c.assignedReps || []).map((r) => r.id);
   const readOnly = canWrite() ? '' : 'disabled';
 
   document.getElementById('companyEditForm').innerHTML = `
     <label>Name <input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required /></label>
     <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
     <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
-    <label>State <input name="state" value="${escapeHtml(c.state || '')}" maxlength="2" ${readOnly} /></label>
+    <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
     <label>Zip <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
-    <label>Contact name <input name="contactName" value="${escapeHtml(c.contact_name || '')}" ${readOnly} /></label>
-    <label>Contact email <input name="contactEmail" value="${escapeHtml(c.contact_email || '')}" ${readOnly} /></label>
-    <label>Contact phone <input name="contactPhone" value="${escapeHtml(c.contact_phone || '')}" ${readOnly} /></label>
     <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
     <label>Segment <input name="segment" value="${escapeHtml(c.segment || '')}" ${readOnly} /></label>
     <label>Customer type <input name="customerType" value="${escapeHtml(c.customer_type || '')}" ${readOnly} /></label>
     <label class="full">Notes <textarea name="notes" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
     <label class="full">Assigned reps
-      <select id="companyRepIds" multiple ${readOnly}>${repOptions(assignedRepIds)}</select>
+      <select id="companyRepIds" multiple ${readOnly}>${repOptions(assignedIds)}</select>
     </label>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Company</button>
@@ -185,214 +178,254 @@ function renderCompanyDetail() {
     </div>
   `;
 
-  document.getElementById('contactCreateForm').innerHTML = `
-    <input name="firstName" placeholder="First name" ${readOnly} required />
-    <input name="lastName" placeholder="Last name" ${readOnly} required />
-    <input name="email" placeholder="Email" ${readOnly} />
-    <input name="phone" placeholder="Phone" ${readOnly} />
-    <button type="submit" ${readOnly}>Add Contact</button>
-  `;
-
-  document.getElementById('interactionCreateForm').innerHTML = `
-    <select name="repId" ${readOnly}>
-      <option value="">Rep</option>
-      ${state.reps.map((r) => `<option value="${r.id}">${escapeHtml(r.full_name)}</option>`).join('')}
-    </select>
-    <input name="interactionType" placeholder="Type" ${readOnly} />
-    <input name="meetingNotes" placeholder="Notes" ${readOnly} required />
-    <input name="nextAction" placeholder="Next action" ${readOnly} />
-    <input name="nextActionAt" type="datetime-local" ${readOnly} />
-    <button type="submit" ${readOnly}>Add Interaction</button>
-  `;
-
-  document.getElementById('contactsBody').innerHTML = state.companyContacts
+  const contactsBody = document.getElementById('contactsBody');
+  contactsBody.innerHTML = state.companyContacts
     .map(
-      (contact) => `<tr>
+      (contact) => `<tr class="clickable" data-contact-id="${contact.id}">
         <td>${escapeHtml(contact.first_name)} ${escapeHtml(contact.last_name)}</td>
         <td>${escapeHtml(contact.email || '')}</td>
         <td>${escapeHtml(contact.phone || '')}</td>
-        <td>
-          <button class="ghost" data-edit-contact="${contact.id}" ${readOnly}>Edit</button>
-          <button class="danger" data-delete-contact="${contact.id}" ${readOnly}>Delete</button>
-        </td>
       </tr>`
     )
     .join('');
 
-  document.getElementById('interactionsBody').innerHTML = state.companyInteractions
+  const interactionsBody = document.getElementById('interactionsBody');
+  interactionsBody.innerHTML = state.companyInteractions
     .map(
-      (interaction) => `<tr>
-        <td>${new Date(interaction.created_at).toLocaleString()}</td>
-        <td>${escapeHtml(interaction.rep_name || '')}</td>
-        <td>${escapeHtml(interaction.interaction_type || '')}</td>
-        <td>${escapeHtml(interaction.meeting_notes || '')}</td>
-        <td>${escapeHtml(interaction.next_action || '')}${interaction.next_action_at ? `<br/><small>${new Date(interaction.next_action_at).toLocaleString()}</small>` : ''}</td>
-        <td>
-          <button class="ghost" data-edit-interaction="${interaction.id}" ${readOnly}>Edit</button>
-          <button class="danger" data-delete-interaction="${interaction.id}" ${readOnly}>Delete</button>
-        </td>
+      (i) => `<tr class="clickable" data-interaction-id="${i.id}">
+        <td>${new Date(i.created_at).toLocaleString()}</td>
+        <td>${escapeHtml(i.rep_name || '')}</td>
+        <td>${escapeHtml(i.interaction_type || '')}</td>
+        <td>${escapeHtml(i.meeting_notes || '')}</td>
+        <td>${escapeHtml(i.next_action || '')}${i.next_action_at ? `<br/><small>${new Date(i.next_action_at).toLocaleString()}</small>` : ''}</td>
       </tr>`
     )
     .join('');
+
+  document.getElementById('newContactBtn').disabled = !canWrite();
+  document.getElementById('newInteractionBtn').disabled = !canWrite();
 
   bindCompanyDetailEvents();
 }
 
 function bindCompanyDetailEvents() {
-  const companyForm = document.getElementById('companyEditForm');
-  companyForm.addEventListener('submit', async (event) => {
+  const form = document.getElementById('companyEditForm');
+  form.onsubmit = async (event) => {
     event.preventDefault();
-    const formData = new FormData(companyForm);
+    const fd = new FormData(form);
     try {
       await api(`/api/companies/${state.currentCompany.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          name: formData.get('name'),
-          address: formData.get('address'),
-          city: formData.get('city'),
-          state: String(formData.get('state') || '').toUpperCase(),
-          zip: formData.get('zip'),
-          contactName: formData.get('contactName'),
-          contactEmail: formData.get('contactEmail'),
-          contactPhone: formData.get('contactPhone'),
-          url: formData.get('url'),
-          segment: formData.get('segment'),
-          customerType: formData.get('customerType'),
-          notes: formData.get('notes')
+          name: fd.get('name'),
+          address: fd.get('address'),
+          city: fd.get('city'),
+          state: String(fd.get('state') || '').toUpperCase(),
+          zip: fd.get('zip'),
+          url: fd.get('url'),
+          segment: fd.get('segment'),
+          customerType: fd.get('customerType'),
+          notes: fd.get('notes')
         })
       });
-      showToast('Company updated');
       await loadCompanies();
-      await openCompany(state.currentCompany.id);
+      await openCompany(state.currentCompany.id, false);
+      showToast('Company updated');
     } catch (error) {
       showToast(error.message, true);
     }
-  });
+  };
 
-  document.getElementById('saveCompanyRepsBtn').addEventListener('click', async () => {
+  document.getElementById('saveCompanyRepsBtn').onclick = async () => {
     const repIds = Array.from(document.getElementById('companyRepIds').selectedOptions).map((o) => Number(o.value));
     try {
-      await api(`/api/companies/${state.currentCompany.id}/reps`, {
-        method: 'POST',
-        body: JSON.stringify({ repIds })
-      });
+      await api(`/api/companies/${state.currentCompany.id}/reps`, { method: 'POST', body: JSON.stringify({ repIds }) });
+      await openCompany(state.currentCompany.id, false);
       showToast('Rep assignments updated');
-      await openCompany(state.currentCompany.id);
     } catch (error) {
       showToast(error.message, true);
     }
-  });
+  };
 
-  document.getElementById('suggestRepsBtn').addEventListener('click', async () => {
+  document.getElementById('suggestRepsBtn').onclick = async () => {
     const query = new URLSearchParams({
       city: state.currentCompany.city || '',
       state: state.currentCompany.state || '',
       zip: state.currentCompany.zip || ''
     });
     try {
-      const suggestions = await api(`/api/reps/suggest?${query.toString()}`);
-      const suggestedIds = new Set(suggestions.suggestedReps.map((rep) => rep.id));
+      const res = await api(`/api/reps/suggest?${query.toString()}`);
+      const ids = new Set(res.suggestedReps.map((rep) => rep.id));
       const select = document.getElementById('companyRepIds');
-      Array.from(select.options).forEach((option) => {
-        if (suggestedIds.has(Number(option.value))) option.selected = true;
+      Array.from(select.options).forEach((opt) => {
+        if (ids.has(Number(opt.value))) opt.selected = true;
       });
-      showToast(`Suggested ${suggestions.suggestedReps.length} reps based on area`);
+      showToast(`Suggested ${res.suggestedReps.length} reps`);
     } catch (error) {
       showToast(error.message, true);
     }
-  });
+  };
 
-  document.getElementById('deleteCompanyBtn').addEventListener('click', async () => {
+  document.getElementById('deleteCompanyBtn').onclick = async () => {
     if (!confirm('Delete this company?')) return;
     try {
       await api(`/api/companies/${state.currentCompany.id}`, { method: 'DELETE' });
-      showToast('Company deleted');
       await loadCompanies();
-      setView('companyListView');
+      setView('companyListView', 'Company list');
+      showToast('Company deleted');
     } catch (error) {
       showToast(error.message, true);
     }
+  };
+
+  document.getElementById('newContactBtn').onclick = () => openContactCreate(state.currentCompany.id);
+  document.getElementById('newInteractionBtn').onclick = () => openInteractionCreate(state.currentCompany.id);
+
+  document.querySelectorAll('[data-contact-id]').forEach((row) => {
+    row.onclick = () => openContactDetail(Number(row.dataset.contactId));
   });
 
-  const contactForm = document.getElementById('contactCreateForm');
-  contactForm.addEventListener('submit', async (event) => {
+  document.querySelectorAll('[data-interaction-id]').forEach((row) => {
+    row.onclick = () => openInteractionDetail(Number(row.dataset.interactionId));
+  });
+}
+
+async function openContactCreate(companyId) {
+  const company = state.companies.find((c) => c.id === companyId) || state.currentCompany;
+  const form = document.getElementById('contactCreateForm');
+  form.innerHTML = `
+    <label>Company <input value="${escapeHtml(company?.name || '')}" disabled /></label>
+    <label>First name <input name="firstName" required /></label>
+    <label>Last name <input name="lastName" required /></label>
+    <label>Email <input name="email" type="email" /></label>
+    <label>Phone <input name="phone" /></label>
+    <label class="full">Notes <textarea name="notes"></textarea></label>
+    <div class="row wrap full">
+      <button type="submit">Create Contact</button>
+    </div>
+  `;
+
+  form.onsubmit = async (event) => {
     event.preventDefault();
-    const fd = new FormData(contactForm);
+    const fd = new FormData(form);
     try {
       await api('/api/customers', {
         method: 'POST',
         body: JSON.stringify({
-          companyId: state.currentCompany.id,
+          companyId,
           firstName: fd.get('firstName'),
           lastName: fd.get('lastName'),
           email: fd.get('email'),
-          phone: fd.get('phone')
+          phone: fd.get('phone'),
+          notes: fd.get('notes')
         })
       });
-      contactForm.reset();
-      await openCompany(state.currentCompany.id);
-      showToast('Contact added');
+      await openCompany(companyId, false);
+      showToast('Contact created');
     } catch (error) {
       showToast(error.message, true);
     }
-  });
+  };
 
-  document.querySelectorAll('[data-edit-contact]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = Number(btn.dataset.editContact);
-      const current = state.companyContacts.find((c) => c.id === id);
-      if (!current) return;
+  setView('contactCreateView', `New Contact • ${company?.name || ''}`);
+}
 
-      const firstName = prompt('First name', current.first_name);
-      if (!firstName) return;
-      const lastName = prompt('Last name', current.last_name);
-      if (!lastName) return;
-      const email = prompt('Email', current.email || '') || '';
-      const phone = prompt('Phone', current.phone || '') || '';
+async function openContactDetail(contactId) {
+  const { customer } = await api(`/api/customers/${contactId}`);
+  const readOnly = canWrite() ? '' : 'disabled';
+  const form = document.getElementById('contactEditForm');
 
-      try {
-        await api(`/api/customers/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            companyId: state.currentCompany.id,
-            firstName,
-            lastName,
-            email,
-            phone,
-            notes: current.notes || ''
-          })
-        });
-        await openCompany(state.currentCompany.id);
-        showToast('Contact updated');
-      } catch (error) {
-        showToast(error.message, true);
-      }
-    });
-  });
+  form.innerHTML = `
+    <label>Company <input value="${escapeHtml(customer.company_name)}" disabled /></label>
+    <label>First name <input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required /></label>
+    <label>Last name <input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required /></label>
+    <label>Email <input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} /></label>
+    <label>Phone <input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} /></label>
+    <label class="full">Notes <textarea name="notes" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea></label>
+    <div class="row wrap full">
+      <button type="submit" ${readOnly}>Save Contact</button>
+      <button id="deleteContactBtn" type="button" class="danger" ${readOnly}>Delete Contact</button>
+    </div>
+  `;
 
-  document.querySelectorAll('[data-delete-contact]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = Number(btn.dataset.deleteContact);
-      if (!confirm('Delete this contact?')) return;
-      try {
-        await api(`/api/customers/${id}`, { method: 'DELETE' });
-        await openCompany(state.currentCompany.id);
-        showToast('Contact deleted');
-      } catch (error) {
-        showToast(error.message, true);
-      }
-    });
-  });
-
-  const interactionForm = document.getElementById('interactionCreateForm');
-  interactionForm.addEventListener('submit', async (event) => {
+  form.onsubmit = async (event) => {
     event.preventDefault();
-    const fd = new FormData(interactionForm);
+    const fd = new FormData(form);
+    try {
+      await api(`/api/customers/${contactId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          companyId: customer.company_id,
+          firstName: fd.get('firstName'),
+          lastName: fd.get('lastName'),
+          email: fd.get('email'),
+          phone: fd.get('phone'),
+          notes: fd.get('notes')
+        })
+      });
+      await openCompany(customer.company_id, false);
+      showToast('Contact updated');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  const delBtn = document.getElementById('deleteContactBtn');
+  delBtn.onclick = async () => {
+    if (!confirm('Delete this contact?')) return;
+    try {
+      await api(`/api/customers/${contactId}`, { method: 'DELETE' });
+      await openCompany(customer.company_id, false);
+      showToast('Contact deleted');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  setView('contactDetailView', `Contact • ${customer.first_name} ${customer.last_name}`);
+}
+
+async function openInteractionCreate(companyId) {
+  const [company, customers] = await Promise.all([
+    api(`/api/companies/${companyId}`),
+    api(`/api/customers?companyId=${companyId}`)
+  ]);
+
+  const form = document.getElementById('interactionCreateForm');
+  form.innerHTML = `
+    <label>Company <input value="${escapeHtml(company.company.name)}" disabled /></label>
+    <label>Customer
+      <select name="customerId">
+        <option value="">--</option>
+        ${customers.customers
+          .map((c) => `<option value="${c.id}">${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`)
+          .join('')}
+      </select>
+    </label>
+    <label>Rep
+      <select name="repId">
+        <option value="">--</option>
+        ${state.reps.map((r) => `<option value="${r.id}">${escapeHtml(r.full_name)}</option>`).join('')}
+      </select>
+    </label>
+    <label>Type <input name="interactionType" /></label>
+    <label class="full">Meeting notes <textarea name="meetingNotes" required></textarea></label>
+    <label>Next action <input name="nextAction" /></label>
+    <label>Next action date/time <input name="nextActionAt" type="datetime-local" /></label>
+    <div class="row wrap full">
+      <button type="submit">Create Interaction</button>
+    </div>
+  `;
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(form);
     try {
       await api('/api/interactions', {
         method: 'POST',
         body: JSON.stringify({
-          companyId: state.currentCompany.id,
+          companyId,
+          customerId: fd.get('customerId') ? Number(fd.get('customerId')) : null,
           repId: fd.get('repId') ? Number(fd.get('repId')) : null,
           interactionType: fd.get('interactionType'),
           meetingNotes: fd.get('meetingNotes'),
@@ -400,66 +433,97 @@ function bindCompanyDetailEvents() {
           nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
         })
       });
-      interactionForm.reset();
-      await openCompany(state.currentCompany.id);
-      showToast('Interaction added');
+      await openCompany(companyId, false);
+      showToast('Interaction created');
     } catch (error) {
       showToast(error.message, true);
     }
-  });
+  };
 
-  document.querySelectorAll('[data-edit-interaction]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = Number(btn.dataset.editInteraction);
-      const current = state.companyInteractions.find((i) => i.id === id);
-      if (!current) return;
+  setView('interactionCreateView', `New Interaction • ${company.company.name}`);
+}
 
-      const interactionType = prompt('Type', current.interaction_type || '') || '';
-      const meetingNotes = prompt('Meeting notes', current.meeting_notes || '');
-      if (!meetingNotes) return;
-      const nextAction = prompt('Next action', current.next_action || '') || '';
+async function openInteractionDetail(interactionId) {
+  const { interaction } = await api(`/api/interactions/${interactionId}`);
+  const companyCustomers = await api(`/api/customers?companyId=${interaction.company_id}`);
+  const readOnly = canWrite() ? '' : 'disabled';
+  const form = document.getElementById('interactionEditForm');
 
-      try {
-        await api(`/api/interactions/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            companyId: state.currentCompany.id,
-            customerId: current.customer_id || null,
-            repId: current.rep_id || null,
-            interactionType,
-            meetingNotes,
-            nextAction,
-            nextActionAt: current.next_action_at || null
-          })
-        });
-        await openCompany(state.currentCompany.id);
-        showToast('Interaction updated');
-      } catch (error) {
-        showToast(error.message, true);
-      }
-    });
-  });
+  form.innerHTML = `
+    <label>Company <input value="${escapeHtml(interaction.company_name)}" disabled /></label>
+    <label>Customer
+      <select name="customerId" ${readOnly}>
+        <option value="">--</option>
+        ${companyCustomers.customers
+          .map(
+            (c) =>
+              `<option value="${c.id}" ${interaction.customer_id === c.id ? 'selected' : ''}>${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`
+          )
+          .join('')}
+      </select>
+    </label>
+    <label>Rep
+      <select name="repId" ${readOnly}>
+        <option value="">--</option>
+        ${state.reps
+          .map((r) => `<option value="${r.id}" ${interaction.rep_id === r.id ? 'selected' : ''}>${escapeHtml(r.full_name)}</option>`)
+          .join('')}
+      </select>
+    </label>
+    <label>Type <input name="interactionType" value="${escapeHtml(interaction.interaction_type || '')}" ${readOnly} /></label>
+    <label class="full">Meeting notes <textarea name="meetingNotes" ${readOnly} required>${escapeHtml(interaction.meeting_notes || '')}</textarea></label>
+    <label>Next action <input name="nextAction" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
+    <label>Next action date/time <input name="nextActionAt" type="datetime-local" value="${
+      interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 16) : ''
+    }" ${readOnly} /></label>
+    <div class="row wrap full">
+      <button type="submit" ${readOnly}>Save Interaction</button>
+      <button id="deleteInteractionBtn" type="button" class="danger" ${readOnly}>Delete Interaction</button>
+    </div>
+  `;
 
-  document.querySelectorAll('[data-delete-interaction]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = Number(btn.dataset.deleteInteraction);
-      if (!confirm('Delete this interaction?')) return;
-      try {
-        await api(`/api/interactions/${id}`, { method: 'DELETE' });
-        await openCompany(state.currentCompany.id);
-        showToast('Interaction deleted');
-      } catch (error) {
-        showToast(error.message, true);
-      }
-    });
-  });
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(form);
+    try {
+      await api(`/api/interactions/${interactionId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          companyId: interaction.company_id,
+          customerId: fd.get('customerId') ? Number(fd.get('customerId')) : null,
+          repId: fd.get('repId') ? Number(fd.get('repId')) : null,
+          interactionType: fd.get('interactionType'),
+          meetingNotes: fd.get('meetingNotes'),
+          nextAction: fd.get('nextAction'),
+          nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
+        })
+      });
+      await openCompany(interaction.company_id, false);
+      showToast('Interaction updated');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  document.getElementById('deleteInteractionBtn').onclick = async () => {
+    if (!confirm('Delete this interaction?')) return;
+    try {
+      await api(`/api/interactions/${interactionId}`, { method: 'DELETE' });
+      await openCompany(interaction.company_id, false);
+      showToast('Interaction deleted');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  setView('interactionDetailView', `Interaction • ${interaction.company_name}`);
 }
 
 async function renderRepsView() {
-  const [withAssignments] = await Promise.all([api('/api/reps/with-assignments')]);
-  state.reps = withAssignments.reps;
-  state.repAssignments = withAssignments.assignments;
-  state.repTerritories = withAssignments.territories;
+  const data = await api('/api/reps/with-assignments');
+  state.reps = data.reps;
+  state.repAssignments = data.assignments;
+  state.repTerritories = data.territories;
 
   document.getElementById('repCreateForm').innerHTML = `
     <input name="fullName" placeholder="Full name" required />
@@ -478,9 +542,7 @@ async function renderRepsView() {
         <td>${escapeHtml(rep.email || '')}</td>
         <td>${escapeHtml(rep.phone || '')}</td>
         <td>${escapeHtml(companies.join(', ') || '-')}</td>
-        <td>
-          <button class="ghost" data-show-territories="${rep.id}">Show (${territories.length})</button>
-        </td>
+        <td><button class="ghost" data-show-territories="${rep.id}">Show (${territories.length})</button></td>
       </tr>`;
     })
     .join('');
@@ -504,7 +566,7 @@ async function renderRepsView() {
   `;
 
   bindRepsEvents();
-  setView('repsView');
+  setView('repsView', 'Manage reps');
 }
 
 function bindRepsEvents() {
@@ -522,8 +584,8 @@ function bindRepsEvents() {
           companyName: fd.get('companyName')
         })
       });
-      showToast('Rep created');
       await renderRepsView();
+      showToast('Rep created');
     } catch (error) {
       showToast(error.message, true);
     }
@@ -546,8 +608,8 @@ function bindRepsEvents() {
         delBtn.onclick = async () => {
           try {
             await api(`/api/rep-territories/${Number(delBtn.dataset.deleteTerritory)}`, { method: 'DELETE' });
-            showToast('Territory removed');
             await renderRepsView();
+            showToast('Territory removed');
           } catch (error) {
             showToast(error.message, true);
           }
@@ -572,9 +634,9 @@ function bindRepsEvents() {
           zipExact: fd.get('zipExact')
         })
       });
-      showToast('Territory added');
       territoryForm.reset();
       await renderRepsView();
+      showToast('Territory added');
     } catch (error) {
       showToast(error.message, true);
     }
@@ -583,9 +645,10 @@ function bindRepsEvents() {
 
 async function loadSession() {
   if (!state.token) {
-    setView('authView');
+    setView('authView', 'Sign in', false);
     return;
   }
+
   try {
     const me = await api('/api/auth/me');
     state.user = me.user;
@@ -596,33 +659,29 @@ async function loadSession() {
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
     await Promise.all([loadCompanies(), loadReps()]);
-    setView('companyListView');
+    setView('companyListView', 'Company list', false);
   } catch {
     localStorage.removeItem('crm_token');
     state.token = null;
-    setView('authView');
+    setView('authView', 'Sign in', false);
   }
 }
 
-document.getElementById('bootstrapForm').addEventListener('submit', async (event) => {
+document.getElementById('bootstrapForm').onsubmit = async (event) => {
   event.preventDefault();
   const fd = new FormData(event.target);
   try {
     await api('/api/auth/bootstrap', {
       method: 'POST',
-      body: JSON.stringify({
-        email: fd.get('email'),
-        fullName: fd.get('fullName'),
-        password: fd.get('password')
-      })
+      body: JSON.stringify({ email: fd.get('email'), fullName: fd.get('fullName'), password: fd.get('password') })
     });
-    showToast('Admin created, now log in.');
+    showToast('Admin created, now log in');
   } catch (error) {
     showToast(error.message, true);
   }
-});
+};
 
-document.getElementById('loginForm').addEventListener('submit', async (event) => {
+document.getElementById('loginForm').onsubmit = async (event) => {
   event.preventDefault();
   const fd = new FormData(event.target);
   try {
@@ -631,58 +690,68 @@ document.getElementById('loginForm').addEventListener('submit', async (event) =>
       body: JSON.stringify({ email: fd.get('email'), password: fd.get('password') })
     });
     state.token = result.token;
-    state.user = result.user;
     localStorage.setItem('crm_token', state.token);
     await loadSession();
     showToast('Logged in');
   } catch (error) {
     showToast(error.message, true);
   }
-});
+};
 
-els.logoutBtn.addEventListener('click', async () => {
+els.logoutBtn.onclick = async () => {
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch {
   }
-  localStorage.removeItem('crm_token');
   state.token = null;
   state.user = null;
+  state.currentCompany = null;
+  state.history = [];
+  localStorage.removeItem('crm_token');
   els.whoami.classList.add('hidden');
   els.logoutBtn.classList.add('hidden');
   els.manageRepsBtn.classList.add('hidden');
-  setView('authView');
-});
+  setView('authView', 'Sign in', false);
+};
 
-els.backToListBtn.addEventListener('click', () => {
-  setView('companyListView');
-});
+els.backBtn.onclick = async () => {
+  const previous = state.history.pop();
+  if (!previous) {
+    setView('companyListView', 'Company list', false);
+    return;
+  }
+  if (previous === 'companyDetailView' && state.currentCompany?.id) {
+    await openCompany(state.currentCompany.id, false);
+    return;
+  }
+  if (previous === 'companyListView') {
+    setView('companyListView', 'Company list', false);
+    return;
+  }
+  setView(previous, els.pageHint.textContent, false);
+};
 
-els.manageRepsBtn.addEventListener('click', async () => {
+els.manageRepsBtn.onclick = async () => {
   try {
     await renderRepsView();
   } catch (error) {
     showToast(error.message, true);
   }
-});
+};
 
-els.backFromRepsBtn.addEventListener('click', () => {
-  setView('companyListView');
-});
-
-document.getElementById('companySearch').addEventListener('input', (event) => {
+document.getElementById('companySearch').oninput = (event) => {
   state.companyFilter = event.target.value;
   renderCompanies();
-});
+};
 
 function toggleCreateCompany(show) {
   document.getElementById('createCompanyForm').classList.toggle('hidden', !show);
 }
 
-document.getElementById('showCreateCompanyBtn').addEventListener('click', () => toggleCreateCompany(true));
-document.getElementById('quickAddCompanyBtn').addEventListener('click', () => toggleCreateCompany(true));
+document.getElementById('showCreateCompanyBtn').onclick = () => toggleCreateCompany(true);
+document.getElementById('quickAddCompanyBtn').onclick = () => toggleCreateCompany(true);
 
-document.getElementById('createCompanyForm').addEventListener('submit', async (event) => {
+document.getElementById('createCompanyForm').onsubmit = async (event) => {
   event.preventDefault();
   const fd = new FormData(event.target);
   try {
@@ -694,9 +763,6 @@ document.getElementById('createCompanyForm').addEventListener('submit', async (e
         city: fd.get('city'),
         state: String(fd.get('state') || '').toUpperCase(),
         zip: fd.get('zip'),
-        contactName: fd.get('contactName'),
-        contactEmail: fd.get('contactEmail'),
-        contactPhone: fd.get('contactPhone'),
         url: fd.get('url'),
         segment: fd.get('segment'),
         customerType: fd.get('customerType'),
@@ -710,6 +776,6 @@ document.getElementById('createCompanyForm').addEventListener('submit', async (e
   } catch (error) {
     showToast(error.message, true);
   }
-});
+};
 
 loadSession();

@@ -13,7 +13,7 @@
         <p id="pageHint">Company list</p>
       </div>
       <div class="top-actions">
-        <button id="backToListBtn" class="ghost hidden" type="button">Back to Companies</button>
+        <button id="backBtn" class="ghost hidden" type="button">Back</button>
         <button id="manageRepsBtn" class="hidden" type="button">Manage Reps</button>
         <span id="whoami" class="whoami hidden"></span>
         <button id="logoutBtn" class="hidden" type="button">Log out</button>
@@ -61,9 +61,6 @@
           <label>City <input name="city" /></label>
           <label>State <input name="state" maxlength="2" /></label>
           <label>Zip <input name="zip" /></label>
-          <label>Contact name <input name="contactName" /></label>
-          <label>Contact email <input name="contactEmail" type="email" /></label>
-          <label>Contact phone <input name="contactPhone" /></label>
           <label>URL <input name="url" type="url" /></label>
           <label>Segment <input name="segment" /></label>
           <label>Customer type <input name="customerType" /></label>
@@ -91,14 +88,16 @@
 
         <details open class="panel">
           <summary>Contacts</summary>
-          <form id="contactCreateForm" class="row wrap"></form>
+          <div class="row between">
+            <p class="muted">Click a contact row to open details.</p>
+            <button id="newContactBtn" type="button">New Contact</button>
+          </div>
           <table>
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Phone</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="contactsBody"></tbody>
@@ -107,7 +106,10 @@
 
         <details open class="panel">
           <summary>Interactions (Newest First)</summary>
-          <form id="interactionCreateForm" class="row wrap"></form>
+          <div class="row between">
+            <p class="muted">Click an interaction row to open details.</p>
+            <button id="newInteractionBtn" type="button">New Interaction</button>
+          </div>
           <table>
             <thead>
               <tr>
@@ -116,7 +118,6 @@
                 <th>Type</th>
                 <th>Notes</th>
                 <th>Next action</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="interactionsBody"></tbody>
@@ -124,10 +125,29 @@
         </details>
       </section>
 
+      <section id="contactDetailView" class="panel hidden">
+        <h2>Contact Detail</h2>
+        <form id="contactEditForm" class="form-grid"></form>
+      </section>
+
+      <section id="contactCreateView" class="panel hidden">
+        <h2>New Contact</h2>
+        <form id="contactCreateForm" class="form-grid"></form>
+      </section>
+
+      <section id="interactionDetailView" class="panel hidden">
+        <h2>Interaction Detail</h2>
+        <form id="interactionEditForm" class="form-grid"></form>
+      </section>
+
+      <section id="interactionCreateView" class="panel hidden">
+        <h2>New Interaction</h2>
+        <form id="interactionCreateForm" class="form-grid"></form>
+      </section>
+
       <section id="repsView" class="panel hidden">
         <div class="row between">
           <h2>Reps and Assigned Companies</h2>
-          <button id="backFromRepsBtn" class="ghost" type="button">Back</button>
         </div>
 
         <form id="repCreateForm" class="row wrap"></form>
