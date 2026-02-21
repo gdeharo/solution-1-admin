@@ -798,6 +798,30 @@ addRoute(
 );
 
 addRoute(
+  'DELETE',
+  /^\/api\/attachments\/(\d+)$/,
+  withWriteAccess(async (request, env, user) => {
+    const match = request.url.match(/\/api\/attachments\/(\d+)$/);
+    const attachmentId = Number(match?.[1]);
+    if (!attachmentId) return err('attachment id is required');
+
+    const attachment = await env.CRM_DB.prepare(
+      `SELECT id, file_key FROM attachments WHERE id = ?1`
+    )
+      .bind(attachmentId)
+      .first<{ id: number; file_key: string }>();
+
+    if (!attachment) return err('Attachment not found', 404);
+
+    await env.CRM_FILES.delete(attachment.file_key);
+    await env.CRM_DB.prepare(`DELETE FROM attachments WHERE id = ?1`).bind(attachmentId).run();
+    await audit(env, user, 'delete', 'attachment', String(attachmentId), { fileKey: attachment.file_key });
+
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
   'GET',
   /^\/api\/files\/(.+)$/,
   withAuth(async (request, env) => {

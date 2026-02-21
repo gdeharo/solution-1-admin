@@ -229,6 +229,22 @@ tr.clickable:hover {
   min-height: 100%;
 }
 
+.company-box strong {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+.company-box label {
+  margin-top: 0.45rem;
+}
+
+.company-box input,
+.company-box select,
+.company-box textarea {
+  min-height: 40px;
+  padding: 0.55rem 0.6rem;
+}
+
 .toast {
   position: fixed;
   right: 1rem;

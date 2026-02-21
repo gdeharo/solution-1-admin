@@ -274,13 +274,32 @@ async function loadCompanyAttachments(companyId) {
     document.getElementById('companyFilesList').innerHTML = data.attachments
       .map(
         (file) =>
-          `<li><a href="${API_BASE}/api/files/${encodeURIComponent(file.file_key)}?token=${encodeURIComponent(
-            state.token || ''
-          )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a> <span class="muted">${escapeHtml(
-            file.mime_type || ''
-          )}</span></li>`
+          `<li class="row between wrap">
+            <span>
+              <a href="${API_BASE}/api/files/${encodeURIComponent(file.file_key)}?token=${encodeURIComponent(
+                state.token || ''
+              )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a>
+              <span class="muted">${escapeHtml(file.mime_type || '')}</span>
+            </span>
+            ${canWrite() ? `<button type="button" class="danger" data-delete-company-file="${file.id}">Delete</button>` : ''}
+          </li>`
       )
       .join('');
+
+    if (canWrite()) {
+      document.querySelectorAll('[data-delete-company-file]').forEach((btn) => {
+        btn.onclick = async () => {
+          if (!confirm('Delete this file?')) return;
+          try {
+            await api(`/api/attachments/${Number(btn.dataset.deleteCompanyFile)}`, { method: 'DELETE' });
+            await loadCompanyAttachments(companyId);
+            showToast('File deleted');
+          } catch (error) {
+            showToast(error.message, true);
+          }
+        };
+      });
+    }
   } catch {
     document.getElementById('companyFilesList').innerHTML = '<li class="muted">Could not load files.</li>';
   }
