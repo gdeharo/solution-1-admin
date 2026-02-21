@@ -1139,7 +1139,7 @@ async function openInteractionDetail(interactionId) {
           nextActionAt: fd.get('nextActionAt') ? toIsoDateStart(String(fd.get('nextActionAt'))) : null
         })
       });
-      await openInteractionDetail(interactionId);
+      await openCompany(interaction.company_id, false);
       showToast('Interaction updated');
     } catch (error) {
       showToast(error.message, true);
