@@ -653,7 +653,7 @@ async function openContactCreate(companyId) {
     event.preventDefault();
     const fd = new FormData(form);
     try {
-      await api('/api/customers', {
+      const created = await api('/api/customers', {
         method: 'POST',
         body: JSON.stringify({
           companyId,
@@ -665,7 +665,8 @@ async function openContactCreate(companyId) {
           notes: fd.get('notes')
         })
       });
-      await openCompany(companyId, false);
+      state.contactEditMode = false;
+      await openContactDetail(created.id);
       showToast('Contact created');
     } catch (error) {
       showToast(error.message, true);
@@ -774,7 +775,7 @@ async function openContactDetail(contactId) {
         })
       });
       state.contactEditMode = false;
-      await openCompany(customer.company_id, false);
+      await openContactDetail(contactId);
       showToast('Contact updated');
     } catch (error) {
       showToast(error.message, true);
@@ -1002,7 +1003,7 @@ async function openInteractionCreate(companyId) {
     event.preventDefault();
     const fd = new FormData(form);
     try {
-      await api('/api/interactions', {
+      const created = await api('/api/interactions', {
         method: 'POST',
         body: JSON.stringify({
           companyId,
@@ -1014,7 +1015,7 @@ async function openInteractionCreate(companyId) {
           nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
         })
       });
-      await openCompany(companyId, false);
+      await openInteractionDetail(created.id);
       showToast('Interaction created');
     } catch (error) {
       showToast(error.message, true);
@@ -1079,7 +1080,7 @@ async function openInteractionDetail(interactionId) {
           nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
         })
       });
-      await openCompany(interaction.company_id, false);
+      await openInteractionDetail(interactionId);
       showToast('Interaction updated');
     } catch (error) {
       showToast(error.message, true);
