@@ -314,6 +314,27 @@ tr.clickable:hover {
   object-fit: cover;
 }
 
+.company-standout {
+  margin-bottom: 0.8rem;
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 1.15rem;
+}
+
+.contact-top-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: start;
+}
+
+.contact-assets-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+
 .toast {
   position: fixed;
   right: 1rem;
@@ -336,6 +357,10 @@ tr.clickable:hover {
   }
   .company-top-row,
   .company-box-grid {
+    grid-template-columns: 1fr;
+  }
+  .contact-top-grid,
+  .contact-assets-grid {
     grid-template-columns: 1fr;
   }
   .address-row {

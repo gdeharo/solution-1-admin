@@ -523,28 +523,46 @@ async function openContactDetail(contactId) {
   const form = document.getElementById('contactEditForm');
 
   form.innerHTML = `
-    <label>Company <input value="${escapeHtml(customer.company_name)}" disabled /></label>
-    <label>First name <input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required /></label>
-    <label>Last name <input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required /></label>
-    <label>Email <input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} /></label>
-    <label>Phone <input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} /></label>
-    <label>Other <input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} /></label>
-    <label class="full">Notes <textarea name="notes" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea></label>
-    <div class="card full">
-      <strong>Photo</strong>
-      <div class="row wrap">
-        <input id="contactPhotoInput" type="file" accept="image/*" ${readOnly} />
-        <button id="uploadContactPhotoBtn" type="button" ${readOnly}>Upload Photo</button>
+    <div class="company-standout">${escapeHtml(customer.company_name)}</div>
+    <div class="contact-top-grid full">
+      <div class="card">
+        <strong>Name</strong>
+        <div class="field-stack">
+          <label>First name <input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required /></label>
+          <label>Last name <input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required /></label>
+        </div>
       </div>
-      <div id="contactPhotoPreview" class="photo-preview"></div>
+      <div class="card">
+        <strong>Contact</strong>
+        <div class="field-stack">
+          <label>Main phone <input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} /></label>
+          <label>Other phone <input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} /></label>
+          <label>Email <input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} /></label>
+        </div>
+      </div>
+      <div class="card">
+        <strong>Notes</strong>
+        <label>Notes <textarea name="notes" rows="8" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea></label>
+      </div>
     </div>
-    <div class="card full">
-      <strong>Files</strong>
-      <div class="row wrap">
-        <input id="contactFileInput" type="file" ${readOnly} />
-        <button id="uploadContactFileBtn" type="button" ${readOnly}>Add File</button>
+    <div class="contact-assets-grid full">
+      <div class="card">
+        <strong>Photo</strong>
+        <div class="row wrap">
+          <input id="contactPhotoInput" type="file" accept="image/*" ${readOnly} />
+          <button id="uploadContactPhotoBtn" type="button" ${readOnly}>Upload Photo</button>
+          <button id="deleteContactPhotoBtn" type="button" class="danger small-btn" ${readOnly}>Delete Photo</button>
+        </div>
+        <div id="contactPhotoPreview" class="photo-preview"></div>
       </div>
-      <div id="contactFilesList" class="docs-grid"></div>
+      <div class="card">
+        <strong>Files</strong>
+        <div class="row wrap">
+          <input id="contactFileInput" type="file" ${readOnly} />
+          <button id="uploadContactFileBtn" type="button" ${readOnly}>Add File</button>
+        </div>
+        <div id="contactFilesList" class="docs-grid"></div>
+      </div>
     </div>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Contact</button>
@@ -565,7 +583,8 @@ async function openContactDetail(contactId) {
           email: fd.get('email'),
           phone: fd.get('phone'),
           otherPhone: fd.get('otherPhone'),
-          notes: fd.get('notes')
+          notes: fd.get('notes'),
+          photoKey: customer.photo_key || null
         })
       });
       await openCompany(customer.company_id, false);
@@ -688,6 +707,42 @@ async function openContactDetail(contactId) {
         input.value = '';
         await renderContactAssets();
         showToast('Photo updated');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
+
+  const deleteContactPhotoBtn = document.getElementById('deleteContactPhotoBtn');
+  if (deleteContactPhotoBtn) {
+    deleteContactPhotoBtn.onclick = async () => {
+      if (!customer.photo_key) {
+        showToast('No photo to delete', true);
+        return;
+      }
+      if (!confirm('Delete this photo?')) return;
+      try {
+        const files = await api(`/api/attachments?entityType=customer&entityId=${contactId}`);
+        const match = (files.attachments || []).find((a) => a.file_key === customer.photo_key);
+        if (match) {
+          await api(`/api/attachments/${match.id}`, { method: 'DELETE' });
+        }
+        await api(`/api/customers/${contactId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            companyId: customer.company_id,
+            firstName: customer.first_name,
+            lastName: customer.last_name,
+            email: customer.email || '',
+            phone: customer.phone || '',
+            otherPhone: customer.other_phone || '',
+            notes: customer.notes || '',
+            photoKey: null
+          })
+        });
+        customer.photo_key = null;
+        await renderContactAssets();
+        showToast('Photo deleted');
       } catch (error) {
         showToast(error.message, true);
       }
