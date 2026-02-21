@@ -1497,6 +1497,7 @@ function toggleCreateCompany(show) {
 
 document.getElementById('showCreateCompanyBtn').onclick = () => toggleCreateCompany(true);
 document.getElementById('quickAddCompanyBtn').onclick = () => toggleCreateCompany(true);
+document.getElementById('cancelCreateCompanyBtn').onclick = () => toggleCreateCompany(false);
 
 document.getElementById('createCompanyForm').onsubmit = async (event) => {
   event.preventDefault();

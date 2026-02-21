@@ -1,12 +1,12 @@
 :root {
-  --bg: #eef3ec;
+  --bg: #f8eef4;
   --panel: #ffffff;
-  --ink: #1b2820;
-  --muted: #4f6256;
-  --line: #d0dbd2;
-  --accent: #1f6f45;
-  --accent-soft: #e2f2e7;
-  --danger: #8e2f2f;
+  --ink: #2b1b25;
+  --muted: #6a4d5d;
+  --line: #e5cfdc;
+  --accent: #c13a7d;
+  --accent-soft: #f6deea;
+  --danger: #9b234f;
 }
 
 * {
@@ -15,7 +15,7 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at right top, #dfeee3, var(--bg) 45%);
+  background: radial-gradient(circle at right top, #f5ddea, var(--bg) 45%);
   color: var(--ink);
   font-family: "Work Sans", "Segoe UI", sans-serif;
 }
@@ -37,7 +37,7 @@ summary {
   align-items: center;
   padding: 1rem;
   border-bottom: 1px solid var(--line);
-  background: #f6fbf7;
+  background: #fff6fb;
 }
 
 .topbar h1 {
@@ -134,6 +134,10 @@ button {
   padding: 0.45rem 0.55rem;
 }
 
+select {
+  min-height: 42px;
+}
+
 button {
   border: 0;
   color: white;
@@ -143,8 +147,8 @@ button {
 }
 
 button.ghost {
-  background: #dbe8de;
-  color: #21422e;
+  background: #f4d9e8;
+  color: #5f2a47;
 }
 
 button.danger {
