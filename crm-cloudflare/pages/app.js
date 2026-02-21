@@ -652,18 +652,16 @@ async function openContactDetail(contactId) {
       <div class="card">
         <strong>Contact</strong>
         <div class="field-stack">
-          <div class="name-row">
-            <label>First name ${
-              isEditing
-                ? `<input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required />`
-                : `<div class="readonly-value">${escapeHtml(customer.first_name || '-')}</div>`
-            }</label>
-            <label>Last name ${
-              isEditing
-                ? `<input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required />`
-                : `<div class="readonly-value">${escapeHtml(customer.last_name || '-')}</div>`
-            }</label>
-          </div>
+          <label>First name ${
+            isEditing
+              ? `<input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required />`
+              : `<div class="readonly-value">${escapeHtml(customer.first_name || '-')}</div>`
+          }</label>
+          <label>Last name ${
+            isEditing
+              ? `<input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required />`
+              : `<div class="readonly-value">${escapeHtml(customer.last_name || '-')}</div>`
+          }</label>
           <label>Email ${
             isEditing
               ? `<input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} />`
@@ -671,18 +669,16 @@ async function openContactDetail(contactId) {
                 ? `<a class="email-link" href="mailto:${encodeURIComponent(customer.email)}">${escapeHtml(customer.email)}</a>`
                 : `<div class="readonly-value">-</div>`
           }</label>
-          <div class="name-row">
-            <label>Main phone ${
-              isEditing
-                ? `<input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} />`
-                : `<div class="readonly-value">${escapeHtml(customer.phone || '-')}</div>`
-            }</label>
-            <label>Other phone ${
-              isEditing
-                ? `<input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} />`
-                : `<div class="readonly-value">${escapeHtml(customer.other_phone || '-')}</div>`
-            }</label>
-          </div>
+          <label>Main phone ${
+            isEditing
+              ? `<input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} />`
+              : `<div class="readonly-value">${escapeHtml(customer.phone || '-')}</div>`
+          }</label>
+          <label>Other phone ${
+            isEditing
+              ? `<input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} />`
+              : `<div class="readonly-value">${escapeHtml(customer.other_phone || '-')}</div>`
+          }</label>
         </div>
       </div>
       <div class="card">
@@ -776,7 +772,8 @@ async function openContactDetail(contactId) {
 
     try {
       const files = await api(`/api/attachments?entityType=customer&entityId=${contactId}`);
-      document.getElementById('contactFilesList').innerHTML = files.attachments
+      const documentFiles = (files.attachments || []).filter((a) => a.file_key !== customer.photo_key);
+      document.getElementById('contactFilesList').innerHTML = documentFiles
         .map(
           (file) => `<div class="doc-card">
             <div class="doc-name">
