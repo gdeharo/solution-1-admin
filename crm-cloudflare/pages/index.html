@@ -57,13 +57,14 @@
         <form id="createCompanyForm" class="card hidden form-grid">
           <h3>New Company</h3>
           <label>Name <input name="name" required /></label>
+          <label>Main phone <input name="mainPhone" /></label>
           <label>Address <input name="address" /></label>
           <label>City <input name="city" /></label>
           <label>State <input name="state" maxlength="2" /></label>
           <label>Zip <input name="zip" /></label>
           <label>URL <input name="url" type="url" /></label>
-          <label>Segment <input name="segment" /></label>
-          <label>Customer type <input name="customerType" /></label>
+          <label>Segment <select name="segment" id="createCompanySegment"></select></label>
+          <label>Type <select name="customerType" id="createCompanyType"></select></label>
           <label class="full">Notes <textarea name="notes"></textarea></label>
           <button type="submit">Create</button>
         </form>
@@ -151,6 +152,7 @@
         </div>
 
         <form id="repCreateForm" class="row wrap"></form>
+        <form id="repAssignmentForm" class="row wrap"></form>
 
         <table>
           <thead>
@@ -169,6 +171,14 @@
           <h3>Assign Territory</h3>
           <form id="territoryForm" class="row wrap"></form>
           <ul id="territoryList" class="list"></ul>
+        </div>
+
+        <div class="card">
+          <h3>Company Dropdown Values</h3>
+          <div class="split">
+            <form id="segmentValueForm" class="row wrap"></form>
+            <form id="typeValueForm" class="row wrap"></form>
+          </div>
         </div>
       </section>
     </main>

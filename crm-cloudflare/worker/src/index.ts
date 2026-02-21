@@ -125,6 +125,22 @@ const canWrite = (role: UserRole): boolean => role === 'admin' || role === 'mana
 const canManageUsers = (role: UserRole): boolean => role === 'admin';
 const canManageReps = (role: UserRole): boolean => role === 'admin' || role === 'manager';
 
+async function ensureSegmentAndTypeExist(env: Env, segment?: string | null, customerType?: string | null): Promise<string | null> {
+  if (segment && segment.trim()) {
+    const segmentExists = await env.CRM_DB.prepare(`SELECT id FROM company_segments WHERE name = ?1`)
+      .bind(segment.trim())
+      .first();
+    if (!segmentExists) return `Unknown segment: ${segment}`;
+  }
+  if (customerType && customerType.trim()) {
+    const typeExists = await env.CRM_DB.prepare(`SELECT id FROM company_types WHERE name = ?1`)
+      .bind(customerType.trim())
+      .first();
+    if (!typeExists) return `Unknown type: ${customerType}`;
+  }
+  return null;
+}
+
 async function audit(env: Env, user: AuthedUser | null, action: string, entityType: string, entityId: string, details?: unknown) {
   await env.CRM_DB.prepare(
     `INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, details_json) VALUES (?1, ?2, ?3, ?4, ?5)`
@@ -253,6 +269,44 @@ addRoute(
 
 addRoute(
   'GET',
+  /^\/api\/company-metadata$/,
+  withAuth(async (_request, env) => {
+    const [segments, types] = await Promise.all([
+      env.CRM_DB.prepare(`SELECT name FROM company_segments ORDER BY name ASC`).all(),
+      env.CRM_DB.prepare(`SELECT name FROM company_types ORDER BY name ASC`).all()
+    ]);
+    return json({ segments: segments.results, types: types.results });
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/company-metadata\/segments$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const body = await parseJson<{ name: string }>(request);
+    if (!body?.name?.trim()) return err('name is required');
+    await env.CRM_DB.prepare(`INSERT OR IGNORE INTO company_segments (name) VALUES (?1)`).bind(body.name.trim()).run();
+    await audit(env, user, 'create', 'company_segment', body.name.trim());
+    return json({ success: true }, 201);
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/company-metadata\/types$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const body = await parseJson<{ name: string }>(request);
+    if (!body?.name?.trim()) return err('name is required');
+    await env.CRM_DB.prepare(`INSERT OR IGNORE INTO company_types (name) VALUES (?1)`).bind(body.name.trim()).run();
+    await audit(env, user, 'create', 'company_type', body.name.trim());
+    return json({ success: true }, 201);
+  }) as any
+);
+
+addRoute(
+  'GET',
   /^\/api\/companies$/,
   withAuth(async (_request, env) => {
     const companies = await env.CRM_DB.prepare(
@@ -278,6 +332,7 @@ addRoute(
       city?: string;
       state?: string;
       zip?: string;
+      mainPhone?: string;
       url?: string;
       segment?: string;
       customerType?: string;
@@ -286,10 +341,12 @@ addRoute(
     }>(request);
 
     if (!body?.name) return err('Company name is required');
+    const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
+    if (metadataError) return err(metadataError);
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO companies (name, address, city, state, zip, url, segment, customer_type, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+      `INSERT INTO companies (name, address, city, state, zip, main_phone, url, segment, customer_type, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
     )
       .bind(
         body.name,
@@ -297,6 +354,7 @@ addRoute(
         body.city ?? null,
         body.state ?? null,
         body.zip ?? null,
+        body.mainPhone ?? null,
         body.url ?? null,
         body.segment ?? null,
         body.customerType ?? null,
@@ -938,18 +996,21 @@ addRoute(
       city?: string;
       state?: string;
       zip?: string;
+      mainPhone?: string;
       url?: string;
       segment?: string;
       customerType?: string;
       notes?: string;
     }>(request);
     if (!companyId || !body?.name) return err('company id and name are required');
+    const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
+    if (metadataError) return err(metadataError);
 
     await env.CRM_DB.prepare(
       `UPDATE companies
-       SET name = ?1, address = ?2, city = ?3, state = ?4, zip = ?5, url = ?6,
-           segment = ?7, customer_type = ?8, notes = ?9, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?10 AND deleted_at IS NULL`
+       SET name = ?1, address = ?2, city = ?3, state = ?4, zip = ?5, main_phone = ?6, url = ?7,
+           segment = ?8, customer_type = ?9, notes = ?10, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?11 AND deleted_at IS NULL`
     )
       .bind(
         body.name,
@@ -957,6 +1018,7 @@ addRoute(
         body.city ?? null,
         body.state ?? null,
         body.zip ?? null,
+        body.mainPhone ?? null,
         body.url ?? null,
         body.segment ?? null,
         body.customerType ?? null,

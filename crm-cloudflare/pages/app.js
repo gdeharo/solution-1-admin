@@ -8,6 +8,8 @@ const state = {
   companyInteractions: [],
   repAssignments: [],
   repTerritories: [],
+  segments: [],
+  customerTypes: [],
   companyFilter: '',
   history: []
 };
@@ -103,6 +105,26 @@ async function loadReps() {
   state.reps = result.reps;
 }
 
+async function loadMetadata() {
+  const data = await api('/api/company-metadata');
+  state.segments = (data.segments || []).map((x) => x.name);
+  state.customerTypes = (data.types || []).map((x) => x.name);
+  renderCreateCompanySelects();
+}
+
+function renderCreateCompanySelects() {
+  const segmentSelect = document.getElementById('createCompanySegment');
+  const typeSelect = document.getElementById('createCompanyType');
+  if (!segmentSelect || !typeSelect) return;
+
+  segmentSelect.innerHTML = `<option value="">--</option>${state.segments
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join('')}`;
+  typeSelect.innerHTML = `<option value="">--</option>${state.customerTypes
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join('')}`;
+}
+
 function filteredCompanies() {
   const q = state.companyFilter.trim().toLowerCase();
   if (!q) return state.companies;
@@ -154,26 +176,43 @@ async function openCompany(companyId, pushHistory = true) {
 
 function renderCompanyDetail() {
   const c = state.currentCompany;
-  const assignedIds = (c.assignedReps || []).map((r) => r.id);
   const readOnly = canWrite() ? '' : 'disabled';
+  const assignedRepNames = (c.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
+  const segmentOptions = [`<option value="">--</option>`]
+    .concat(
+      state.segments.map(
+        (name) => `<option value="${escapeHtml(name)}" ${c.segment === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
+      )
+    )
+    .join('');
+  const typeOptions = [`<option value="">--</option>`]
+    .concat(
+      state.customerTypes.map(
+        (name) =>
+          `<option value="${escapeHtml(name)}" ${c.customer_type === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
+      )
+    )
+    .join('');
 
   document.getElementById('companyEditForm').innerHTML = `
     <label>Name <input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required /></label>
-    <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
-    <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
-    <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
-    <label>Zip <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+    <label>Main phone <input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} /></label>
+    <div class="card full">
+      <strong>Address</strong>
+      <div class="address-stack">
+        <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
+        <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
+        <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
+        <label>Zip <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+      </div>
+    </div>
     <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
-    <label>Segment <input name="segment" value="${escapeHtml(c.segment || '')}" ${readOnly} /></label>
-    <label>Customer type <input name="customerType" value="${escapeHtml(c.customer_type || '')}" ${readOnly} /></label>
+    <label>Segment <select name="segment" ${readOnly}>${segmentOptions}</select></label>
+    <label>Type <select name="customerType" ${readOnly}>${typeOptions}</select></label>
     <label class="full">Notes <textarea name="notes" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
-    <label class="full">Assigned reps
-      <select id="companyRepIds" multiple ${readOnly}>${repOptions(assignedIds)}</select>
-    </label>
+    <label class="full">Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Company</button>
-      <button type="button" id="saveCompanyRepsBtn" ${readOnly}>Save Rep Assignments</button>
-      <button type="button" id="suggestRepsBtn" class="ghost" ${readOnly}>Suggest by Area</button>
       <button type="button" id="deleteCompanyBtn" class="danger" ${readOnly}>Delete Company</button>
     </div>
   `;
@@ -218,6 +257,7 @@ function bindCompanyDetailEvents() {
         method: 'PUT',
         body: JSON.stringify({
           name: fd.get('name'),
+          mainPhone: fd.get('mainPhone'),
           address: fd.get('address'),
           city: fd.get('city'),
           state: String(fd.get('state') || '').toUpperCase(),
@@ -231,36 +271,6 @@ function bindCompanyDetailEvents() {
       await loadCompanies();
       await openCompany(state.currentCompany.id, false);
       showToast('Company updated');
-    } catch (error) {
-      showToast(error.message, true);
-    }
-  };
-
-  document.getElementById('saveCompanyRepsBtn').onclick = async () => {
-    const repIds = Array.from(document.getElementById('companyRepIds').selectedOptions).map((o) => Number(o.value));
-    try {
-      await api(`/api/companies/${state.currentCompany.id}/reps`, { method: 'POST', body: JSON.stringify({ repIds }) });
-      await openCompany(state.currentCompany.id, false);
-      showToast('Rep assignments updated');
-    } catch (error) {
-      showToast(error.message, true);
-    }
-  };
-
-  document.getElementById('suggestRepsBtn').onclick = async () => {
-    const query = new URLSearchParams({
-      city: state.currentCompany.city || '',
-      state: state.currentCompany.state || '',
-      zip: state.currentCompany.zip || ''
-    });
-    try {
-      const res = await api(`/api/reps/suggest?${query.toString()}`);
-      const ids = new Set(res.suggestedReps.map((rep) => rep.id));
-      const select = document.getElementById('companyRepIds');
-      Array.from(select.options).forEach((opt) => {
-        if (ids.has(Number(opt.value))) opt.selected = true;
-      });
-      showToast(`Suggested ${res.suggestedReps.length} reps`);
     } catch (error) {
       showToast(error.message, true);
     }
@@ -533,6 +543,17 @@ async function renderRepsView() {
     <button type="submit">Add Rep</button>
   `;
 
+  document.getElementById('repAssignmentForm').innerHTML = `
+    <select name="companyId" required>
+      <option value="">Select company</option>
+      ${state.companies.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+    </select>
+    <select name="repIds" multiple required>
+      ${state.reps.map((rep) => `<option value="${rep.id}">${escapeHtml(rep.full_name)}</option>`).join('')}
+    </select>
+    <button type="submit">Save Company Rep Assignment</button>
+  `;
+
   document.getElementById('repsBody').innerHTML = state.reps
     .map((rep) => {
       const companies = state.repAssignments.filter((a) => a.rep_id === rep.id).map((a) => a.company_name);
@@ -565,6 +586,20 @@ async function renderRepsView() {
     <button type="submit">Add Territory</button>
   `;
 
+  document.getElementById('segmentValueForm').innerHTML = `
+    <strong>Segments</strong>
+    <input name="name" placeholder="Add segment value" required />
+    <button type="submit">Add Segment</button>
+    <span class="muted">${escapeHtml(state.segments.join(', '))}</span>
+  `;
+
+  document.getElementById('typeValueForm').innerHTML = `
+    <strong>Types</strong>
+    <input name="name" placeholder="Add type value" required />
+    <button type="submit">Add Type</button>
+    <span class="muted">${escapeHtml(state.customerTypes.join(', '))}</span>
+  `;
+
   bindRepsEvents();
   setView('repsView', 'Manage reps');
 }
@@ -586,6 +621,21 @@ function bindRepsEvents() {
       });
       await renderRepsView();
       showToast('Rep created');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  const repAssignmentForm = document.getElementById('repAssignmentForm');
+  repAssignmentForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(repAssignmentForm);
+    const companyId = Number(fd.get('companyId'));
+    const repIds = Array.from(repAssignmentForm.querySelector('[name="repIds"]').selectedOptions).map((o) => Number(o.value));
+    try {
+      await api(`/api/companies/${companyId}/reps`, { method: 'POST', body: JSON.stringify({ repIds }) });
+      await Promise.all([renderRepsView(), loadCompanies()]);
+      showToast('Company rep assignment saved');
     } catch (error) {
       showToast(error.message, true);
     }
@@ -641,6 +691,34 @@ function bindRepsEvents() {
       showToast(error.message, true);
     }
   };
+
+  const segmentValueForm = document.getElementById('segmentValueForm');
+  segmentValueForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(segmentValueForm);
+    try {
+      await api('/api/company-metadata/segments', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) });
+      await loadMetadata();
+      await renderRepsView();
+      showToast('Segment added');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  const typeValueForm = document.getElementById('typeValueForm');
+  typeValueForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(typeValueForm);
+    try {
+      await api('/api/company-metadata/types', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) });
+      await loadMetadata();
+      await renderRepsView();
+      showToast('Type added');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
 }
 
 async function loadSession() {
@@ -658,7 +736,7 @@ async function loadSession() {
     els.manageRepsBtn.classList.toggle('hidden', !canManageReps());
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
-    await Promise.all([loadCompanies(), loadReps()]);
+    await Promise.all([loadCompanies(), loadReps(), loadMetadata()]);
     setView('companyListView', 'Company list', false);
   } catch {
     localStorage.removeItem('crm_token');
@@ -759,6 +837,7 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
       method: 'POST',
       body: JSON.stringify({
         name: fd.get('name'),
+        mainPhone: fd.get('mainPhone'),
         address: fd.get('address'),
         city: fd.get('city'),
         state: String(fd.get('state') || '').toUpperCase(),

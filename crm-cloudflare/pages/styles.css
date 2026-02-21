@@ -206,6 +206,12 @@ tr.clickable:hover {
   margin: 0;
 }
 
+.address-stack {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
 .toast {
   position: fixed;
   right: 1rem;
