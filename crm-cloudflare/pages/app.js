@@ -12,7 +12,8 @@ const state = {
   customerTypes: [],
   companyFilter: '',
   history: [],
-  companyEditMode: false
+  companyEditMode: false,
+  contactEditMode: false
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -109,6 +110,21 @@ function companyAddressText(company) {
 function companyMapUrl(company) {
   const q = companyAddressText(company);
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+
+async function toSquareImageFile(file) {
+  const imageBitmap = await createImageBitmap(file);
+  const side = Math.min(imageBitmap.width, imageBitmap.height);
+  const sx = Math.floor((imageBitmap.width - side) / 2);
+  const sy = Math.floor((imageBitmap.height - side) / 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = 720;
+  canvas.height = 720;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(imageBitmap, sx, sy, side, side, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+  if (!blob) throw new Error('Could not process image');
+  return new File([blob], `contact-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
 }
 
 function buildCountryOptions(selected = 'US') {
@@ -571,7 +587,10 @@ function bindCompanyDetailEvents() {
   document.getElementById('newInteractionBtn').onclick = () => openInteractionCreate(state.currentCompany.id);
 
   document.querySelectorAll('[data-contact-id]').forEach((row) => {
-    row.onclick = () => openContactDetail(Number(row.dataset.contactId));
+    row.onclick = () => {
+      state.contactEditMode = false;
+      openContactDetail(Number(row.dataset.contactId));
+    };
   });
 
   document.querySelectorAll('[data-interaction-id]').forEach((row) => {
@@ -623,58 +642,90 @@ async function openContactCreate(companyId) {
 
 async function openContactDetail(contactId) {
   const { customer } = await api(`/api/customers/${contactId}`);
-  const readOnly = canWrite() ? '' : 'disabled';
+  const isEditing = canWrite() && state.contactEditMode;
+  const readOnly = isEditing ? '' : 'disabled';
   const form = document.getElementById('contactEditForm');
 
   form.innerHTML = `
     <div class="company-standout">${escapeHtml(customer.company_name)}</div>
-    <div class="contact-top-grid full">
-      <div class="card">
-        <strong>Name</strong>
-        <div class="field-stack">
-          <label>First name <input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required /></label>
-          <label>Last name <input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required /></label>
-        </div>
-      </div>
+    <div class="contact-top-grid-two full">
       <div class="card">
         <strong>Contact</strong>
         <div class="field-stack">
-          <label>Main phone <input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} /></label>
-          <label>Other phone <input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} /></label>
-          <label>Email <input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} /></label>
+          <div class="name-row">
+            <label>First name ${
+              isEditing
+                ? `<input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required />`
+                : `<div class="readonly-value">${escapeHtml(customer.first_name || '-')}</div>`
+            }</label>
+            <label>Last name ${
+              isEditing
+                ? `<input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required />`
+                : `<div class="readonly-value">${escapeHtml(customer.last_name || '-')}</div>`
+            }</label>
+          </div>
+          <label>Email ${
+            isEditing
+              ? `<input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} />`
+              : customer.email
+                ? `<a class="email-link" href="mailto:${encodeURIComponent(customer.email)}">${escapeHtml(customer.email)}</a>`
+                : `<div class="readonly-value">-</div>`
+          }</label>
+          <div class="name-row">
+            <label>Main phone ${
+              isEditing
+                ? `<input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} />`
+                : `<div class="readonly-value">${escapeHtml(customer.phone || '-')}</div>`
+            }</label>
+            <label>Other phone ${
+              isEditing
+                ? `<input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} />`
+                : `<div class="readonly-value">${escapeHtml(customer.other_phone || '-')}</div>`
+            }</label>
+          </div>
         </div>
       </div>
       <div class="card">
-        <strong>Notes</strong>
-        <label>Notes <textarea name="notes" rows="8" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea></label>
+        <strong>Photo</strong>
+        <input id="contactPhotoInput" type="file" accept="image/*" class="hidden" />
+        <div id="contactPhotoTile" class="photo-tile ${isEditing && canWrite() ? 'photo-tile-editable' : ''}">
+          <div id="contactPhotoPreview" class="photo-preview"></div>
+        </div>
       </div>
     </div>
     <div class="contact-assets-grid full">
       <div class="card">
-        <strong>Photo</strong>
-        <div class="row wrap">
-          <input id="contactPhotoInput" type="file" accept="image/*" ${readOnly} />
-          <button id="uploadContactPhotoBtn" type="button" ${readOnly}>Upload Photo</button>
-          <button id="deleteContactPhotoBtn" type="button" class="danger small-btn" ${readOnly}>Delete Photo</button>
-        </div>
-        <div id="contactPhotoPreview" class="photo-preview"></div>
+        <strong>Notes</strong>
+        <label>Notes ${
+          isEditing
+            ? `<textarea name="notes" rows="8" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea>`
+            : `<div class="readonly-value readonly-multiline">${escapeHtml(customer.notes || '-')}</div>`
+        }</label>
       </div>
       <div class="card">
         <strong>Files</strong>
-        <div class="row wrap">
-          <input id="contactFileInput" type="file" ${readOnly} />
-          <button id="uploadContactFileBtn" type="button" ${readOnly}>Add File</button>
+        <div class="row wrap ${isEditing && canWrite() ? '' : 'hidden'}">
+          <input id="contactFileInput" type="file" />
+          <button id="uploadContactFileBtn" type="button">Add File</button>
         </div>
         <div id="contactFilesList" class="docs-grid"></div>
       </div>
     </div>
     <div class="row wrap full">
-      <button type="submit" ${readOnly}>Save Contact</button>
-      <button id="deleteContactBtn" type="button" class="danger" ${readOnly}>Delete Contact</button>
+      ${
+        canWrite()
+          ? isEditing
+            ? `<button type="submit">Save Contact</button>
+               <button id="cancelContactEditBtn" type="button" class="ghost">Cancel</button>
+               <button id="deleteContactBtn" type="button" class="danger">Delete Contact</button>`
+            : `<button id="startContactEditBtn" type="button">Edit</button>`
+          : ''
+      }
     </div>
   `;
 
   form.onsubmit = async (event) => {
+    if (!state.contactEditMode) return;
     event.preventDefault();
     const fd = new FormData(form);
     try {
@@ -691,6 +742,7 @@ async function openContactDetail(contactId) {
           photoKey: customer.photo_key || null
         })
       });
+      state.contactEditMode = false;
       await openCompany(customer.company_id, false);
       showToast('Contact updated');
     } catch (error) {
@@ -699,16 +751,18 @@ async function openContactDetail(contactId) {
   };
 
   const delBtn = document.getElementById('deleteContactBtn');
-  delBtn.onclick = async () => {
-    if (!confirm('Delete this contact?')) return;
-    try {
-      await api(`/api/customers/${contactId}`, { method: 'DELETE' });
-      await openCompany(customer.company_id, false);
-      showToast('Contact deleted');
-    } catch (error) {
-      showToast(error.message, true);
-    }
-  };
+  if (delBtn) {
+    delBtn.onclick = async () => {
+      if (!confirm('Delete this contact?')) return;
+      try {
+        await api(`/api/customers/${contactId}`, { method: 'DELETE' });
+        await openCompany(customer.company_id, false);
+        showToast('Contact deleted');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
 
   const renderContactAssets = async () => {
     const photoContainer = document.getElementById('contactPhotoPreview');
@@ -717,7 +771,7 @@ async function openContactDetail(contactId) {
         state.token || ''
       )}" alt="Contact photo" class="contact-photo" />`;
     } else {
-      photoContainer.innerHTML = '<span class="muted">No photo uploaded.</span>';
+      photoContainer.innerHTML = '<span class="muted">Click to add photo</span>';
     }
 
     try {
@@ -731,12 +785,12 @@ async function openContactDetail(contactId) {
               )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a>
             </div>
             <div class="muted">${escapeHtml(file.mime_type || '')}</div>
-            ${canWrite() ? `<button type="button" class="danger small-btn" data-delete-contact-file="${file.id}">Delete</button>` : ''}
+            ${isEditing && canWrite() ? `<button type="button" class="danger small-btn" data-delete-contact-file="${file.id}">Delete</button>` : ''}
           </div>`
         )
         .join('');
 
-      if (canWrite()) {
+      if (isEditing && canWrite()) {
         document.querySelectorAll('[data-delete-contact-file]').forEach((btn) => {
           btn.onclick = async () => {
             if (!confirm('Delete this file?')) return;
@@ -756,7 +810,7 @@ async function openContactDetail(contactId) {
   };
 
   const uploadContactFileBtn = document.getElementById('uploadContactFileBtn');
-  if (uploadContactFileBtn) {
+  if (uploadContactFileBtn && isEditing && canWrite()) {
     uploadContactFileBtn.onclick = async () => {
       const input = document.getElementById('contactFileInput');
       const file = input.files?.[0];
@@ -779,85 +833,108 @@ async function openContactDetail(contactId) {
     };
   }
 
-  const uploadContactPhotoBtn = document.getElementById('uploadContactPhotoBtn');
-  if (uploadContactPhotoBtn) {
-    uploadContactPhotoBtn.onclick = async () => {
-      const input = document.getElementById('contactPhotoInput');
-      const file = input.files?.[0];
-      if (!file) {
-        showToast('Choose a photo first', true);
+  const replacePhoto = async (rawFile) => {
+    const processedFile = await toSquareImageFile(rawFile);
+    const formData = new FormData();
+    formData.set('entityType', 'customer');
+    formData.set('entityId', String(contactId));
+    formData.set('file', processedFile);
+    const uploaded = await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+    await api(`/api/customers/${contactId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        companyId: customer.company_id,
+        firstName: customer.first_name,
+        lastName: customer.last_name,
+        email: customer.email || '',
+        phone: customer.phone || '',
+        otherPhone: customer.other_phone || '',
+        notes: customer.notes || '',
+        photoKey: uploaded.key
+      })
+    });
+    customer.photo_key = uploaded.key;
+    await renderContactAssets();
+    showToast('Photo updated');
+  };
+
+  const deletePhoto = async () => {
+    const files = await api(`/api/attachments?entityType=customer&entityId=${contactId}`);
+    const match = (files.attachments || []).find((a) => a.file_key === customer.photo_key);
+    if (match) await api(`/api/attachments/${match.id}`, { method: 'DELETE' });
+    await api(`/api/customers/${contactId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        companyId: customer.company_id,
+        firstName: customer.first_name,
+        lastName: customer.last_name,
+        email: customer.email || '',
+        phone: customer.phone || '',
+        otherPhone: customer.other_phone || '',
+        notes: customer.notes || '',
+        photoKey: null
+      })
+    });
+    customer.photo_key = null;
+    await renderContactAssets();
+    showToast('Photo deleted');
+  };
+
+  const photoInput = document.getElementById('contactPhotoInput');
+  const photoTile = document.getElementById('contactPhotoTile');
+  if (photoInput && photoTile && isEditing && canWrite()) {
+    photoTile.onclick = async () => {
+      if (!customer.photo_key) {
+        photoInput.click();
         return;
       }
-      const formData = new FormData();
-      formData.set('entityType', 'customer');
-      formData.set('entityId', String(contactId));
-      formData.set('file', file);
+      const replace = confirm('Replace photo? Click Cancel to choose delete.');
+      if (replace) {
+        photoInput.click();
+        return;
+      }
+      const remove = confirm('Delete current photo?');
+      if (remove) {
+        try {
+          await deletePhoto();
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      }
+    };
+
+    photoInput.onchange = async () => {
+      const file = photoInput.files?.[0];
+      if (!file) return;
       try {
-        const uploaded = await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
-        await api(`/api/customers/${contactId}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            companyId: customer.company_id,
-            firstName: customer.first_name,
-            lastName: customer.last_name,
-            email: customer.email || '',
-            phone: customer.phone || '',
-            otherPhone: customer.other_phone || '',
-            notes: customer.notes || '',
-            photoKey: uploaded.key
-          })
-        });
-        customer.photo_key = uploaded.key;
-        input.value = '';
-        await renderContactAssets();
-        showToast('Photo updated');
+        await replacePhoto(file);
       } catch (error) {
         showToast(error.message, true);
+      } finally {
+        photoInput.value = '';
       }
     };
   }
 
-  const deleteContactPhotoBtn = document.getElementById('deleteContactPhotoBtn');
-  if (deleteContactPhotoBtn) {
-    deleteContactPhotoBtn.onclick = async () => {
-      if (!customer.photo_key) {
-        showToast('No photo to delete', true);
-        return;
-      }
-      if (!confirm('Delete this photo?')) return;
-      try {
-        const files = await api(`/api/attachments?entityType=customer&entityId=${contactId}`);
-        const match = (files.attachments || []).find((a) => a.file_key === customer.photo_key);
-        if (match) {
-          await api(`/api/attachments/${match.id}`, { method: 'DELETE' });
-        }
-        await api(`/api/customers/${contactId}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            companyId: customer.company_id,
-            firstName: customer.first_name,
-            lastName: customer.last_name,
-            email: customer.email || '',
-            phone: customer.phone || '',
-            otherPhone: customer.other_phone || '',
-            notes: customer.notes || '',
-            photoKey: null
-          })
-        });
-        customer.photo_key = null;
-        await renderContactAssets();
-        showToast('Photo deleted');
-      } catch (error) {
-        showToast(error.message, true);
-      }
+  const startEditBtn = document.getElementById('startContactEditBtn');
+  if (startEditBtn) {
+    startEditBtn.onclick = () => {
+      state.contactEditMode = true;
+      openContactDetail(contactId);
+    };
+  }
+
+  const cancelEditBtn = document.getElementById('cancelContactEditBtn');
+  if (cancelEditBtn) {
+    cancelEditBtn.onclick = () => {
+      state.contactEditMode = false;
+      openContactDetail(contactId);
     };
   }
 
   await renderContactAssets();
-
   setView('contactDetailView', `Contact • ${customer.first_name} ${customer.last_name}`);
 }
-
 async function openInteractionCreate(companyId) {
   const [company, customers] = await Promise.all([
     api(`/api/companies/${companyId}`),

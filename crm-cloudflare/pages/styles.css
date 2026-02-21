@@ -350,13 +350,15 @@ tr.clickable:hover {
 
 .photo-preview {
   margin-top: 0.5rem;
+  width: 100%;
+  height: 100%;
 }
 
 .contact-photo {
-  max-width: 180px;
-  max-height: 180px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: 0;
   object-fit: cover;
 }
 
@@ -374,11 +376,44 @@ tr.clickable:hover {
   align-items: start;
 }
 
+.contact-top-grid-two {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 2fr 1fr;
+  align-items: start;
+}
+
 .contact-assets-grid {
   display: grid;
   gap: 0.6rem;
   grid-template-columns: 1fr 1fr;
   align-items: start;
+}
+
+.name-row {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: 1fr 1fr;
+}
+
+.photo-tile {
+  margin-top: 0.45rem;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #f8fbf8;
+}
+
+.photo-tile-editable {
+  cursor: pointer;
+}
+
+.photo-tile-editable:hover {
+  border-color: #9fbea9;
+  background: #ecf6ef;
 }
 
 .toast {
@@ -406,7 +441,11 @@ tr.clickable:hover {
     grid-template-columns: 1fr;
   }
   .contact-top-grid,
+  .contact-top-grid-two,
   .contact-assets-grid {
+    grid-template-columns: 1fr;
+  }
+  .name-row {
     grid-template-columns: 1fr;
   }
   .address-row {
