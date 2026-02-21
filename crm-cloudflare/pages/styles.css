@@ -416,6 +416,27 @@ tr.clickable:hover {
   background: #ecf6ef;
 }
 
+.action-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 28, 22, 0.35);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+}
+
+.action-modal {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.9rem;
+  min-width: 280px;
+}
+
+.action-modal h3 {
+  margin: 0 0 0.7rem;
+}
+
 .toast {
   position: fixed;
   right: 1rem;

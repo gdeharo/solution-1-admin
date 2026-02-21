@@ -114,17 +114,52 @@ function companyMapUrl(company) {
 
 async function toSquareImageFile(file) {
   const imageBitmap = await createImageBitmap(file);
-  const side = Math.min(imageBitmap.width, imageBitmap.height);
-  const sx = Math.floor((imageBitmap.width - side) / 2);
-  const sy = Math.floor((imageBitmap.height - side) / 2);
   const canvas = document.createElement('canvas');
   canvas.width = 720;
   canvas.height = 720;
   const ctx = canvas.getContext('2d');
-  ctx.drawImage(imageBitmap, sx, sy, side, side, 0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const scale = Math.min(canvas.width / imageBitmap.width, canvas.height / imageBitmap.height);
+  const drawW = Math.round(imageBitmap.width * scale);
+  const drawH = Math.round(imageBitmap.height * scale);
+  const dx = Math.floor((canvas.width - drawW) / 2);
+  const dy = Math.floor((canvas.height - drawH) / 2);
+  ctx.drawImage(imageBitmap, 0, 0, imageBitmap.width, imageBitmap.height, dx, dy, drawW, drawH);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
   if (!blob) throw new Error('Could not process image');
   return new File([blob], `contact-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
+}
+
+function showPhotoActionDialog() {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'action-modal-overlay';
+    overlay.innerHTML = `
+      <div class="action-modal">
+        <h3>Photo Options</h3>
+        <div class="row wrap">
+          <button type="button" data-choice="replace">Replace</button>
+          <button type="button" class="danger" data-choice="delete">Delete</button>
+          <button type="button" class="ghost" data-choice="cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const close = (choice) => {
+      overlay.remove();
+      resolve(choice);
+    };
+
+    overlay.querySelectorAll('[data-choice]').forEach((btn) => {
+      btn.onclick = () => close(btn.dataset.choice);
+    });
+
+    overlay.onclick = (event) => {
+      if (event.target === overlay) close('cancel');
+    };
+  });
 }
 
 function buildCountryOptions(selected = 'US') {
@@ -885,13 +920,12 @@ async function openContactDetail(contactId) {
         photoInput.click();
         return;
       }
-      const replace = confirm('Replace photo? Click Cancel to choose delete.');
-      if (replace) {
+      const choice = await showPhotoActionDialog();
+      if (choice === 'replace') {
         photoInput.click();
         return;
       }
-      const remove = confirm('Delete current photo?');
-      if (remove) {
+      if (choice === 'delete') {
         try {
           await deletePhoto();
         } catch (error) {
