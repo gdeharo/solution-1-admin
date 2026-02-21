@@ -78,6 +78,7 @@ const US_STATES = [
 ];
 
 const CA_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
+const INTERACTION_TYPE_DEFAULTS = ['Store Visit', 'Other Visit', 'Phone Call', 'Other'];
 
 function canWrite() {
   return ['admin', 'manager', 'rep'].includes(state.user?.role);
@@ -182,6 +183,32 @@ function buildStateField(scope, country, currentState = '', disabled = false) {
     inner = `State/Province <input name="state" value="${value}" ${dis} placeholder="Enter region" />`;
   }
   return { wrapId, inner };
+}
+
+function interactionTypeOptions(selectedValue = '') {
+  const values = Array.from(new Set([...INTERACTION_TYPE_DEFAULTS, ...(selectedValue ? [selectedValue] : [])]));
+  return values
+    .map((v) => `<option value="${escapeHtml(v)}" ${v === selectedValue ? 'selected' : ''}>${escapeHtml(v)}</option>`)
+    .concat([`<option value="__custom__">+ Add custom…</option>`])
+    .join('');
+}
+
+function bindInteractionTypeCustom(selectEl) {
+  if (!selectEl) return;
+  selectEl.onchange = () => {
+    if (selectEl.value !== '__custom__') return;
+    const custom = prompt('Enter interaction type');
+    if (!custom || !custom.trim()) {
+      selectEl.selectedIndex = 0;
+      return;
+    }
+    const value = custom.trim();
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    option.selected = true;
+    selectEl.insertBefore(option, selectEl.lastElementChild);
+  };
 }
 
 function setView(viewId, hint, pushHistory = true) {
@@ -458,7 +485,7 @@ function renderCompanyDetail() {
     .map(
       (i) => `<tr class="clickable" data-interaction-id="${i.id}">
         <td>${new Date(i.created_at).toLocaleString()}</td>
-        <td>${escapeHtml(i.rep_name || '')}</td>
+        <td>${escapeHtml(i.created_by_name || i.rep_name || '')}</td>
         <td>${escapeHtml(i.interaction_type || '')}</td>
         <td>${escapeHtml(i.meeting_notes || '')}</td>
         <td>${escapeHtml(i.next_action || '')}${i.next_action_at ? `<br/><small>${new Date(i.next_action_at).toLocaleString()}</small>` : ''}</td>
@@ -633,7 +660,7 @@ function bindCompanyDetailEvents() {
   });
 }
 
-async function openContactCreate(companyId) {
+async function openContactCreate(companyId, options = {}) {
   const company = state.companies.find((c) => c.id === companyId) || state.currentCompany;
   const form = document.getElementById('contactCreateForm');
   form.innerHTML = `
@@ -665,8 +692,12 @@ async function openContactCreate(companyId) {
           notes: fd.get('notes')
         })
       });
-      state.contactEditMode = false;
-      await openContactDetail(created.id);
+      if (options.returnToInteraction) {
+        await openInteractionCreate(companyId, options.interactionDraft || null, created.id);
+      } else {
+        state.contactEditMode = false;
+        await openContactDetail(created.id);
+      }
       showToast('Contact created');
     } catch (error) {
       showToast(error.message, true);
@@ -967,37 +998,59 @@ async function openContactDetail(contactId) {
   await renderContactAssets();
   setView('contactDetailView', `Contact • ${customer.first_name} ${customer.last_name}`);
 }
-async function openInteractionCreate(companyId) {
+async function openInteractionCreate(companyId, draft = null, selectedContactId = null) {
   const [company, customers] = await Promise.all([
     api(`/api/companies/${companyId}`),
     api(`/api/customers?companyId=${companyId}`)
   ]);
+  const initial = {
+    customerId: selectedContactId || draft?.customerId || '',
+    interactionType: draft?.interactionType || 'Store Visit',
+    meetingNotes: draft?.meetingNotes || '',
+    nextAction: draft?.nextAction || '',
+    nextActionAt: draft?.nextActionAt || ''
+  };
 
   const form = document.getElementById('interactionCreateForm');
   form.innerHTML = `
     <label>Company <input value="${escapeHtml(company.company.name)}" disabled /></label>
-    <label>Customer
+    <label>Contact
       <select name="customerId">
         <option value="">--</option>
+        <option value="__new_contact__">+ Create Contact…</option>
         ${customers.customers
-          .map((c) => `<option value="${c.id}">${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`)
+          .map(
+            (c) =>
+              `<option value="${c.id}" ${String(initial.customerId) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`
+          )
           .join('')}
       </select>
     </label>
-    <label>Rep
-      <select name="repId">
-        <option value="">--</option>
-        ${state.reps.map((r) => `<option value="${r.id}">${escapeHtml(r.full_name)}</option>`).join('')}
-      </select>
+    <label>Type
+      <select name="interactionType" id="interactionCreateType">${interactionTypeOptions(initial.interactionType)}</select>
     </label>
-    <label>Type <input name="interactionType" /></label>
-    <label class="full">Meeting notes <textarea name="meetingNotes" required></textarea></label>
-    <label>Next action <input name="nextAction" /></label>
-    <label>Next action date/time <input name="nextActionAt" type="datetime-local" /></label>
+    <label class="full">Meeting notes <textarea name="meetingNotes" required>${escapeHtml(initial.meetingNotes)}</textarea></label>
+    <label class="full">Next action <input name="nextAction" value="${escapeHtml(initial.nextAction)}" /></label>
+    <label class="full">Next action date/time <input name="nextActionAt" type="datetime-local" value="${escapeHtml(initial.nextActionAt)}" /></label>
+    <label class="full">Photo <input name="photo" type="file" accept="image/*" capture="environment" /></label>
     <div class="row wrap full">
       <button type="submit">Create Interaction</button>
     </div>
   `;
+  bindInteractionTypeCustom(document.getElementById('interactionCreateType'));
+
+  form.querySelector('[name="customerId"]').onchange = async (event) => {
+    if (event.target.value !== '__new_contact__') return;
+    const fd = new FormData(form);
+    const interactionDraft = {
+      customerId: '',
+      interactionType: fd.get('interactionType') || '',
+      meetingNotes: fd.get('meetingNotes') || '',
+      nextAction: fd.get('nextAction') || '',
+      nextActionAt: fd.get('nextActionAt') || ''
+    };
+    await openContactCreate(companyId, { returnToInteraction: true, interactionDraft });
+  };
 
   form.onsubmit = async (event) => {
     event.preventDefault();
@@ -1008,13 +1061,21 @@ async function openInteractionCreate(companyId) {
         body: JSON.stringify({
           companyId,
           customerId: fd.get('customerId') ? Number(fd.get('customerId')) : null,
-          repId: fd.get('repId') ? Number(fd.get('repId')) : null,
+          repId: null,
           interactionType: fd.get('interactionType'),
           meetingNotes: fd.get('meetingNotes'),
           nextAction: fd.get('nextAction'),
           nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
         })
       });
+      const photo = fd.get('photo');
+      if (photo instanceof File && photo.size > 0) {
+        const formData = new FormData();
+        formData.set('entityType', 'interaction');
+        formData.set('entityId', String(created.id));
+        formData.set('file', photo);
+        await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+      }
       await openInteractionDetail(created.id);
       showToast('Interaction created');
     } catch (error) {
@@ -1033,7 +1094,7 @@ async function openInteractionDetail(interactionId) {
 
   form.innerHTML = `
     <label>Company <input value="${escapeHtml(interaction.company_name)}" disabled /></label>
-    <label>Customer
+    <label>Contact
       <select name="customerId" ${readOnly}>
         <option value="">--</option>
         ${companyCustomers.customers
@@ -1044,18 +1105,11 @@ async function openInteractionDetail(interactionId) {
           .join('')}
       </select>
     </label>
-    <label>Rep
-      <select name="repId" ${readOnly}>
-        <option value="">--</option>
-        ${state.reps
-          .map((r) => `<option value="${r.id}" ${interaction.rep_id === r.id ? 'selected' : ''}>${escapeHtml(r.full_name)}</option>`)
-          .join('')}
-      </select>
-    </label>
-    <label>Type <input name="interactionType" value="${escapeHtml(interaction.interaction_type || '')}" ${readOnly} /></label>
+    <label>Editor <input value="${escapeHtml(interaction.created_by_name || '')}" disabled /></label>
+    <label>Type <select name="interactionType" id="interactionDetailType" ${readOnly}>${interactionTypeOptions(interaction.interaction_type || '')}</select></label>
     <label class="full">Meeting notes <textarea name="meetingNotes" ${readOnly} required>${escapeHtml(interaction.meeting_notes || '')}</textarea></label>
-    <label>Next action <input name="nextAction" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
-    <label>Next action date/time <input name="nextActionAt" type="datetime-local" value="${
+    <label class="full">Next action <input name="nextAction" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
+    <label class="full">Next action date/time <input name="nextActionAt" type="datetime-local" value="${
       interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 16) : ''
     }" ${readOnly} /></label>
     <div class="row wrap full">
@@ -1063,6 +1117,7 @@ async function openInteractionDetail(interactionId) {
       <button id="deleteInteractionBtn" type="button" class="danger" ${readOnly}>Delete Interaction</button>
     </div>
   `;
+  bindInteractionTypeCustom(document.getElementById('interactionDetailType'));
 
   form.onsubmit = async (event) => {
     event.preventDefault();
@@ -1073,7 +1128,7 @@ async function openInteractionDetail(interactionId) {
         body: JSON.stringify({
           companyId: interaction.company_id,
           customerId: fd.get('customerId') ? Number(fd.get('customerId')) : null,
-          repId: fd.get('repId') ? Number(fd.get('repId')) : null,
+          repId: null,
           interactionType: fd.get('interactionType'),
           meetingNotes: fd.get('meetingNotes'),
           nextAction: fd.get('nextAction'),
