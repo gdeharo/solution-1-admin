@@ -123,6 +123,7 @@ async function getAuthedUser(request: Request, env: Env): Promise<AuthedUser | n
 
 const canWrite = (role: UserRole): boolean => role === 'admin' || role === 'manager' || role === 'rep';
 const canManageUsers = (role: UserRole): boolean => role === 'admin';
+const canManageReps = (role: UserRole): boolean => role === 'admin' || role === 'manager';
 
 async function audit(env: Env, user: AuthedUser | null, action: string, entityType: string, entityId: string, details?: unknown) {
   await env.CRM_DB.prepare(
@@ -274,6 +275,9 @@ addRoute(
     const body = await parseJson<{
       name: string;
       address?: string;
+      city?: string;
+      state?: string;
+      zip?: string;
       contactName?: string;
       contactEmail?: string;
       contactPhone?: string;
@@ -287,12 +291,15 @@ addRoute(
     if (!body?.name) return err('Company name is required');
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO companies (name, address, contact_name, contact_email, contact_phone, url, segment, customer_type, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+      `INSERT INTO companies (name, address, city, state, zip, contact_name, contact_email, contact_phone, url, segment, customer_type, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`
     )
       .bind(
         body.name,
         body.address ?? null,
+        body.city ?? null,
+        body.state ?? null,
+        body.zip ?? null,
         body.contactName ?? null,
         body.contactEmail ?? null,
         body.contactPhone ?? null,
@@ -346,6 +353,41 @@ addRoute(
       .bind(companyId)
       .all();
     return json({ customers: rows.results });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/companies\/(\d+)$/,
+  withAuth(async (request, env) => {
+    const match = request.url.match(/\/api\/companies\/(\d+)$/);
+    const companyId = Number(match?.[1]);
+    if (!companyId) return err('company id is required');
+
+    const company = await env.CRM_DB.prepare(
+      `SELECT
+         c.*,
+         (SELECT COUNT(*) FROM customers cu WHERE cu.company_id = c.id AND cu.deleted_at IS NULL) AS customer_count,
+         (SELECT COUNT(*) FROM company_reps cr WHERE cr.company_id = c.id) AS rep_count
+       FROM companies c
+       WHERE c.id = ?1 AND c.deleted_at IS NULL`
+    )
+      .bind(companyId)
+      .first();
+
+    if (!company) return err('Company not found', 404);
+
+    const reps = await env.CRM_DB.prepare(
+      `SELECT r.id, r.full_name
+       FROM company_reps cr
+       JOIN reps r ON r.id = cr.rep_id
+       WHERE cr.company_id = ?1 AND r.deleted_at IS NULL
+       ORDER BY r.full_name ASC`
+    )
+      .bind(companyId)
+      .all();
+
+    return json({ company, assignedReps: reps.results });
   }) as any
 );
 
@@ -449,6 +491,28 @@ addRoute(
       `SELECT * FROM reps WHERE deleted_at IS NULL ORDER BY full_name ASC`
     ).all();
     return json({ reps: rows.results });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/reps\/with-assignments$/,
+  withAuth(async (_request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const reps = await env.CRM_DB.prepare(`SELECT * FROM reps WHERE deleted_at IS NULL ORDER BY full_name ASC`).all();
+    const assignments = await env.CRM_DB.prepare(
+      `SELECT cr.rep_id, c.id AS company_id, c.name AS company_name, c.city, c.state, c.zip
+       FROM company_reps cr
+       JOIN companies c ON c.id = cr.company_id
+       WHERE c.deleted_at IS NULL
+       ORDER BY cr.rep_id, c.name`
+    ).all();
+    const territories = await env.CRM_DB.prepare(
+      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact
+       FROM rep_territories
+       ORDER BY rep_id, territory_type`
+    ).all();
+    return json({ reps: reps.results, assignments: assignments.results, territories: territories.results });
   }) as any
 );
 
@@ -716,6 +780,109 @@ addRoute(
 );
 
 addRoute(
+  'GET',
+  /^\/api\/rep-territories$/,
+  withAuth(async (_request, env, user, url) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const repId = Number(url.searchParams.get('repId'));
+    if (!repId) return err('repId is required');
+    const rows = await env.CRM_DB.prepare(
+      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, created_at
+       FROM rep_territories
+       WHERE rep_id = ?1
+       ORDER BY created_at DESC`
+    )
+      .bind(repId)
+      .all();
+    return json({ territories: rows.results });
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/rep-territories$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const body = await parseJson<{
+      repId: number;
+      territoryType: 'state' | 'city_state' | 'zip_prefix' | 'zip_exact';
+      state?: string;
+      city?: string;
+      zipPrefix?: string;
+      zipExact?: string;
+    }>(request);
+    if (!body?.repId || !body.territoryType) return err('repId and territoryType are required');
+    if (!['state', 'city_state', 'zip_prefix', 'zip_exact'].includes(body.territoryType)) return err('Invalid territoryType');
+
+    if (body.territoryType === 'state' && !body.state) return err('state is required');
+    if (body.territoryType === 'city_state' && (!body.city || !body.state)) return err('city and state are required');
+    if (body.territoryType === 'zip_prefix' && !body.zipPrefix) return err('zipPrefix is required');
+    if (body.territoryType === 'zip_exact' && !body.zipExact) return err('zipExact is required');
+
+    const result = await env.CRM_DB.prepare(
+      `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+    )
+      .bind(
+        body.repId,
+        body.territoryType,
+        body.state ?? null,
+        body.city ?? null,
+        body.zipPrefix ?? null,
+        body.zipExact ?? null
+      )
+      .run();
+
+    await audit(env, user, 'create', 'rep_territory', String(result.meta.last_row_id), body);
+    return json({ id: result.meta.last_row_id }, 201);
+  }) as any
+);
+
+addRoute(
+  'DELETE',
+  /^\/api\/rep-territories\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/rep-territories\/(\d+)$/);
+    const territoryId = Number(match?.[1]);
+    if (!territoryId) return err('territory id is required');
+    await env.CRM_DB.prepare(`DELETE FROM rep_territories WHERE id = ?1`).bind(territoryId).run();
+    await audit(env, user, 'delete', 'rep_territory', String(territoryId));
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/reps\/suggest$/,
+  withAuth(async (_request, env, _user, url) => {
+    const city = (url.searchParams.get('city') || '').trim();
+    const state = (url.searchParams.get('state') || '').trim();
+    const zip = (url.searchParams.get('zip') || '').trim();
+
+    if (!city && !state && !zip) return err('Provide city, state, or zip');
+
+    const rows = await env.CRM_DB.prepare(
+      `SELECT DISTINCT r.id, r.full_name
+       FROM rep_territories t
+       JOIN reps r ON r.id = t.rep_id
+       WHERE r.deleted_at IS NULL
+         AND (
+           (t.territory_type = 'state' AND t.state = ?1)
+           OR (t.territory_type = 'city_state' AND t.state = ?1 AND t.city = ?2)
+           OR (t.territory_type = 'zip_exact' AND t.zip_exact = ?3)
+           OR (t.territory_type = 'zip_prefix' AND ?3 LIKE (t.zip_prefix || '%'))
+         )
+       ORDER BY r.full_name ASC`
+    )
+      .bind(state || null, city || null, zip || null)
+      .all();
+
+    return json({ suggestedReps: rows.results });
+  }) as any
+);
+
+addRoute(
   'PUT',
   /^\/api\/companies\/(\d+)$/,
   withWriteAccess(async (request, env, user) => {
@@ -724,6 +891,9 @@ addRoute(
     const body = await parseJson<{
       name: string;
       address?: string;
+      city?: string;
+      state?: string;
+      zip?: string;
       contactName?: string;
       contactEmail?: string;
       contactPhone?: string;
@@ -736,13 +906,16 @@ addRoute(
 
     await env.CRM_DB.prepare(
       `UPDATE companies
-       SET name = ?1, address = ?2, contact_name = ?3, contact_email = ?4, contact_phone = ?5, url = ?6,
-           segment = ?7, customer_type = ?8, notes = ?9, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?10 AND deleted_at IS NULL`
+       SET name = ?1, address = ?2, city = ?3, state = ?4, zip = ?5, contact_name = ?6, contact_email = ?7, contact_phone = ?8, url = ?9,
+           segment = ?10, customer_type = ?11, notes = ?12, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?13 AND deleted_at IS NULL`
     )
       .bind(
         body.name,
         body.address ?? null,
+        body.city ?? null,
+        body.state ?? null,
+        body.zip ?? null,
         body.contactName ?? null,
         body.contactEmail ?? null,
         body.contactPhone ?? null,
