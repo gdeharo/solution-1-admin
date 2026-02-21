@@ -113,6 +113,10 @@ function companyMapUrl(company) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
+function toIsoDateStart(dateValue) {
+  return `${dateValue}T00:00:00.000Z`;
+}
+
 async function toSquareImageFile(file) {
   const imageBitmap = await createImageBitmap(file);
   const canvas = document.createElement('canvas');
@@ -484,11 +488,11 @@ function renderCompanyDetail() {
   interactionsBody.innerHTML = state.companyInteractions
     .map(
       (i) => `<tr class="clickable" data-interaction-id="${i.id}">
-        <td>${new Date(i.created_at).toLocaleString()}</td>
+        <td>${new Date(i.created_at).toLocaleDateString()}</td>
         <td>${escapeHtml(i.created_by_name || i.rep_name || '')}</td>
         <td>${escapeHtml(i.interaction_type || '')}</td>
         <td>${escapeHtml(i.meeting_notes || '')}</td>
-        <td>${escapeHtml(i.next_action || '')}${i.next_action_at ? `<br/><small>${new Date(i.next_action_at).toLocaleString()}</small>` : ''}</td>
+        <td>${escapeHtml(i.next_action || '')}${i.next_action_at ? `<br/><small>${new Date(i.next_action_at).toLocaleDateString()}</small>` : ''}</td>
       </tr>`
     )
     .join('');
@@ -1031,7 +1035,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
     </label>
     <label class="full">Meeting notes <textarea name="meetingNotes" required>${escapeHtml(initial.meetingNotes)}</textarea></label>
     <label class="full">Next action <input name="nextAction" value="${escapeHtml(initial.nextAction)}" /></label>
-    <label class="full">Next action date/time <input name="nextActionAt" type="datetime-local" value="${escapeHtml(initial.nextActionAt)}" /></label>
+    <label class="full">Next action date <input name="nextActionAt" type="date" value="${escapeHtml(initial.nextActionAt)}" /></label>
     <label class="full">Photo <input name="photo" type="file" accept="image/*" capture="environment" /></label>
     <div class="row wrap full">
       <button type="submit">Create Interaction</button>
@@ -1065,7 +1069,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
           interactionType: fd.get('interactionType'),
           meetingNotes: fd.get('meetingNotes'),
           nextAction: fd.get('nextAction'),
-          nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
+          nextActionAt: fd.get('nextActionAt') ? toIsoDateStart(String(fd.get('nextActionAt'))) : null
         })
       });
       const photo = fd.get('photo');
@@ -1109,8 +1113,8 @@ async function openInteractionDetail(interactionId) {
     <label>Type <select name="interactionType" id="interactionDetailType" ${readOnly}>${interactionTypeOptions(interaction.interaction_type || '')}</select></label>
     <label class="full">Meeting notes <textarea name="meetingNotes" ${readOnly} required>${escapeHtml(interaction.meeting_notes || '')}</textarea></label>
     <label class="full">Next action <input name="nextAction" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
-    <label class="full">Next action date/time <input name="nextActionAt" type="datetime-local" value="${
-      interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 16) : ''
+    <label class="full">Next action date <input name="nextActionAt" type="date" value="${
+      interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 10) : ''
     }" ${readOnly} /></label>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Interaction</button>
@@ -1132,7 +1136,7 @@ async function openInteractionDetail(interactionId) {
           interactionType: fd.get('interactionType'),
           meetingNotes: fd.get('meetingNotes'),
           nextAction: fd.get('nextAction'),
-          nextActionAt: fd.get('nextActionAt') ? new Date(String(fd.get('nextActionAt'))).toISOString() : null
+          nextActionAt: fd.get('nextActionAt') ? toIsoDateStart(String(fd.get('nextActionAt'))) : null
         })
       });
       await openInteractionDetail(interactionId);
@@ -1423,6 +1427,10 @@ els.backBtn.onclick = async () => {
   const previous = state.history.pop();
   if (!previous) {
     setView('companyListView', 'Company list', false);
+    return;
+  }
+  if ((previous === 'contactCreateView' || previous === 'interactionCreateView') && state.currentCompany?.id) {
+    await openCompany(state.currentCompany.id, false);
     return;
   }
   if (previous === 'companyDetailView' && state.currentCompany?.id) {
