@@ -288,29 +288,44 @@ function renderCompanyDetail() {
       <label>Main phone <input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} /></label>
     </div>
     <div class="company-box-grid full">
-      <div class="card company-box">
+      <div id="companyAddressBox" class="card company-box ${isEditing ? '' : 'address-clickable'}" ${isEditing ? '' : `title="Open in Google Maps"`}>
         <strong>Address</strong>
         <div class="field-stack">
           <label>Street ${
             isEditing
               ? `<textarea name="address" rows="1" class="street-field" ${readOnly}>${escapeHtml(c.address || '')}</textarea>`
-              : `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noreferrer">${escapeHtml(c.address || '') || '-'}</a>`
+              : `<div class="readonly-value">${escapeHtml(c.address || '-')}</div>`
           }</label>
           <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
           <div class="address-row">
             <label id="companyStateWrap"></label>
-            <label>Postal Code <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+            <label>Postal Code ${
+              isEditing
+                ? `<input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} />`
+                : `<div class="readonly-value">${escapeHtml(c.zip || '-')}</div>`
+            }</label>
           </div>
-          <label>Country <select name="country" id="companyCountry" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select></label>
-          <a class="maps-link" href="${mapsUrl}" target="_blank" rel="noreferrer">Open in Google Maps</a>
+          <label>Country ${
+            isEditing
+              ? `<select name="country" id="companyCountry" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select>`
+              : `<div class="readonly-value">${escapeHtml(c.country || 'US')}</div>`
+          }</label>
         </div>
       </div>
       <div class="card company-box">
         <strong>Details</strong>
         <div class="field-stack">
           <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
-          <label>Segment <select name="segment" ${readOnly}>${segmentOptions}</select></label>
-          <label>Type <select name="customerType" ${readOnly}>${typeOptions}</select></label>
+          <label>Segment ${
+            isEditing
+              ? `<select name="segment" ${readOnly}>${segmentOptions}</select>`
+              : `<div class="readonly-value">${escapeHtml(c.segment || '-')}</div>`
+          }</label>
+          <label>Type ${
+            isEditing
+              ? `<select name="customerType" ${readOnly}>${typeOptions}</select>`
+              : `<div class="readonly-value">${escapeHtml(c.customer_type || '-')}</div>`
+          }</label>
           <label>Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
         </div>
       </div>
@@ -378,14 +393,18 @@ function renderCompanyDetail() {
   document.getElementById('newInteractionBtn').disabled = !canWrite();
 
   bindCompanyDetailEvents();
-  const initialStateField = buildStateField('company', c.country || 'US', c.state || '', !canWrite());
-  document.getElementById(initialStateField.wrapId).innerHTML = initialStateField.inner;
-  const companyCountry = document.getElementById('companyCountry');
-  if (companyCountry) {
-    companyCountry.onchange = () => {
-      const next = buildStateField('company', companyCountry.value || 'US', '', !canWrite());
-      document.getElementById(next.wrapId).innerHTML = next.inner;
-    };
+  if (isEditing) {
+    const initialStateField = buildStateField('company', c.country || 'US', c.state || '', !canWrite());
+    document.getElementById(initialStateField.wrapId).innerHTML = initialStateField.inner;
+    const companyCountry = document.getElementById('companyCountry');
+    if (companyCountry) {
+      companyCountry.onchange = () => {
+        const next = buildStateField('company', companyCountry.value || 'US', '', !canWrite());
+        document.getElementById(next.wrapId).innerHTML = next.inner;
+      };
+    }
+  } else {
+    document.getElementById('companyStateWrap').innerHTML = `State/Province <div class="readonly-value">${escapeHtml(c.state || '-')}</div>`;
   }
   loadCompanyAttachments(c.id);
 }
@@ -464,6 +483,13 @@ function bindCompanyDetailEvents() {
     startEditBtn.onclick = () => {
       state.companyEditMode = true;
       renderCompanyDetail();
+    };
+  }
+
+  const addressBox = document.getElementById('companyAddressBox');
+  if (addressBox && !state.companyEditMode) {
+    addressBox.onclick = () => {
+      window.open(companyMapUrl(state.currentCompany), '_blank', 'noopener,noreferrer');
     };
   }
 

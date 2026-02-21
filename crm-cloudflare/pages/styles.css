@@ -309,6 +309,26 @@ tr.clickable:hover {
   text-decoration: underline;
 }
 
+.readonly-value {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0.55rem 0.6rem;
+  background: #f7faf7;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+}
+
+.address-clickable {
+  cursor: pointer;
+}
+
+.address-clickable:hover {
+  border-color: #b8cbbd;
+  background: #f4faf5;
+}
+
 .photo-preview {
   margin-top: 0.5rem;
 }
