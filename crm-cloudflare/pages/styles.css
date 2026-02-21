@@ -307,7 +307,8 @@ tr.clickable:hover {
 }
 
 .maps-link,
-.email-link {
+.email-link,
+.phone-link {
   color: var(--accent);
   font-weight: 600;
   text-decoration: underline;

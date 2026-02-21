@@ -114,6 +114,40 @@ function companyMapUrl(company) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
+function digitsOnly(value) {
+  return String(value ?? '').replace(/\D/g, '');
+}
+
+function normalizedCountryCode(country) {
+  return String(country || '').trim().toUpperCase();
+}
+
+function isUsOrCa(country) {
+  const code = normalizedCountryCode(country);
+  return code === 'US' || code === 'CA';
+}
+
+function validatePhoneByCountry(phone, country, label = 'Phone') {
+  const raw = String(phone || '').trim();
+  if (!raw) return null;
+  if (isUsOrCa(country) && digitsOnly(raw).length !== 10) {
+    return `${label} must have exactly 10 digits for US/CA numbers.`;
+  }
+  return null;
+}
+
+function telHref(phone, country) {
+  const raw = String(phone || '').trim();
+  if (!raw) return '';
+  const digits = digitsOnly(raw);
+  if (!digits) return '';
+  if (isUsOrCa(country)) {
+    const local = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+    if (local.length === 10) return `tel:+1${local}`;
+  }
+  return `tel:+${digits}`;
+}
+
 function toIsoDateStart(dateValue) {
   return `${dateValue}T00:00:00.000Z`;
 }
@@ -355,6 +389,7 @@ function renderCompanyDetail() {
   const isEditing = canWrite() && state.companyEditMode;
   const readOnly = isEditing ? '' : 'disabled';
   const assignedRepNames = (c.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
+  const companyPhoneHref = telHref(c.main_phone || '', c.country || 'US');
   const mapsUrl = companyMapUrl(c);
   const segmentOptions = [`<option value="">--</option>`]
     .concat(
@@ -382,7 +417,9 @@ function renderCompanyDetail() {
       <label>Main phone ${
         isEditing
           ? `<input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} />`
-          : `<div class="readonly-value">${escapeHtml(c.main_phone || '-')}</div>`
+          : c.main_phone && companyPhoneHref
+            ? `<a class="phone-link" href="${companyPhoneHref}">${escapeHtml(c.main_phone)}</a>`
+            : `<div class="readonly-value">${escapeHtml(c.main_phone || '-')}</div>`
       }</label>
     </div>
     <div class="company-box-grid full">
@@ -487,7 +524,16 @@ function renderCompanyDetail() {
               )}</a>`
             : ''
         }</td>
-        <td>${escapeHtml(contact.phone || '')}</td>
+        <td>${
+          contact.phone
+            ? (() => {
+                const href = telHref(contact.phone, c.country || 'US');
+                return href
+                  ? `<a href="${href}" class="phone-link" onclick="event.stopPropagation();">${escapeHtml(contact.phone)}</a>`
+                  : escapeHtml(contact.phone);
+              })()
+            : ''
+        }</td>
       </tr>`
     )
     .join('');
@@ -595,6 +641,9 @@ function bindCompanyDetailEvents() {
     event.preventDefault();
     const fd = new FormData(form);
     try {
+      const country = String(fd.get('country') || 'US').toUpperCase();
+      const mainPhoneError = validatePhoneByCountry(fd.get('mainPhone'), country, 'Main phone');
+      if (mainPhoneError) throw new Error(mainPhoneError);
       await api(`/api/companies/${state.currentCompany.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -603,7 +652,7 @@ function bindCompanyDetailEvents() {
           address: fd.get('address'),
           city: fd.get('city'),
           state: String(fd.get('state') || '').toUpperCase(),
-          country: fd.get('country') || 'US',
+          country,
           zip: fd.get('zip'),
           url: fd.get('url'),
           segment: fd.get('segment'),
@@ -700,6 +749,7 @@ function bindCompanyDetailEvents() {
 
 async function openContactCreate(companyId, options = {}) {
   const company = state.companies.find((c) => c.id === companyId) || state.currentCompany;
+  const companyCountry = company?.country || 'US';
   const form = document.getElementById('contactCreateForm');
   form.innerHTML = `
     <label>Company <input value="${escapeHtml(company?.name || '')}" disabled /></label>
@@ -718,6 +768,10 @@ async function openContactCreate(companyId, options = {}) {
     event.preventDefault();
     const fd = new FormData(form);
     try {
+      const phoneError = validatePhoneByCountry(fd.get('phone'), companyCountry, 'Main phone');
+      if (phoneError) throw new Error(phoneError);
+      const otherPhoneError = validatePhoneByCountry(fd.get('otherPhone'), companyCountry, 'Other phone');
+      if (otherPhoneError) throw new Error(otherPhoneError);
       const created = await api('/api/customers', {
         method: 'POST',
         body: JSON.stringify({
@@ -747,6 +801,10 @@ async function openContactCreate(companyId, options = {}) {
 
 async function openContactDetail(contactId) {
   const { customer } = await api(`/api/customers/${contactId}`);
+  const contactCompany = state.companies.find((c) => c.id === customer.company_id) || state.currentCompany;
+  const contactCountry = contactCompany?.country || 'US';
+  const contactPhoneHref = telHref(customer.phone || '', contactCountry);
+  const contactOtherPhoneHref = telHref(customer.other_phone || '', contactCountry);
   const isEditing = canWrite() && state.contactEditMode;
   const readOnly = isEditing ? '' : 'disabled';
   const form = document.getElementById('contactEditForm');
@@ -777,12 +835,16 @@ async function openContactDetail(contactId) {
           <label>Main phone ${
             isEditing
               ? `<input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} />`
-              : `<div class="readonly-value">${escapeHtml(customer.phone || '-')}</div>`
+              : customer.phone && contactPhoneHref
+                ? `<a class="phone-link" href="${contactPhoneHref}">${escapeHtml(customer.phone)}</a>`
+                : `<div class="readonly-value">${escapeHtml(customer.phone || '-')}</div>`
           }</label>
           <label>Other phone ${
             isEditing
               ? `<input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} />`
-              : `<div class="readonly-value">${escapeHtml(customer.other_phone || '-')}</div>`
+              : customer.other_phone && contactOtherPhoneHref
+                ? `<a class="phone-link" href="${contactOtherPhoneHref}">${escapeHtml(customer.other_phone)}</a>`
+                : `<div class="readonly-value">${escapeHtml(customer.other_phone || '-')}</div>`
           }</label>
         </div>
       </div>
@@ -830,6 +892,10 @@ async function openContactDetail(contactId) {
     event.preventDefault();
     const fd = new FormData(form);
     try {
+      const phoneError = validatePhoneByCountry(fd.get('phone'), contactCountry, 'Main phone');
+      if (phoneError) throw new Error(phoneError);
+      const otherPhoneError = validatePhoneByCountry(fd.get('otherPhone'), contactCountry, 'Other phone');
+      if (otherPhoneError) throw new Error(otherPhoneError);
       await api(`/api/customers/${contactId}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -1503,6 +1569,9 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
   event.preventDefault();
   const fd = new FormData(event.target);
   try {
+    const country = String(fd.get('country') || 'US').toUpperCase();
+    const mainPhoneError = validatePhoneByCountry(fd.get('mainPhone'), country, 'Main phone');
+    if (mainPhoneError) throw new Error(mainPhoneError);
     await api('/api/companies', {
       method: 'POST',
       body: JSON.stringify({
@@ -1511,7 +1580,7 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
         address: fd.get('address'),
         city: fd.get('city'),
         state: String(fd.get('state') || '').toUpperCase(),
-        country: fd.get('country') || 'US',
+        country,
         zip: fd.get('zip'),
         url: fd.get('url'),
         segment: fd.get('segment'),
