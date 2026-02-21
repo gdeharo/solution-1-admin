@@ -235,6 +235,11 @@ tr.clickable:hover {
   padding: 0.55rem 0.6rem;
 }
 
+.company-box select {
+  height: 42px;
+  line-height: 1.2;
+}
+
 .field-stack {
   display: grid;
   gap: 0.45rem;

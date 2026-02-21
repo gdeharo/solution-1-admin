@@ -36,6 +36,47 @@ const els = {
   toast: document.getElementById('toast')
 };
 
+const COUNTRY_OPTIONS = [
+  ['US', 'United States'],
+  ['CA', 'Canada'],
+  ['MX', 'Mexico'],
+  ['GB', 'United Kingdom'],
+  ['DE', 'Germany'],
+  ['FR', 'France'],
+  ['IT', 'Italy'],
+  ['ES', 'Spain'],
+  ['NL', 'Netherlands'],
+  ['BE', 'Belgium'],
+  ['CH', 'Switzerland'],
+  ['SE', 'Sweden'],
+  ['NO', 'Norway'],
+  ['DK', 'Denmark'],
+  ['FI', 'Finland'],
+  ['IE', 'Ireland'],
+  ['PT', 'Portugal'],
+  ['PL', 'Poland'],
+  ['CZ', 'Czechia'],
+  ['AT', 'Austria'],
+  ['AU', 'Australia'],
+  ['NZ', 'New Zealand'],
+  ['JP', 'Japan'],
+  ['KR', 'South Korea'],
+  ['SG', 'Singapore'],
+  ['IN', 'India'],
+  ['BR', 'Brazil'],
+  ['AR', 'Argentina'],
+  ['CL', 'Chile'],
+  ['ZA', 'South Africa']
+];
+
+const US_STATES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME',
+  'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA',
+  'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC'
+];
+
+const CA_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
+
 function canWrite() {
   return ['admin', 'manager', 'rep'].includes(state.user?.role);
 }
@@ -58,6 +99,28 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function buildCountryOptions(selected = 'US') {
+  return COUNTRY_OPTIONS.map(
+    ([code, label]) => `<option value="${code}" ${code === selected ? 'selected' : ''}>${code} - ${label}</option>`
+  ).join('');
+}
+
+function buildStateField(scope, country, currentState = '', disabled = false) {
+  const wrapId = scope === 'create' ? 'createCompanyStateWrap' : 'companyStateWrap';
+  const dis = disabled ? 'disabled' : '';
+  const value = escapeHtml(currentState || '');
+  let inner = '';
+  if (country === 'US' || country === 'CA') {
+    const options = (country === 'US' ? US_STATES : CA_PROVINCES)
+      .map((code) => `<option value="${code}" ${code === currentState ? 'selected' : ''}>${code}</option>`)
+      .join('');
+    inner = `State/Province <select name="state" ${dis}><option value="">--</option>${options}</select>`;
+  } else {
+    inner = `State/Province <input name="state" value="${value}" ${dis} placeholder="Enter region" />`;
+  }
+  return { wrapId, inner };
 }
 
 function setView(viewId, hint, pushHistory = true) {
@@ -123,6 +186,18 @@ function renderCreateCompanySelects() {
   typeSelect.innerHTML = `<option value="">--</option>${state.customerTypes
     .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
     .join('')}`;
+
+  const countrySelect = document.getElementById('createCompanyCountry');
+  if (countrySelect) {
+    const selectedCountry = countrySelect.value || 'US';
+    countrySelect.innerHTML = buildCountryOptions(selectedCountry);
+    const stateField = buildStateField('create', selectedCountry, '', false);
+    document.getElementById(stateField.wrapId).innerHTML = stateField.inner;
+    countrySelect.onchange = () => {
+      const dynamic = buildStateField('create', countrySelect.value || 'US', '', false);
+      document.getElementById(dynamic.wrapId).innerHTML = dynamic.inner;
+    };
+  }
 }
 
 function filteredCompanies() {
@@ -203,10 +278,11 @@ function renderCompanyDetail() {
       <div class="card company-box">
         <strong>Address</strong>
         <div class="field-stack">
-          <label>Address <input name="address" value="${escapeHtml(c.address || '')}" ${readOnly} /></label>
+          <label>Street <textarea name="address" rows="3" ${readOnly}>${escapeHtml(c.address || '')}</textarea></label>
           <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
-          <label>State <input name="state" maxlength="2" value="${escapeHtml(c.state || '')}" ${readOnly} /></label>
-          <label>Zip <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+          <label>Country <select name="country" id="companyCountry" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select></label>
+          <label id="companyStateWrap"></label>
+          <label>Postal Code <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
         </div>
       </div>
       <div class="card company-box">
@@ -269,6 +345,15 @@ function renderCompanyDetail() {
   document.getElementById('newInteractionBtn').disabled = !canWrite();
 
   bindCompanyDetailEvents();
+  const initialStateField = buildStateField('company', c.country || 'US', c.state || '', !canWrite());
+  document.getElementById(initialStateField.wrapId).innerHTML = initialStateField.inner;
+  const companyCountry = document.getElementById('companyCountry');
+  if (companyCountry) {
+    companyCountry.onchange = () => {
+      const next = buildStateField('company', companyCountry.value || 'US', '', !canWrite());
+      document.getElementById(next.wrapId).innerHTML = next.inner;
+    };
+  }
   loadCompanyAttachments(c.id);
 }
 
@@ -323,6 +408,7 @@ function bindCompanyDetailEvents() {
           address: fd.get('address'),
           city: fd.get('city'),
           state: String(fd.get('state') || '').toUpperCase(),
+          country: fd.get('country') || 'US',
           zip: fd.get('zip'),
           url: fd.get('url'),
           segment: fd.get('segment'),
@@ -928,6 +1014,7 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
         address: fd.get('address'),
         city: fd.get('city'),
         state: String(fd.get('state') || '').toUpperCase(),
+        country: fd.get('country') || 'US',
         zip: fd.get('zip'),
         url: fd.get('url'),
         segment: fd.get('segment'),

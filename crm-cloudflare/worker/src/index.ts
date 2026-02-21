@@ -331,6 +331,7 @@ addRoute(
       address?: string;
       city?: string;
       state?: string;
+      country?: string;
       zip?: string;
       mainPhone?: string;
       url?: string;
@@ -345,14 +346,15 @@ addRoute(
     if (metadataError) return err(metadataError);
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO companies (name, address, city, state, zip, main_phone, url, segment, customer_type, notes)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+      `INSERT INTO companies (name, address, city, state, country, zip, main_phone, url, segment, customer_type, notes)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
     )
       .bind(
         body.name,
         body.address ?? null,
         body.city ?? null,
         body.state ?? null,
+        body.country ?? 'US',
         body.zip ?? null,
         body.mainPhone ?? null,
         body.url ?? null,
@@ -1019,6 +1021,7 @@ addRoute(
       address?: string;
       city?: string;
       state?: string;
+      country?: string;
       zip?: string;
       mainPhone?: string;
       url?: string;
@@ -1032,15 +1035,16 @@ addRoute(
 
     await env.CRM_DB.prepare(
       `UPDATE companies
-       SET name = ?1, address = ?2, city = ?3, state = ?4, zip = ?5, main_phone = ?6, url = ?7,
-           segment = ?8, customer_type = ?9, notes = ?10, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?11 AND deleted_at IS NULL`
+       SET name = ?1, address = ?2, city = ?3, state = ?4, country = ?5, zip = ?6, main_phone = ?7, url = ?8,
+           segment = ?9, customer_type = ?10, notes = ?11, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?12 AND deleted_at IS NULL`
     )
       .bind(
         body.name,
         body.address ?? null,
         body.city ?? null,
         body.state ?? null,
+        body.country ?? 'US',
         body.zip ?? null,
         body.mainPhone ?? null,
         body.url ?? null,
