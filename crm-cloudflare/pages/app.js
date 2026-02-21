@@ -278,11 +278,13 @@ function renderCompanyDetail() {
       <div class="card company-box">
         <strong>Address</strong>
         <div class="field-stack">
-          <label>Street <textarea name="address" rows="3" ${readOnly}>${escapeHtml(c.address || '')}</textarea></label>
+          <label>Street <textarea name="address" rows="1" class="street-field" ${readOnly}>${escapeHtml(c.address || '')}</textarea></label>
           <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
+          <div class="address-row">
+            <label id="companyStateWrap"></label>
+            <label>Postal Code <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
+          </div>
           <label>Country <select name="country" id="companyCountry" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select></label>
-          <label id="companyStateWrap"></label>
-          <label>Postal Code <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
         </div>
       </div>
       <div class="card company-box">

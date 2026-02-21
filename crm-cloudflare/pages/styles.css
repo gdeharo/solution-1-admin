@@ -246,6 +246,18 @@ tr.clickable:hover {
   margin-top: 0.45rem;
 }
 
+.address-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.street-field {
+  resize: vertical;
+  min-height: 42px;
+  max-height: 150px;
+}
+
 .documents-layout {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 2fr;
@@ -312,6 +324,9 @@ tr.clickable:hover {
   }
   .company-top-row,
   .company-box-grid {
+    grid-template-columns: 1fr;
+  }
+  .address-row {
     grid-template-columns: 1fr;
   }
   .documents-layout {

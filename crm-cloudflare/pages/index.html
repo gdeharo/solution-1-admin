@@ -58,11 +58,13 @@
           <h3>New Company</h3>
           <label>Name <input name="name" required /></label>
           <label>Main phone <input name="mainPhone" /></label>
-          <label class="full">Street <textarea name="address" rows="3"></textarea></label>
+          <label class="full">Street <textarea name="address" rows="1" class="street-field"></textarea></label>
           <label>City <input name="city" /></label>
+          <div class="address-row full">
+            <label id="createCompanyStateWrap">State <input name="state" /></label>
+            <label>Postal Code <input name="zip" /></label>
+          </div>
           <label>Country <select name="country" id="createCompanyCountry"></select></label>
-          <label id="createCompanyStateWrap">State <input name="state" /></label>
-          <label>Postal Code <input name="zip" /></label>
           <label>URL <input name="url" type="url" /></label>
           <label>Segment <select name="segment" id="createCompanySegment"></select></label>
           <label>Type <select name="customerType" id="createCompanyType"></select></label>
