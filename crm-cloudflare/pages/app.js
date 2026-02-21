@@ -298,7 +298,7 @@ function renderCompanyDetail() {
       </div>
       <div class="card company-box">
         <strong>Comments</strong>
-        <label>Comments <textarea name="notes" rows="10" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
+        <label>Comments <textarea name="notes" rows="6" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
       </div>
     </div>
     <div class="card full">

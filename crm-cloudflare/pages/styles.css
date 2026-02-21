@@ -220,7 +220,7 @@ tr.clickable:hover {
 }
 
 .company-box {
-  min-height: 100%;
+  min-height: 0;
 }
 
 .company-box strong {
