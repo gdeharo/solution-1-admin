@@ -325,8 +325,24 @@ tr.clickable:hover {
 }
 
 .address-clickable:hover {
-  border-color: #b8cbbd;
-  background: #f4faf5;
+  border-color: #8eb09a;
+  background: #e8f4ec;
+  box-shadow: 0 0 0 2px #d2e9da;
+  transform: translateY(-1px);
+}
+
+.url-link {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0.55rem 0.6rem;
+  background: #f7faf7;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  display: flex;
+  align-items: center;
+  word-break: break-all;
 }
 
 .photo-preview {

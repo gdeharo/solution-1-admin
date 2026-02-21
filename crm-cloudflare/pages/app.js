@@ -315,7 +315,13 @@ function renderCompanyDetail() {
       <div class="card company-box">
         <strong>Details</strong>
         <div class="field-stack">
-          <label>URL <input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} /></label>
+          <label>URL ${
+            isEditing
+              ? `<input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} />`
+              : c.url
+                ? `<a class="url-link" href="${escapeHtml(c.url)}" target="_blank" rel="noreferrer">${escapeHtml(c.url)}</a>`
+                : `<div class="readonly-value">-</div>`
+          }</label>
           <label>Segment ${
             isEditing
               ? `<select name="segment" ${readOnly}>${segmentOptions}</select>`
