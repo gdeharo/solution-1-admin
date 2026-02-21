@@ -284,8 +284,16 @@ function renderCompanyDetail() {
 
   document.getElementById('companyEditForm').innerHTML = `
     <div class="company-top-row full">
-      <label>Name <input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required /></label>
-      <label>Main phone <input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} /></label>
+      <label>Name ${
+        isEditing
+          ? `<input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required />`
+          : `<div class="readonly-value">${escapeHtml(c.name || '-')}</div>`
+      }</label>
+      <label>Main phone ${
+        isEditing
+          ? `<input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} />`
+          : `<div class="readonly-value">${escapeHtml(c.main_phone || '-')}</div>`
+      }</label>
     </div>
     <div class="company-box-grid full">
       <div id="companyAddressBox" class="card company-box ${isEditing ? '' : 'address-clickable'}" ${isEditing ? '' : `title="Open in Google Maps"`}>
@@ -296,7 +304,11 @@ function renderCompanyDetail() {
               ? `<textarea name="address" rows="1" class="street-field" ${readOnly}>${escapeHtml(c.address || '')}</textarea>`
               : `<div class="readonly-value">${escapeHtml(c.address || '-')}</div>`
           }</label>
-          <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
+          <label>City ${
+            isEditing
+              ? `<input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} />`
+              : `<div class="readonly-value">${escapeHtml(c.city || '-')}</div>`
+          }</label>
           <div class="address-row">
             <label id="companyStateWrap"></label>
             <label>Postal Code ${
@@ -332,12 +344,20 @@ function renderCompanyDetail() {
               ? `<select name="customerType" ${readOnly}>${typeOptions}</select>`
               : `<div class="readonly-value">${escapeHtml(c.customer_type || '-')}</div>`
           }</label>
-          <label>Assigned reps <input value="${escapeHtml(assignedRepNames)}" disabled /></label>
+          <label>Assigned reps ${
+            isEditing
+              ? `<input value="${escapeHtml(assignedRepNames)}" disabled />`
+              : `<div class="readonly-value">${escapeHtml(assignedRepNames)}</div>`
+          }</label>
         </div>
       </div>
       <div class="card company-box">
         <strong>Comments</strong>
-        <label>Comments <textarea name="notes" rows="6" ${readOnly}>${escapeHtml(c.notes || '')}</textarea></label>
+        <label>Comments ${
+          isEditing
+            ? `<textarea name="notes" rows="6" ${readOnly}>${escapeHtml(c.notes || '')}</textarea>`
+            : `<div class="readonly-value readonly-multiline">${escapeHtml(c.notes || '-')}</div>`
+        }</label>
       </div>
     </div>
     <div class="card full">

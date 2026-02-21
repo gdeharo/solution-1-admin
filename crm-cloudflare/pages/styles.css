@@ -310,14 +310,13 @@ tr.clickable:hover {
 }
 
 .readonly-value {
-  min-height: 42px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0.55rem 0.6rem;
-  background: #f7faf7;
+  min-height: 22px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
   color: var(--ink);
-  display: flex;
-  align-items: center;
+  display: block;
 }
 
 .address-clickable {
@@ -332,17 +331,21 @@ tr.clickable:hover {
 }
 
 .url-link {
-  min-height: 42px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0.55rem 0.6rem;
-  background: #f7faf7;
+  min-height: 22px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
   color: var(--accent);
   font-weight: 600;
   text-decoration: underline;
-  display: flex;
-  align-items: center;
+  display: inline-block;
   word-break: break-all;
+}
+
+.readonly-multiline {
+  white-space: pre-wrap;
+  line-height: 1.4;
 }
 
 .photo-preview {
