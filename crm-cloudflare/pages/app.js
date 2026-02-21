@@ -11,7 +11,8 @@ const state = {
   segments: [],
   customerTypes: [],
   companyFilter: '',
-  history: []
+  history: [],
+  companyEditMode: false
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -99,6 +100,15 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function companyAddressText(company) {
+  return [company.address, company.city, company.state, company.zip, company.country].filter(Boolean).join(', ');
+}
+
+function companyMapUrl(company) {
+  const q = companyAddressText(company);
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
 function buildCountryOptions(selected = 'US') {
@@ -244,6 +254,7 @@ async function openCompany(companyId, pushHistory = true) {
   state.currentCompany.assignedReps = companyData.assignedReps;
   state.companyContacts = contactsData.customers;
   state.companyInteractions = interactionsData.interactions;
+  state.companyEditMode = false;
 
   renderCompanyDetail();
   setView('companyDetailView', state.currentCompany.name, pushHistory);
@@ -251,8 +262,10 @@ async function openCompany(companyId, pushHistory = true) {
 
 function renderCompanyDetail() {
   const c = state.currentCompany;
-  const readOnly = canWrite() ? '' : 'disabled';
+  const isEditing = canWrite() && state.companyEditMode;
+  const readOnly = isEditing ? '' : 'disabled';
   const assignedRepNames = (c.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
+  const mapsUrl = companyMapUrl(c);
   const segmentOptions = [`<option value="">--</option>`]
     .concat(
       state.segments.map(
@@ -278,13 +291,18 @@ function renderCompanyDetail() {
       <div class="card company-box">
         <strong>Address</strong>
         <div class="field-stack">
-          <label>Street <textarea name="address" rows="1" class="street-field" ${readOnly}>${escapeHtml(c.address || '')}</textarea></label>
+          <label>Street ${
+            isEditing
+              ? `<textarea name="address" rows="1" class="street-field" ${readOnly}>${escapeHtml(c.address || '')}</textarea>`
+              : `<a class="maps-link" href="${mapsUrl}" target="_blank" rel="noreferrer">${escapeHtml(c.address || '') || '-'}</a>`
+          }</label>
           <label>City <input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} /></label>
           <div class="address-row">
             <label id="companyStateWrap"></label>
             <label>Postal Code <input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} /></label>
           </div>
           <label>Country <select name="country" id="companyCountry" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select></label>
+          <a class="maps-link" href="${mapsUrl}" target="_blank" rel="noreferrer">Open in Google Maps</a>
         </div>
       </div>
       <div class="card company-box">
@@ -314,8 +332,15 @@ function renderCompanyDetail() {
       </div>
     </div>
     <div class="row wrap full">
-      <button type="submit" ${readOnly}>Save Company</button>
-      <button type="button" id="deleteCompanyBtn" class="danger" ${readOnly}>Delete Company</button>
+      ${
+        canWrite()
+          ? isEditing
+            ? `<button type="submit">Save Company</button>
+               <button type="button" id="cancelCompanyEditBtn" class="ghost">Cancel</button>
+               <button type="button" id="deleteCompanyBtn" class="danger">Delete Company</button>`
+            : `<button type="button" id="startCompanyEditBtn">Edit</button>`
+          : ''
+      }
     </div>
   `;
 
@@ -324,7 +349,13 @@ function renderCompanyDetail() {
     .map(
       (contact) => `<tr class="clickable" data-contact-id="${contact.id}">
         <td>${escapeHtml(contact.first_name)} ${escapeHtml(contact.last_name)}</td>
-        <td>${escapeHtml(contact.email || '')}</td>
+        <td>${
+          contact.email
+            ? `<a href="mailto:${encodeURIComponent(contact.email)}" class="email-link" onclick="event.stopPropagation();">${escapeHtml(
+                contact.email
+              )}</a>`
+            : ''
+        }</td>
         <td>${escapeHtml(contact.phone || '')}</td>
       </tr>`
     )
@@ -399,6 +430,7 @@ async function loadCompanyAttachments(companyId) {
 function bindCompanyDetailEvents() {
   const form = document.getElementById('companyEditForm');
   form.onsubmit = async (event) => {
+    if (!state.companyEditMode) return;
     event.preventDefault();
     const fd = new FormData(form);
     try {
@@ -419,6 +451,7 @@ function bindCompanyDetailEvents() {
         })
       });
       await loadCompanies();
+      state.companyEditMode = false;
       await openCompany(state.currentCompany.id, false);
       showToast('Company updated');
     } catch (error) {
@@ -426,17 +459,36 @@ function bindCompanyDetailEvents() {
     }
   };
 
-  document.getElementById('deleteCompanyBtn').onclick = async () => {
-    if (!confirm('Delete this company?')) return;
-    try {
-      await api(`/api/companies/${state.currentCompany.id}`, { method: 'DELETE' });
-      await loadCompanies();
-      setView('companyListView', 'Company list');
-      showToast('Company deleted');
-    } catch (error) {
-      showToast(error.message, true);
-    }
-  };
+  const startEditBtn = document.getElementById('startCompanyEditBtn');
+  if (startEditBtn) {
+    startEditBtn.onclick = () => {
+      state.companyEditMode = true;
+      renderCompanyDetail();
+    };
+  }
+
+  const cancelEditBtn = document.getElementById('cancelCompanyEditBtn');
+  if (cancelEditBtn) {
+    cancelEditBtn.onclick = () => {
+      state.companyEditMode = false;
+      renderCompanyDetail();
+    };
+  }
+
+  const deleteCompanyBtn = document.getElementById('deleteCompanyBtn');
+  if (deleteCompanyBtn) {
+    deleteCompanyBtn.onclick = async () => {
+      if (!confirm('Delete this company?')) return;
+      try {
+        await api(`/api/companies/${state.currentCompany.id}`, { method: 'DELETE' });
+        await loadCompanies();
+        setView('companyListView', 'Company list');
+        showToast('Company deleted');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
 
   const uploadBtn = document.getElementById('uploadCompanyFileBtn');
   if (uploadBtn) {

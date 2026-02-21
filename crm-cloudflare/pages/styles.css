@@ -302,6 +302,13 @@ tr.clickable:hover {
   justify-self: start;
 }
 
+.maps-link,
+.email-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .photo-preview {
   margin-top: 0.5rem;
 }
