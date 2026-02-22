@@ -2,10 +2,19 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-02-20-delete-enabled-v1";
+const WORKER_BUILD = "2026-02-20-hardening-v1";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
+};
+let catalogDataCache = {
+  barRows: null,
+  kmcRows: null,
+  chainTypeRows: null,
+  loadedAtMs: 0,
+};
+let catalogHeaderRepairCache = {
+  lastCheckAtMs: 0,
 };
 
 const TAB_BAR_LENGTHS = "Chainsaw Bar Lengths-Grid view";
@@ -115,8 +124,7 @@ export default {
 
       // Google Sheets-backed catalog endpoints
       if (path === "/catalog/brands" && request.method === "GET") {
-        await maybeRepairHeadersForCatalog(env);
-        const barRows = await getSheetRows(env, TAB_BAR_LENGTHS);
+        const { barRows } = await getCatalogSheetData(env);
         const brands = uniqueSorted(
           barRows.map((r) => r["Chainsaw Brand"]).filter(Boolean)
         );
@@ -124,11 +132,10 @@ export default {
       }
 
       if (path === "/catalog/models" && request.method === "GET") {
-        await maybeRepairHeadersForCatalog(env);
+        const { barRows } = await getCatalogSheetData(env);
         const brand = (url.searchParams.get("brand") || "").trim();
         if (!brand) return json({ error: "Missing required param: brand" }, 400);
 
-        const barRows = await getSheetRows(env, TAB_BAR_LENGTHS);
         const models = uniqueSorted(
           barRows
             .filter((r) => eqNorm(r["Chainsaw Brand"], brand))
@@ -140,14 +147,13 @@ export default {
       }
 
       if (path === "/catalog/bar-lengths" && request.method === "GET") {
-        await maybeRepairHeadersForCatalog(env);
+        const { barRows } = await getCatalogSheetData(env);
         const brand = (url.searchParams.get("brand") || "").trim();
         const model = (url.searchParams.get("model") || "").trim();
         if (!brand || !model) {
           return json({ error: "Missing required params: brand, model" }, 400);
         }
 
-        const barRows = await getSheetRows(env, TAB_BAR_LENGTHS);
         const lengths = uniqueSortedByNumericPrefix(
           barRows
             .filter((r) => eqNorm(r["Chainsaw Brand"], brand) && eqNorm(r["Chainsaw Model"], model))
@@ -159,7 +165,7 @@ export default {
       }
 
       if (path === "/catalog/results" && request.method === "GET") {
-        await maybeRepairHeadersForCatalog(env);
+        const { barRows, kmcRows, chainTypeRows } = await getCatalogSheetData(env);
         const brand = (url.searchParams.get("brand") || "").trim();
         const model = (url.searchParams.get("model") || "").trim();
         const barLength = (url.searchParams.get("barLength") || "").trim();
@@ -169,9 +175,6 @@ export default {
           return json({ error: "Missing required params: brand, model, barLength" }, 400);
         }
 
-        const barRows = await getSheetRows(env, TAB_BAR_LENGTHS);
-        const kmcRows = await getSheetRows(env, TAB_KMC_CHAINS);
-        const chainTypeRows = await getSheetRows(env, TAB_CHAIN_TYPES);
         const chainTypeMap = buildChainTypeMap(chainTypeRows);
         const settings = await getSettingsMap(env);
         const chainBrandFallback = settings.chain_brand_fallback || "KMC";
@@ -1405,8 +1408,45 @@ async function loadEntityRowsWithoutHeaderRepair(env, entity) {
 }
 
 async function maybeRepairHeadersForCatalog(env) {
-  // Keep catalog reads resilient even if headers were changed manually in Sheets.
+  // Keep automatic header repair, but throttle checks to avoid repeated writes.
+  const now = Date.now();
+  if (catalogHeaderRepairCache.lastCheckAtMs && catalogHeaderRepairCache.lastCheckAtMs + 120_000 > now) {
+    return;
+  }
   await validateManagedSheetHeaders(env);
+  catalogHeaderRepairCache.lastCheckAtMs = now;
+}
+
+async function getCatalogSheetData(env) {
+  const now = Date.now();
+  if (
+    catalogDataCache.barRows &&
+    catalogDataCache.kmcRows &&
+    catalogDataCache.chainTypeRows &&
+    catalogDataCache.loadedAtMs + 30_000 > now
+  ) {
+    return {
+      barRows: catalogDataCache.barRows,
+      kmcRows: catalogDataCache.kmcRows,
+      chainTypeRows: catalogDataCache.chainTypeRows,
+    };
+  }
+
+  await maybeRepairHeadersForCatalog(env);
+  const [barRows, kmcRows, chainTypeRows] = await Promise.all([
+    getSheetRows(env, TAB_BAR_LENGTHS),
+    getSheetRows(env, TAB_KMC_CHAINS),
+    getSheetRows(env, TAB_CHAIN_TYPES),
+  ]);
+
+  catalogDataCache = {
+    barRows,
+    kmcRows,
+    chainTypeRows,
+    loadedAtMs: now,
+  };
+
+  return { barRows, kmcRows, chainTypeRows };
 }
 
 async function getLookupValues(env, opts = {}) {
