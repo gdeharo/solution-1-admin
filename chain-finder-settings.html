@@ -86,6 +86,7 @@
     .modal .actions button { width: auto; min-width: 120px; }
     .table-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; white-space: nowrap; }
     .table-actions button { width: auto; min-width: 0; padding: 4px 8px; font-size: 12px; }
+    .icon-btn { min-width: 28px; width: 28px; height: 26px; padding: 0; line-height: 1; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
     th:last-child, td:last-child { white-space: nowrap; }
 
     @media (max-width: 980px) {
@@ -113,11 +114,6 @@
       <p class="muted">Choose an area to manage.</p>
       <div class="menu-grid">
         <div class="menu-item">
-          <h3>Settings</h3>
-          <p>Title, colors, button label, fallback text.</p>
-          <button data-nav="settings">Open Settings</button>
-        </div>
-        <div class="menu-item">
           <h3>KMC Chains</h3>
           <p>KMC chain catalog rows and pricing.</p>
           <button data-nav="kmc-chains">Open KMC Chains</button>
@@ -131,6 +127,11 @@
           <h3>Search Log</h3>
           <p>Review search activity and top requested combinations.</p>
           <button data-nav="search-log">Open Search Log</button>
+        </div>
+        <div class="menu-item">
+          <h3>Settings</h3>
+          <p>Title, colors, button label, fallback text.</p>
+          <button data-nav="settings">Open Settings</button>
         </div>
       </div>
       <div class="menu-item" style="margin-top:12px;">
@@ -305,6 +306,7 @@
     // Hide these in table display only.
     const TABLE_HIDDEN_FIELDS = {
       "kmc-chains": new Set(),
+      "bar-lengths": new Set(["Chain Type Code", "Name"]),
     };
 
     const state = {
@@ -1042,9 +1044,14 @@
         const rowNum = Number(r.__row || 0);
         const rowClass = rowNum && rowNum === highlightRow ? ` class="row-highlight"` : "";
         const canDelete = ["kmc-chains", "bar-lengths"].includes(slug);
+        const canDuplicate = ["kmc-chains", "bar-lengths"].includes(slug);
         const actions = readonly
           ? `<span class="muted">Read only</span>`
-          : `<span class="table-actions"><button class="secondary" onclick="editRow('${slug}', ${Number(r.__row)})">Edit</button>${canDelete ? `<button class="danger" onclick="confirmDeleteRow('${slug}', ${Number(r.__row)})">Delete</button>` : ""}</span>`;
+          : `<span class="table-actions">` +
+            `<button class="secondary icon-btn" title="Edit" aria-label="Edit" onclick="editRow('${slug}', ${Number(r.__row)})">&#9998;</button>` +
+            `${canDuplicate ? `<button class="secondary icon-btn" title="Duplicate" aria-label="Duplicate" onclick="duplicateRow('${slug}', ${Number(r.__row)})">&#10697;</button>` : ""}` +
+            `${canDelete ? `<button class="danger icon-btn" title="Delete" aria-label="Delete" onclick="confirmDeleteRow('${slug}', ${Number(r.__row)})">&#128465;</button>` : ""}` +
+            `</span>`;
         return `<tr${rowClass}>${cols}${showRowColumn ? `<td>${escapeHtml(r.__row)}</td>` : ""}<td>${
           actions
         }</td></tr>`;
@@ -1156,7 +1163,49 @@
       window.scrollTo({ top: document.getElementById(`view-${slug}`).offsetTop - 20, behavior: "smooth" });
     }
 
+    function duplicateRow(slug, rowNumber) {
+      const cfg = ENTITIES[slug];
+      const row = (state.entities[slug] || []).find((r) => Number(r.__row) === Number(rowNumber));
+      if (!row) return;
+
+      const copy = {};
+      for (const f of cfg.fields) copy[f] = toStr(row[f]);
+
+      if (slug === "bar-lengths") {
+        copy["Bar Length"] = "";
+        copy["Drive Links"] = "";
+        copy["KMC Chain URL"] = "";
+        copy["Name"] = "";
+      }
+      if (slug === "kmc-chains") {
+        copy["Links"] = "";
+        copy["Part Reference"] = "";
+        copy["UPC"] = "";
+        copy["URL"] = "";
+      }
+
+      for (const f of cfg.fields) {
+        setVal(fieldInputId(slug, f), copy[f] || "");
+      }
+      document.getElementById(`edit-row-${slug}`).value = "";
+
+      if (slug === "kmc-chains") renderEntityTable("kmc-chains");
+      if (slug === "bar-lengths") {
+        populateBarLengthLookupOptions();
+        setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Brand")), copy["Chainsaw Brand"] || "");
+        populateBarModelOptions();
+        setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Chainsaw Model")), copy["Chainsaw Model"] || "");
+        populateBarLengthValueOptions();
+        setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Bar Length")), "");
+        updateBarLengthNameDerived();
+        renderEntityTable("bar-lengths");
+      }
+
+      window.scrollTo({ top: document.getElementById(`view-${slug}`).offsetTop - 20, behavior: "smooth" });
+    }
+
     window.editRow = editRow;
+    window.duplicateRow = duplicateRow;
     window.confirmDeleteRow = confirmDeleteRow;
 
     function confirmDeleteRow(slug, rowNumber) {
