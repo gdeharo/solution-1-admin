@@ -58,6 +58,11 @@
       gap: 8px;
       margin-top: 10px;
     }
+    .analytics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 14px; }
+    .analytics-card { border: 1px solid #dbe7ff; border-radius: 8px; padding: 10px; background: #f4f8ff; }
+    .analytics-card .label { font-size: 12px; color: #445; }
+    .analytics-card .value { font-size: 22px; font-weight: 700; color: #146ff8; margin-top: 4px; }
+    .filters-grid { display: grid; grid-template-columns: 90px 90px 1fr 1fr 110px auto; gap: 8px; margin: 8px 0 12px; align-items: center; }
 
     .modal-backdrop {
       position: fixed;
@@ -89,6 +94,8 @@
       .settings-row { grid-template-columns: 1fr; }
       .settings-actions { grid-template-columns: 1fr; }
       .toolbar { flex-wrap: wrap; }
+      .analytics-grid { grid-template-columns: 1fr; }
+      .filters-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -111,11 +118,6 @@
           <button data-nav="settings">Open Settings</button>
         </div>
         <div class="menu-item">
-          <h3>Chain Types</h3>
-          <p>Chain type profile definitions and lookup values.</p>
-          <button data-nav="chain-types">Open Chain Types</button>
-        </div>
-        <div class="menu-item">
           <h3>KMC Chains</h3>
           <p>KMC chain catalog rows and pricing.</p>
           <button data-nav="kmc-chains">Open KMC Chains</button>
@@ -124,6 +126,11 @@
           <h3>Chainsaw List</h3>
           <p>Brand/model/bar-length fitment rows.</p>
           <button data-nav="bar-lengths">Open Chainsaw List</button>
+        </div>
+        <div class="menu-item">
+          <h3>Search Log</h3>
+          <p>Review search activity and top requested combinations.</p>
+          <button data-nav="search-log">Open Search Log</button>
         </div>
       </div>
       <div class="menu-item" style="margin-top:12px;">
@@ -190,9 +197,31 @@
       </div>
     </section>
 
-    <section id="view-chain-types" class="view card hidden"></section>
     <section id="view-kmc-chains" class="view card hidden"></section>
     <section id="view-bar-lengths" class="view card hidden"></section>
+    <section id="view-search-log" class="view card hidden">
+      <div class="toolbar">
+        <button class="secondary" data-nav="home">Back To Menu</button>
+      </div>
+      <h2>Search Log</h2>
+      <div class="filters-grid">
+        <input id="logDays" type="number" min="1" value="30" placeholder="Days" />
+        <input id="logLimit" type="number" min="1" max="500" value="100" placeholder="Rows" />
+        <input id="logBrand" placeholder="Filter brand (optional)" />
+        <input id="logModel" placeholder="Filter model (optional)" />
+        <input id="logBarLength" placeholder="Filter bar length (optional)" />
+        <button id="btnLoadSearchLog">Refresh</button>
+      </div>
+      <div class="analytics-grid">
+        <div class="analytics-card"><div class="label">Searches</div><div class="value" id="sumSearches">0</div></div>
+        <div class="analytics-card"><div class="label">Successful</div><div class="value" id="sumSuccessful">0</div></div>
+        <div class="analytics-card"><div class="label">Total Matches</div><div class="value" id="sumMatches">0</div></div>
+      </div>
+      <h3>Top Searches</h3>
+      <table id="table-top-searches"></table>
+      <h3 style="margin-top:14px;">Recent Searches</h3>
+      <table id="table-search-log"></table>
+    </section>
   </div>
 
     <div id="errorModalBackdrop" class="modal-backdrop" aria-hidden="true">
@@ -233,10 +262,6 @@
     const PANEL_ID = "kmc-chain-finder-admin";
 
     const ENTITIES = {
-      "chain-types": {
-        title: "Chain Types",
-        fields: ["Chain Type", "Gauge", "Pitch", "Chisel Style", "ANSI Low Kickback", "Profile Class", "Kerf Type", "Sequence Type"],
-      },
       "kmc-chains": {
         title: "KMC Chains",
         fields: [
@@ -289,14 +314,13 @@
         fromHub: false,
       },
       entities: {
-        "chain-types": [],
         "kmc-chains": [],
         "bar-lengths": [],
       },
       loaded: {
-        "chain-types": false,
         "kmc-chains": false,
         "bar-lengths": false,
+        "search-log": false,
         settings: false,
         lookups: false,
       },
@@ -305,7 +329,6 @@
         "bar-lengths": {},
       },
       highlightedRowBySlug: {
-        "chain-types": 0,
         "kmc-chains": 0,
         "bar-lengths": 0,
       },
@@ -346,9 +369,9 @@
       views: {
         home: document.getElementById("view-home"),
         settings: document.getElementById("view-settings"),
-        "chain-types": document.getElementById("view-chain-types"),
         "kmc-chains": document.getElementById("view-kmc-chains"),
         "bar-lengths": document.getElementById("view-bar-lengths"),
+        "search-log": document.getElementById("view-search-log"),
       },
       errorModalBackdrop: document.getElementById("errorModalBackdrop"),
       errorModalMessage: document.getElementById("errorModalMessage"),
@@ -362,6 +385,17 @@
       lookupModalInput: document.getElementById("lookupModalInput"),
       lookupModalCancel: document.getElementById("lookupModalCancel"),
       lookupModalSave: document.getElementById("lookupModalSave"),
+      logDays: document.getElementById("logDays"),
+      logLimit: document.getElementById("logLimit"),
+      logBrand: document.getElementById("logBrand"),
+      logModel: document.getElementById("logModel"),
+      logBarLength: document.getElementById("logBarLength"),
+      btnLoadSearchLog: document.getElementById("btnLoadSearchLog"),
+      sumSearches: document.getElementById("sumSearches"),
+      sumSuccessful: document.getElementById("sumSuccessful"),
+      sumMatches: document.getElementById("sumMatches"),
+      tableTopSearches: document.getElementById("table-top-searches"),
+      tableSearchLog: document.getElementById("table-search-log"),
     };
 
     if (ui.btnMainAdmin) {
@@ -403,6 +437,7 @@
     ui.lookupModalBackdrop.addEventListener("click", (e) => {
       if (e.target === ui.lookupModalBackdrop) closeLookupModal(null);
     });
+    ui.btnLoadSearchLog.addEventListener("click", () => loadSearchLogView(true));
 
     for (const slug of Object.keys(ENTITIES)) {
       renderEntityScaffold(slug);
@@ -610,15 +645,14 @@
         await Promise.all([
           loadSettings(),
           loadLookups(),
-          loadEntity("chain-types"),
           loadEntity("kmc-chains"),
           loadEntity("bar-lengths"),
         ]);
         state.loaded.settings = true;
         state.loaded.lookups = true;
-        state.loaded["chain-types"] = true;
         state.loaded["kmc-chains"] = true;
         state.loaded["bar-lengths"] = true;
+        state.loaded["search-log"] = false;
         setStatus("Data refreshed.", true);
       } catch (err) {
         setStatus(err.message, false);
@@ -636,7 +670,7 @@
           await loadSettings();
           state.loaded.settings = true;
         }
-        if (["chain-types", "bar-lengths"].includes(viewName) && !state.loaded.lookups) {
+        if (viewName === "bar-lengths" && !state.loaded.lookups) {
           await loadLookups();
           state.loaded.lookups = true;
         }
@@ -644,20 +678,17 @@
           await loadLookups();
           state.loaded.lookups = true;
         }
-        if (viewName === "kmc-chains" && !state.loaded["chain-types"]) {
-          await loadEntity("chain-types");
-          state.loaded["chain-types"] = true;
-        }
         if (ENTITIES[viewName] && !state.loaded[viewName]) {
           await loadEntity(viewName);
           state.loaded[viewName] = true;
         }
+        if (viewName === "search-log" && !state.loaded["search-log"]) {
+          await loadSearchLogView(false);
+          state.loaded["search-log"] = true;
+        }
 
         if (viewName === "kmc-chains") {
           renderEntityTable("kmc-chains");
-        }
-        if (viewName === "chain-types") {
-          populateChainTypeLookupOptions();
         }
         if (viewName === "bar-lengths") {
           populateChainTypeLookupOptions();
@@ -898,10 +929,6 @@
       state.entities[slug] = data.rows || [];
       renderEntityTable(slug);
 
-      if (slug === "chain-types") {
-        populateChainTypeLookupOptions();
-      }
-
       if (slug === "bar-lengths") {
         populateBarLengthLookupOptions();
         updateBarLengthNameDerived();
@@ -910,6 +937,54 @@
       if (slug === "kmc-chains") {
         renderEntityTable("kmc-chains");
       }
+    }
+
+    async function loadSearchLogView(showToast) {
+      const days = Math.max(1, Number(ui.logDays.value || 30));
+      const limit = Math.min(500, Math.max(1, Number(ui.logLimit.value || 100)));
+      const brand = String(ui.logBrand.value || "").trim();
+      const model = String(ui.logModel.value || "").trim();
+      const barLength = String(ui.logBarLength.value || "").trim();
+
+      const summary = await api(`/admin/analytics/search-summary?days=${days}`, "GET");
+      const top = await api(`/admin/analytics/top-searches?days=${days}&limit=10`, "GET");
+      const rows = await api(
+        `/admin/analytics/search-log?days=${days}&limit=${limit}` +
+          `&brand=${encodeURIComponent(brand)}` +
+          `&model=${encodeURIComponent(model)}` +
+          `&barLength=${encodeURIComponent(barLength)}`,
+        "GET"
+      );
+
+      const s = summary.summary || {};
+      ui.sumSearches.textContent = String(Number(s.searches || 0));
+      ui.sumSuccessful.textContent = String(Number(s.successful_searches || 0));
+      ui.sumMatches.textContent = String(Number(s.total_matches || 0));
+
+      const topRows = Array.isArray(top.rows) ? top.rows : [];
+      const topHead = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Searches</th><th>Total Matches</th></tr>";
+      const topBody = topRows.map((r) => `<tr>
+        <td>${escapeHtml(r.brand)}</td>
+        <td>${escapeHtml(r.model)}</td>
+        <td>${escapeHtml(r.bar_length)}</td>
+        <td>${escapeHtml(r.searches)}</td>
+        <td>${escapeHtml(r.total_matches)}</td>
+      </tr>`).join("");
+      ui.tableTopSearches.innerHTML = topHead + topBody;
+
+      const logRows = Array.isArray(rows.rows) ? rows.rows : [];
+      const logHead = "<tr><th>When</th><th>Brand</th><th>Model</th><th>Bar Length</th><th>Matches</th><th>Part References</th></tr>";
+      const logBody = logRows.map((r) => `<tr>
+        <td>${escapeHtml(formatIsoLocal(r.timestamp_iso))}</td>
+        <td>${escapeHtml(r.brand)}</td>
+        <td>${escapeHtml(r.model)}</td>
+        <td>${escapeHtml(r.bar_length)}</td>
+        <td>${escapeHtml(r.match_count)}</td>
+        <td>${escapeHtml(r.matched_part_references || "")}</td>
+      </tr>`).join("");
+      ui.tableSearchLog.innerHTML = logHead + logBody;
+
+      if (showToast) setStatus("Search log refreshed.", true);
     }
 
     function renderEntityTable(slug) {
@@ -958,7 +1033,7 @@
       const hiddenCols = TABLE_HIDDEN_FIELDS[slug] || new Set();
       const visibleFields = cfg.fields.filter((f) => !hiddenCols.has(f));
 
-      const showRowColumn = !["kmc-chains", "chain-types", "bar-lengths"].includes(slug);
+      const showRowColumn = !["kmc-chains", "bar-lengths"].includes(slug);
       const header = `<tr>${visibleFields.map((f) => `<th>${escapeHtml(f)}</th>`).join("")}${showRowColumn ? "<th>Row</th>" : ""}<th>Actions</th></tr>`;
       const highlightRow = Number(state.highlightedRowBySlug[slug] || 0);
       const readonly = state.access.fromHub && !canWrite();
@@ -966,7 +1041,7 @@
         const cols = visibleFields.map((f) => `<td>${escapeHtml(r[f])}</td>`).join("");
         const rowNum = Number(r.__row || 0);
         const rowClass = rowNum && rowNum === highlightRow ? ` class="row-highlight"` : "";
-        const canDelete = ["chain-types", "kmc-chains", "bar-lengths"].includes(slug);
+        const canDelete = ["kmc-chains", "bar-lengths"].includes(slug);
         const actions = readonly
           ? `<span class="muted">Read only</span>`
           : `<span class="table-actions"><button class="secondary" onclick="editRow('${slug}', ${Number(r.__row)})">Edit</button>${canDelete ? `<button class="danger" onclick="confirmDeleteRow('${slug}', ${Number(r.__row)})">Delete</button>` : ""}</span>`;
@@ -994,20 +1069,6 @@
           return;
         }
       }
-      if (slug === "chain-types") {
-        const dup = findDuplicateChainTypeRow(row, state.entities["chain-types"] || [], rowNumber);
-        if (dup) {
-          state.highlightedRowBySlug["chain-types"] = Number(dup.__row || 0);
-          renderEntityTable("chain-types");
-          const existingCode = toStr(dup["Chain Type"]).trim() || "(blank)";
-          showErrorModal(`Duplicate chain type values found (existing code: ${existingCode}). Use Edit on the highlighted row.`);
-          setStatus("Duplicate chain type values found.", false);
-          return;
-        }
-        if (!row["Chain Type"]) {
-          row["Chain Type"] = generateChainTypeCode(row, state.entities["chain-types"] || [], rowNumber);
-        }
-      }
       if (slug === "bar-lengths") {
         row["Name"] = buildBarLengthName(row["Chainsaw Model"], row["Bar Length"]);
       }
@@ -1033,18 +1094,6 @@
           setSelectValueWithOption(document.getElementById(fieldInputId("bar-lengths", "Bar Length")), keep.barLength);
           applyBarModelDefaultsFromSelection();
           renderEntityTable("bar-lengths");
-        } else if (slug === "chain-types") {
-          const keep = {
-            gauge: toStr(row["Gauge"]).trim(),
-            pitch: toStr(row["Pitch"]).trim(),
-          };
-          document.getElementById(`edit-row-${slug}`).value = "";
-          await loadEntity(slug);
-          const gaugeEl = document.getElementById(fieldInputId("chain-types", "Gauge"));
-          const pitchEl = document.getElementById(fieldInputId("chain-types", "Pitch"));
-          setSelectValueWithOption(gaugeEl, keep.gauge);
-          setSelectValueWithOption(pitchEl, keep.pitch);
-          renderEntityTable("chain-types");
         } else {
           clearEntityForm(slug);
           await loadEntity(slug);
@@ -1052,14 +1101,6 @@
         setStatus(`${cfg.title}: row saved.`, true);
       } catch (err) {
         const errorText = String(err.message || "").toLowerCase();
-        if (slug === "chain-types" && errorText.includes("duplicate chain type variables")) {
-          const dup = findDuplicateChainTypeRow(row, state.entities["chain-types"] || [], rowNumber);
-          if (dup) {
-            state.highlightedRowBySlug["chain-types"] = Number(dup.__row || 0);
-            renderEntityTable("chain-types");
-          }
-          showErrorModal("Duplicate chain type values detected. Use Edit on the highlighted row.");
-        }
         if (slug === "kmc-chains" && errorText.includes("duplicate part reference")) {
           showErrorModal("Part reference allready exists, it can not be saved");
         } else if (slug === "kmc-chains" && errorText.includes("duplicate upc")) {
@@ -1083,16 +1124,10 @@
       document.getElementById(`edit-row-${slug}`).value = "";
 
       if (slug === "kmc-chains") renderEntityTable("kmc-chains");
-      if (slug === "chain-types") {
-        state.highlightedRowBySlug["chain-types"] = 0;
-      }
       if (slug === "bar-lengths") {
         populateBarLengthLookupOptions();
         updateBarLengthNameDerived();
         renderEntityTable("bar-lengths");
-      }
-      if (slug === "chain-types") {
-        renderEntityTable("chain-types");
       }
     }
 
@@ -1126,7 +1161,7 @@
 
     function confirmDeleteRow(slug, rowNumber) {
       if (!assertCanWrite("delete rows")) return;
-      if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 2) return;
+      if (!Number.isInteger(Number(rowNumber)) || Number(rowNumber) < 1) return;
       state.deletePending = {
         slug: String(slug || ""),
         rowNumber: Number(rowNumber),
@@ -1147,7 +1182,7 @@
       if (!assertCanWrite("delete rows")) return;
       const slug = state.deletePending.slug;
       const rowNumber = Number(state.deletePending.rowNumber || 0);
-      if (!slug || rowNumber < 2) {
+      if (!slug || rowNumber < 1) {
         hideConfirmDeleteModal();
         return;
       }
@@ -1541,6 +1576,14 @@
 
     function toStr(value) {
       return value == null ? "" : String(value);
+    }
+
+    function formatIsoLocal(value) {
+      const s = toStr(value).trim();
+      if (!s) return "";
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return s;
+      return d.toLocaleString();
     }
 
     function buildBarLengthName(model, barLength) {
