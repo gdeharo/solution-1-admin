@@ -135,11 +135,16 @@
           <p>Title, colors, button label, fallback text.</p>
           <button data-nav="settings">Open Settings</button>
         </div>
-      </div>
-      <div class="menu-item" style="margin-top:12px;">
-        <h3>Embed Snippets</h3>
-        <p>Copy website embed code for the finder tool.</p>
-        <button id="btnOpenEmbedSnippets" class="secondary">Open Embed Snippets</button>
+        <div class="menu-item">
+          <h3>Selector Preview</h3>
+          <p>Open the customer-facing chain finder page.</p>
+          <button id="btnOpenSelectorPreview" class="secondary">Open Selector Preview</button>
+        </div>
+        <div class="menu-item">
+          <h3>Embed Snippets</h3>
+          <p>Copy website embed code for the finder tool.</p>
+          <button id="btnOpenEmbedSnippets" class="secondary">Open Embed Snippets</button>
+        </div>
       </div>
     </section>
 
@@ -364,6 +369,7 @@
     const ui = {
       accessInfo: document.getElementById("accessInfo"),
       btnMainAdmin: document.getElementById("btnMainAdmin"),
+      btnOpenSelectorPreview: document.getElementById("btnOpenSelectorPreview"),
       btnOpenEmbedSnippets: document.getElementById("btnOpenEmbedSnippets"),
       btnPanelLogout: document.getElementById("btnPanelLogout"),
       connectionDetails: document.getElementById("connectionDetails"),
@@ -410,6 +416,11 @@
     if (ui.btnOpenEmbedSnippets) {
       ui.btnOpenEmbedSnippets.addEventListener("click", () => {
         window.location.href = "/embed-snippets/";
+      });
+    }
+    if (ui.btnOpenSelectorPreview) {
+      ui.btnOpenSelectorPreview.addEventListener("click", () => {
+        window.open("/chainsaw-chain-finder/", "_blank", "noopener");
       });
     }
     document.getElementById("saveConn").addEventListener("click", saveConnection);
