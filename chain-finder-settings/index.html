@@ -115,32 +115,32 @@
       <h2>Menu</h2>
       <p class="muted">Choose an area to manage.</p>
       <div class="menu-grid">
-        <div class="menu-item">
+        <div class="menu-item" data-menu-key="kmc-chains">
           <h3>KMC Chains</h3>
           <p>KMC chain catalog rows and pricing.</p>
           <button data-nav="kmc-chains">Open KMC Chains</button>
         </div>
-        <div class="menu-item">
+        <div class="menu-item" data-menu-key="bar-lengths">
           <h3>Chainsaw List</h3>
           <p>Brand/model/bar-length fitment rows.</p>
           <button data-nav="bar-lengths">Open Chainsaw List</button>
         </div>
-        <div class="menu-item">
+        <div class="menu-item" data-menu-key="search-log">
           <h3>Search Log</h3>
           <p>Review search activity and top requested combinations.</p>
           <button data-nav="search-log">Open Search Log</button>
         </div>
-        <div class="menu-item">
+        <div class="menu-item" data-menu-key="settings">
           <h3>Settings</h3>
           <p>Title, colors, button label, fallback text.</p>
           <button data-nav="settings">Open Settings</button>
         </div>
-        <div class="menu-item">
+        <div class="menu-item" data-menu-key="selector-preview">
           <h3>Selector Preview</h3>
           <p>Open the customer-facing chain finder page.</p>
           <button id="btnOpenSelectorPreview" class="secondary">Open Selector Preview</button>
         </div>
-        <div class="menu-item">
+        <div class="menu-item" data-menu-key="embed-snippets">
           <h3>Embed Snippets</h3>
           <p>Copy website embed code for the finder tool.</p>
           <button id="btnOpenEmbedSnippets" class="secondary">Open Embed Snippets</button>
@@ -507,12 +507,24 @@
       return state.access.panelRole === "viewer" || state.access.panelRole === "editor" || state.access.panelRole === "manager";
     }
 
+    function applyMenuVisibilityByRole() {
+      const all = ["kmc-chains", "bar-lengths", "search-log", "settings", "selector-preview", "embed-snippets"];
+      const editor = new Set(["kmc-chains", "bar-lengths"]);
+      const role = state.access.fromHub ? (state.access.panelRole || "none") : "manager";
+      const allowed = role === "manager" ? new Set(all) : editor;
+      document.querySelectorAll(".menu-item[data-menu-key]").forEach((el) => {
+        const key = String(el.getAttribute("data-menu-key") || "").trim();
+        el.classList.toggle("hidden", !allowed.has(key));
+      });
+    }
+
     function applyAccessUI() {
       if (state.access.fromHub) {
         ui.btnPanelLogout.classList.remove("hidden");
         ui.btnMainAdmin.classList.remove("hidden");
         ui.connectionDetails.classList.add("hidden");
         ui.accessInfo.textContent = `Access role: ${state.access.panelRole || "none"} (from Admin Hub)`;
+        applyMenuVisibilityByRole();
         if (!hasPanelReadAccess()) {
           Object.values(ui.views).forEach((v) => v.classList.add("hidden"));
           setStatus("No panel access. Contact your manager.", false);
@@ -521,6 +533,7 @@
         ui.btnPanelLogout.classList.add("hidden");
         ui.btnMainAdmin.classList.add("hidden");
         ui.accessInfo.textContent = "Access role: full admin (standalone mode)";
+        applyMenuVisibilityByRole();
       }
     }
 
