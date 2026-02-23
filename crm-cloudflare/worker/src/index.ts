@@ -529,11 +529,11 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/settings\/theme$/,
-  withAuth(async (_request, env) => {
+  async (_request, env) => {
     const row = await env.CRM_DB.prepare(`SELECT value_json FROM app_settings WHERE key = 'theme'`).first<{ value_json: string }>();
     if (!row) return json({ theme: null });
     return json({ theme: JSON.parse(row.value_json) });
-  }) as any
+  }
 );
 
 addRoute(

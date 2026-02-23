@@ -6,10 +6,8 @@
     <title>CRM on Cloudflare</title>
     <script>
       (() => {
-        try {
-          const raw = localStorage.getItem('crm_theme_v1');
-          if (!raw) return;
-          const theme = JSON.parse(raw);
+        const applyThemeVars = (theme) => {
+          if (!theme) return;
           const root = document.documentElement;
           if (theme.bg) root.style.setProperty('--bg', theme.bg);
           if (theme.panel) root.style.setProperty('--panel', theme.panel);
@@ -19,7 +17,24 @@
           if (theme.accent) root.style.setProperty('--accent', theme.accent);
           if (theme.accentSoft) root.style.setProperty('--accent-soft', theme.accentSoft);
           if (theme.danger) root.style.setProperty('--danger', theme.danger);
+        };
+        try {
+          const raw = localStorage.getItem('crm_theme_v1');
+          if (raw) {
+            applyThemeVars(JSON.parse(raw));
+            return;
+          }
         } catch {}
+        fetch('https://crm-api.gdeharo.workers.dev/api/settings/theme')
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (!data?.theme) return;
+            applyThemeVars(data.theme);
+            try {
+              localStorage.setItem('crm_theme_v1', JSON.stringify(data.theme));
+            } catch {}
+          })
+          .catch(() => {});
       })();
     </script>
     <link rel="stylesheet" href="./styles.css" />
