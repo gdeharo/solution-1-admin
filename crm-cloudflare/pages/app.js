@@ -268,7 +268,7 @@ function interactionTypeOptions(selectedValue = '') {
     .join('');
 }
 
-function applyTheme(theme) {
+function applyTheme(theme, persist = true) {
   const merged = { ...DEFAULT_THEME, ...(theme || {}) };
   const root = document.documentElement;
   root.style.setProperty('--bg', merged.bg);
@@ -280,9 +280,11 @@ function applyTheme(theme) {
   root.style.setProperty('--accent-soft', merged.accentSoft);
   root.style.setProperty('--danger', merged.danger);
   state.theme = merged;
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(merged));
-  } catch {
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(merged));
+    } catch {
+    }
   }
 }
 
@@ -451,7 +453,7 @@ async function loadTheme() {
     const data = await api('/api/settings/theme');
     applyTheme(data.theme || DEFAULT_THEME);
   } catch {
-    applyTheme(DEFAULT_THEME);
+    applyTheme(DEFAULT_THEME, false);
   }
 }
 
@@ -1817,7 +1819,7 @@ function bindRepsEvents() {
   };
 
   themeForm.querySelector('[name="accent"]').oninput = (event) => {
-    applyTheme(deriveThemeFromAccent(event.target.value));
+    applyTheme(deriveThemeFromAccent(event.target.value), false);
   };
 
   const interactionTypeValueForm = document.getElementById('interactionTypeValueForm');
@@ -2197,7 +2199,7 @@ function initInviteSetupForm() {
   if (!inviteToken) {
     form.classList.add('hidden');
     loginForm.classList.remove('hidden');
-    bootstrapForm.classList.remove('hidden');
+    bootstrapForm.classList.add('hidden');
     return;
   }
 
@@ -2233,7 +2235,7 @@ function initInviteSetupForm() {
       form.reset();
       form.classList.add('hidden');
       loginForm.classList.remove('hidden');
-      bootstrapForm.classList.remove('hidden');
+      bootstrapForm.classList.add('hidden');
       showToast('Password saved. You can sign in now.');
     } catch (error) {
       showToast(error.message, true);
@@ -2389,6 +2391,6 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
   }
 };
 
-applyTheme(DEFAULT_THEME);
+applyTheme(DEFAULT_THEME, false);
 initInviteSetupForm();
 loadSession();
