@@ -49,6 +49,15 @@ const randomToken = (bytes = 32): string => {
   return toBase64(arr).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
+const randomPassword = (length = 12): string => {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const arr = new Uint8Array(length);
+  crypto.getRandomValues(arr);
+  let out = '';
+  for (let i = 0; i < length; i += 1) out += alphabet[arr[i] % alphabet.length];
+  return out;
+};
+
 const isoAfterHours = (hours: number): string => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 
 async function hashPassword(password: string, saltBase64?: string): Promise<{ hash: string; salt: string }> {
@@ -261,6 +270,39 @@ addRoute('POST', /^\/api\/auth\/logout$/, async (request, env) => {
   const token = getTokenFromRequest(request);
   if (!token) return err('Unauthorized', 401);
   await env.CRM_DB.prepare(`DELETE FROM sessions WHERE id = ?1`).bind(token).run();
+  return json({ success: true });
+});
+
+addRoute('POST', /^\/api\/auth\/invite\/accept$/, async (request, env) => {
+  const body = await parseJson<{ token: string; password: string }>(request);
+  if (!body?.token || !body?.password) return err('token and password are required');
+  if (String(body.password).length < 8) return err('Password must be at least 8 characters');
+
+  const invite = await env.CRM_DB.prepare(
+    `SELECT ui.id, ui.user_id, ui.expires_at, ui.used_at, u.email
+     FROM user_invites ui
+     JOIN users u ON u.id = ui.user_id
+     WHERE ui.token = ?1`
+  )
+    .bind(body.token)
+    .first<{ id: number; user_id: number; expires_at: string; used_at: string | null; email: string }>();
+
+  if (!invite) return err('Invalid invite token', 404);
+  if (invite.used_at) return err('Invite token already used', 409);
+  if (new Date(invite.expires_at).getTime() < Date.now()) return err('Invite token expired', 410);
+
+  const pwd = await hashPassword(body.password);
+  await env.CRM_DB.batch([
+    env.CRM_DB.prepare(
+      `UPDATE users
+       SET password_hash = ?1, password_salt = ?2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?3`
+    ).bind(pwd.hash, pwd.salt, invite.user_id),
+    env.CRM_DB.prepare(`UPDATE user_invites SET used_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(invite.id),
+    env.CRM_DB.prepare(`DELETE FROM sessions WHERE user_id = ?1`).bind(invite.user_id)
+  ]);
+
+  await audit(env, null, 'accept_invite', 'user', String(invite.user_id), { email: invite.email });
   return json({ success: true });
 });
 
@@ -1060,13 +1102,14 @@ addRoute(
   withAuth(async (request, env, user) => {
     if (!canManageUsers(user.role)) return err('Forbidden', 403);
 
-    const body = await parseJson<{ email: string; fullName: string; role: UserRole; password: string }>(request);
-    if (!body?.email || !body?.fullName || !body?.role || !body?.password) {
-      return err('email, fullName, role, and password are required');
+    const body = await parseJson<{ email: string; fullName: string; role: UserRole; password?: string }>(request);
+    if (!body?.email || !body?.fullName || !body?.role) {
+      return err('email, fullName, and role are required');
     }
     if (!['admin', 'manager', 'rep', 'viewer'].includes(body.role)) return err('Invalid role');
 
-    const pwd = await hashPassword(body.password);
+    const temporaryPassword = body.password?.trim() || randomPassword(12);
+    const pwd = await hashPassword(temporaryPassword);
     const result = await env.CRM_DB.prepare(
       `INSERT INTO users (email, full_name, role, password_hash, password_salt)
        VALUES (?1, ?2, ?3, ?4, ?5)`
@@ -1074,8 +1117,25 @@ addRoute(
       .bind(body.email.toLowerCase().trim(), body.fullName.trim(), body.role, pwd.hash, pwd.salt)
       .run();
 
+    const inviteToken = randomToken(24);
+    const inviteExpiresAt = isoAfterHours(24 * 7);
+    await env.CRM_DB.prepare(
+      `INSERT INTO user_invites (token, user_id, expires_at, created_by_user_id)
+       VALUES (?1, ?2, ?3, ?4)`
+    )
+      .bind(inviteToken, result.meta.last_row_id, inviteExpiresAt, user.id)
+      .run();
+
     await audit(env, user, 'create', 'user', String(result.meta.last_row_id), { email: body.email, role: body.role });
-    return json({ id: result.meta.last_row_id }, 201);
+    return json(
+      {
+        id: result.meta.last_row_id,
+        temporaryPassword,
+        inviteToken,
+        inviteExpiresAt
+      },
+      201
+    );
   }) as any
 );
 

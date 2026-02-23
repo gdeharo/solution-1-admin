@@ -19,7 +19,8 @@ const state = {
   companyEditMode: false,
   contactEditMode: false,
   companySectionState: {},
-  adminOpenSection: ''
+  adminOpenSection: '',
+  currentContactId: null
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -882,6 +883,7 @@ async function openContactCreate(companyId, options = {}) {
 }
 
 async function openContactDetail(contactId) {
+  state.currentContactId = contactId;
   const { customer } = await api(`/api/customers/${contactId}`);
   const contactCompany = state.companies.find((c) => c.id === customer.company_id) || state.currentCompany;
   const contactCountry = contactCompany?.country || 'US';
@@ -1680,7 +1682,6 @@ async function renderRepsView() {
         <option value="manager">Manager</option>
         <option value="admin">Admin</option>
       </select>
-      <input name="password" placeholder="Temporary password" type="password" required />
       <button type="submit">Create User</button>
     `;
     document.getElementById('usersBody').innerHTML = users
@@ -1966,17 +1967,33 @@ function bindRepsEvents() {
       event.preventDefault();
       const fd = new FormData(userCreateForm);
       try {
-        await api('/api/users', {
+        const created = await api('/api/users', {
           method: 'POST',
           body: JSON.stringify({
             fullName: fd.get('fullName'),
             email: fd.get('email'),
-            role: fd.get('role'),
-            password: fd.get('password')
+            role: fd.get('role')
           })
         });
+        const baseUrl = `${window.location.origin}${window.location.pathname}`;
+        const inviteUrl = `${baseUrl}?invite=${encodeURIComponent(created.inviteToken)}&email=${encodeURIComponent(
+          String(fd.get('email') || '')
+        )}`;
+        const subject = `Invitation from ${state.user.fullName} to access Company CRM`;
+        const body = [
+          'Hello, welcome to the Company CRM. By using this web application you will be able to manage companies, contacts and interactions with them easily.',
+          '',
+          `Click here to access the application and set your password: ${inviteUrl}`,
+          '',
+          `Your user ID is your email: ${String(fd.get('email') || '')}`,
+          `Your temporary password is: ${created.temporaryPassword}`
+        ].join('\n');
+        window.open(
+          `mailto:${encodeURIComponent(String(fd.get('email') || ''))}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+          '_blank'
+        );
         await renderRepsView();
-        showToast('User created');
+        showToast('User created. Draft email opened');
       } catch (error) {
         showToast(error.message, true);
       }
@@ -2050,6 +2067,54 @@ async function loadSession() {
     state.token = null;
     setView('authView', 'Sign in', false);
   }
+}
+
+function initInviteSetupForm() {
+  const form = document.getElementById('inviteSetupForm');
+  const loginForm = document.getElementById('loginForm');
+  const bootstrapForm = document.getElementById('bootstrapForm');
+  const url = new URL(window.location.href);
+  const inviteToken = url.searchParams.get('invite');
+  const email = url.searchParams.get('email') || '';
+
+  if (!inviteToken) {
+    form.classList.add('hidden');
+    loginForm.classList.remove('hidden');
+    bootstrapForm.classList.remove('hidden');
+    return;
+  }
+
+  form.classList.remove('hidden');
+  loginForm.classList.add('hidden');
+  bootstrapForm.classList.add('hidden');
+  form.querySelector('[name="email"]').value = email;
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const password = String(fd.get('password') || '');
+    const confirmPassword = String(fd.get('confirmPassword') || '');
+    if (password !== confirmPassword) {
+      showToast('Passwords do not match', true);
+      return;
+    }
+    try {
+      await api('/api/auth/invite/accept', {
+        method: 'POST',
+        body: JSON.stringify({ token: inviteToken, password })
+      });
+      url.searchParams.delete('invite');
+      url.searchParams.delete('email');
+      window.history.replaceState({}, '', url.toString());
+      form.reset();
+      form.classList.add('hidden');
+      loginForm.classList.remove('hidden');
+      bootstrapForm.classList.remove('hidden');
+      showToast('Password saved. You can sign in now.');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
 }
 
 document.getElementById('bootstrapForm').onsubmit = async (event) => {
@@ -2132,6 +2197,29 @@ els.manageRepsBtn.onclick = async () => {
   }
 };
 
+document.addEventListener('keydown', async (event) => {
+  if (event.key !== 'Escape') return;
+  const overlay = document.querySelector('.action-modal-overlay');
+  if (overlay) {
+    overlay.click();
+    return;
+  }
+  const activeView = VIEW_IDS.find((id) => !document.getElementById(id)?.classList.contains('hidden'));
+  if (activeView === 'companyDetailView' && state.companyEditMode) {
+    state.companyEditMode = false;
+    renderCompanyDetail();
+    return;
+  }
+  if (activeView === 'contactDetailView' && state.contactEditMode && state.currentContactId) {
+    state.contactEditMode = false;
+    await openContactDetail(state.currentContactId);
+    return;
+  }
+  if (!els.backBtn.classList.contains('hidden')) {
+    els.backBtn.onclick();
+  }
+});
+
 document.getElementById('companySearch').oninput = (event) => {
   state.companyFilter = event.target.value;
   renderCompanies();
@@ -2178,4 +2266,5 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
 };
 
 applyTheme(DEFAULT_THEME);
+initInviteSetupForm();
 loadSession();
