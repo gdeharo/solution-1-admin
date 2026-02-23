@@ -335,7 +335,7 @@ function buildInviteEmailPayload(adminName, email, inviteToken, temporaryPasswor
   const body = [
     'Hello, welcome to the Company CRM. By using this web application you will be able to manage companies, contacts and interactions with them easily.',
     '',
-    'Open this link to access the application and set your password:',
+    'Copy this link to your browser to access the application and set your password:',
     inviteUrl,
     '',
     `Your user ID is your email: ${email}`,
