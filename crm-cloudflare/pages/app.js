@@ -2391,6 +2391,12 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
   }
 };
 
-applyTheme(DEFAULT_THEME, false);
+try {
+  const cached = localStorage.getItem(THEME_STORAGE_KEY);
+  if (cached) {
+    applyTheme(JSON.parse(cached), false);
+  }
+} catch {
+}
 initInviteSetupForm();
 loadSession();

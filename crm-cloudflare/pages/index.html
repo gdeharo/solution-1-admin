@@ -22,7 +22,6 @@
           const raw = localStorage.getItem('crm_theme_v1');
           if (raw) {
             applyThemeVars(JSON.parse(raw));
-            return;
           }
         } catch {}
         fetch('https://crm-api.gdeharo.workers.dev/api/settings/theme')
