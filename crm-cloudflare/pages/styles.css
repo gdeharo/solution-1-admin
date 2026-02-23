@@ -553,9 +553,13 @@ tr.clickable:hover {
 
 #userAdminCard th:nth-child(5),
 #userAdminCard td:nth-child(5) {
-  width: 17%;
+  width: 24%;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+#userAdminCard td:nth-child(5) {
+  white-space: nowrap;
 }
 
 .action-modal h3 {
