@@ -407,18 +407,17 @@ tr.clickable:hover {
   align-items: start;
 }
 
-.interaction-top-grid {
+.interaction-layout {
   display: grid;
   gap: 0.6rem;
   grid-template-columns: 2fr 1fr;
   align-items: start;
 }
 
-.interaction-assets-grid {
+.interaction-left-stack,
+.interaction-right-stack {
   display: grid;
   gap: 0.6rem;
-  grid-template-columns: 2fr 1fr;
-  align-items: start;
 }
 
 #interactionCreateForm input,
@@ -503,8 +502,7 @@ tr.clickable:hover {
   .contact-top-grid,
   .contact-top-grid-two,
   .contact-assets-grid,
-  .interaction-top-grid,
-  .interaction-assets-grid {
+  .interaction-layout {
     grid-template-columns: 1fr;
   }
   .name-row {
