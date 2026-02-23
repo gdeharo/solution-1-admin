@@ -526,6 +526,39 @@ tr.clickable:hover {
   vertical-align: middle;
 }
 
+#userAdminCard table {
+  table-layout: fixed;
+}
+
+#userAdminCard th:nth-child(1),
+#userAdminCard td:nth-child(1) {
+  width: 24%;
+}
+
+#userAdminCard th:nth-child(2),
+#userAdminCard td:nth-child(2) {
+  width: 30%;
+}
+
+#userAdminCard th:nth-child(3),
+#userAdminCard td:nth-child(3) {
+  width: 16%;
+}
+
+#userAdminCard th:nth-child(4),
+#userAdminCard td:nth-child(4) {
+  width: 12%;
+}
+
+#userAdminCard th:nth-child(5),
+#userAdminCard td:nth-child(5) {
+  width: 18%;
+}
+
+#userAdminCard td:nth-child(5) {
+  white-space: nowrap;
+}
+
 .action-modal h3 {
   margin: 0 0 0.7rem;
 }
