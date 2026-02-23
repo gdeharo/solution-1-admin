@@ -189,10 +189,6 @@
               </thead>
               <tbody id="repsBody"></tbody>
             </table>
-            <div id="repDetailCard" class="card hidden">
-              <h3 id="repDetailTitle">Rep Detail</h3>
-              <ul id="repDetailCompanies" class="list"></ul>
-            </div>
           </div>
         </details>
 
@@ -207,12 +203,18 @@
         <details class="admin-section">
           <summary>Dropdown Values</summary>
           <div class="card">
-            <h3>Segments</h3>
-            <form id="segmentValueForm" class="row wrap"></form>
-            <ul id="segmentValueList" class="list"></ul>
-            <h3>Types</h3>
-            <form id="typeValueForm" class="row wrap"></form>
-            <ul id="typeValueList" class="list"></ul>
+            <div class="value-columns">
+              <div>
+                <h3>Segments</h3>
+                <form id="segmentValueForm" class="row wrap"></form>
+                <ul id="segmentValueList" class="list"></ul>
+              </div>
+              <div>
+                <h3>Types</h3>
+                <form id="typeValueForm" class="row wrap"></form>
+                <ul id="typeValueList" class="list"></ul>
+              </div>
+            </div>
           </div>
         </details>
 
@@ -234,6 +236,21 @@
             </table>
           </div>
         </details>
+      </section>
+
+      <section id="repAccountsView" class="panel hidden">
+        <h2 id="repAccountsTitle">Rep Accounts</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>City</th>
+              <th>State</th>
+              <th>Zip</th>
+            </tr>
+          </thead>
+          <tbody id="repAccountsBody"></tbody>
+        </table>
       </section>
     </main>
 

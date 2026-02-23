@@ -18,7 +18,8 @@ const state = {
   history: [],
   companyEditMode: false,
   contactEditMode: false,
-  companySectionState: {}
+  companySectionState: {},
+  adminOpenSection: ''
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -31,7 +32,8 @@ const VIEW_IDS = [
   'contactCreateView',
   'interactionDetailView',
   'interactionCreateView',
-  'repsView'
+  'repsView',
+  'repAccountsView'
 ];
 
 const els = {
@@ -84,6 +86,21 @@ const US_STATES = [
 ];
 
 const CA_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
+const TERRITORY_STATE_OPTIONS = [
+  ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'], ['CO', 'Colorado'],
+  ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'], ['ID', 'Idaho'],
+  ['IL', 'Illinois'], ['IN', 'Indiana'], ['IA', 'Iowa'], ['KS', 'Kansas'], ['KY', 'Kentucky'], ['LA', 'Louisiana'],
+  ['ME', 'Maine'], ['MD', 'Maryland'], ['MA', 'Massachusetts'], ['MI', 'Michigan'], ['MN', 'Minnesota'],
+  ['MS', 'Mississippi'], ['MO', 'Missouri'], ['MT', 'Montana'], ['NE', 'Nebraska'], ['NV', 'Nevada'],
+  ['NH', 'New Hampshire'], ['NJ', 'New Jersey'], ['NM', 'New Mexico'], ['NY', 'New York'], ['NC', 'North Carolina'],
+  ['ND', 'North Dakota'], ['OH', 'Ohio'], ['OK', 'Oklahoma'], ['OR', 'Oregon'], ['PA', 'Pennsylvania'],
+  ['RI', 'Rhode Island'], ['SC', 'South Carolina'], ['SD', 'South Dakota'], ['TN', 'Tennessee'], ['TX', 'Texas'],
+  ['UT', 'Utah'], ['VT', 'Vermont'], ['VA', 'Virginia'], ['WA', 'Washington'], ['WV', 'West Virginia'], ['WI', 'Wisconsin'],
+  ['WY', 'Wyoming'], ['DC', 'District of Columbia'],
+  ['AB', 'Alberta'], ['BC', 'British Columbia'], ['MB', 'Manitoba'], ['NB', 'New Brunswick'], ['NL', 'Newfoundland and Labrador'],
+  ['NS', 'Nova Scotia'], ['NT', 'Northwest Territories'], ['NU', 'Nunavut'], ['ON', 'Ontario'], ['PE', 'Prince Edward Island'],
+  ['QC', 'Quebec'], ['SK', 'Saskatchewan'], ['YT', 'Yukon']
+];
 const INTERACTION_TYPE_DEFAULTS = ['Store Visit', 'Other Visit', 'Phone Call', 'Other'];
 const DEFAULT_THEME = {
   bg: '#f8eef4',
@@ -1554,7 +1571,7 @@ async function renderRepsView() {
     .map(
       (item) => `<li>
         <span>${escapeHtml(item.name)}</span>
-        <button type="button" class="ghost" data-rename-interaction-type="${item.id}">Rename</button>
+        <button type="button" class="ghost" title="Edit" aria-label="Edit" data-rename-interaction-type="${item.id}">✎</button>
       </li>`
     )
     .join('');
@@ -1597,16 +1614,6 @@ async function renderRepsView() {
       <option value="">Rep</option>
       ${state.reps.map((rep) => `<option value="${rep.id}">${escapeHtml(rep.full_name)}</option>`).join('')}
     </select>
-    <select name="territoryType" required>
-      <option value="state">State</option>
-      <option value="city_state">City + State</option>
-      <option value="zip_prefix">Zip Prefix</option>
-      <option value="zip_exact">Zip Exact</option>
-    </select>
-    <input name="state" placeholder="State (CA)" />
-    <input name="city" placeholder="City" />
-    <input name="zipPrefix" placeholder="Zip prefix" />
-    <input name="zipExact" placeholder="Zip exact" />
     <select name="segment">
       <option value="">All Segments</option>
       ${state.segments.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
@@ -1615,6 +1622,19 @@ async function renderRepsView() {
       <option value="">All Types</option>
       ${state.customerTypes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
     </select>
+    <select name="territoryType" required>
+      <option value="state">State</option>
+      <option value="city_state">City + State</option>
+      <option value="zip_prefix">Zip Prefix</option>
+      <option value="zip_exact">Zip Exact</option>
+    </select>
+    <select name="state">
+      <option value="">State/Province</option>
+      ${TERRITORY_STATE_OPTIONS.map(([code, name]) => `<option value="${code}">${code} - ${name}</option>`).join('')}
+    </select>
+    <input name="city" placeholder="City" />
+    <input name="zipPrefix" placeholder="Zip prefix" />
+    <input name="zipExact" placeholder="Zip exact" />
     <button type="submit">Add Territory</button>
   `;
 
@@ -1627,8 +1647,8 @@ async function renderRepsView() {
     .map(
       (item) => `<li>
         <span>${escapeHtml(item.name)}</span>
-        <button type="button" class="ghost" data-rename-segment="${item.id}">Rename</button>
-        <button type="button" class="danger small-btn" data-delete-segment="${item.id}">Delete</button>
+        <button type="button" class="ghost" title="Edit" aria-label="Edit" data-rename-segment="${item.id}">✎</button>
+        <button type="button" class="danger small-btn" title="Delete" aria-label="Delete" data-delete-segment="${item.id}">⌦</button>
       </li>`
     )
     .join('');
@@ -1642,8 +1662,8 @@ async function renderRepsView() {
     .map(
       (item) => `<li>
         <span>${escapeHtml(item.name)}</span>
-        <button type="button" class="ghost" data-rename-type="${item.id}">Rename</button>
-        <button type="button" class="danger small-btn" data-delete-type="${item.id}">Delete</button>
+        <button type="button" class="ghost" title="Edit" aria-label="Edit" data-rename-type="${item.id}">✎</button>
+        <button type="button" class="danger small-btn" title="Delete" aria-label="Delete" data-delete-type="${item.id}">⌦</button>
       </li>`
     )
     .join('');
@@ -1686,17 +1706,17 @@ async function renderRepsView() {
     document.getElementById('usersBody').innerHTML = '';
   }
 
-  document.getElementById('repDetailCard').classList.add('hidden');
-
   bindRepsEvents();
   setView('repsView', 'Admin Panel');
 }
 
 function bindRepsEvents() {
   document.querySelectorAll('#repsView .admin-section').forEach((section) => {
-    section.open = false;
+    const key = section.querySelector('summary')?.textContent?.trim() || '';
+    section.open = key === state.adminOpenSection;
     section.ontoggle = () => {
       if (!section.open) return;
+      state.adminOpenSection = key;
       document.querySelectorAll('#repsView .admin-section').forEach((other) => {
         if (other !== section) other.open = false;
       });
@@ -1936,14 +1956,7 @@ function bindRepsEvents() {
   document.querySelectorAll('[data-open-rep-detail]').forEach((row) => {
     row.onclick = () => {
       const repId = Number(row.dataset.openRepDetail);
-      const rep = state.reps.find((r) => r.id === repId);
-      const companies = state.repAssignments.filter((a) => a.rep_id === repId);
-      const detailCard = document.getElementById('repDetailCard');
-      document.getElementById('repDetailTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
-      document.getElementById('repDetailCompanies').innerHTML = companies.length
-        ? companies.map((c) => `<li>${escapeHtml(c.company_name)} (${escapeHtml([c.city, c.state].filter(Boolean).join(', ') || '-')})</li>`).join('')
-        : '<li>No assigned companies.</li>';
-      detailCard.classList.remove('hidden');
+      openRepAccounts(repId);
     };
   });
 
@@ -1990,6 +2003,29 @@ function bindRepsEvents() {
       }
     };
   });
+}
+
+function openRepAccounts(repId) {
+  const rep = state.reps.find((r) => r.id === repId);
+  const companies = state.repAssignments.filter((a) => a.rep_id === repId);
+  document.getElementById('repAccountsTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
+  document.getElementById('repAccountsBody').innerHTML = companies.length
+    ? companies
+        .map(
+          (c) => `<tr class="clickable" data-open-company-from-rep="${c.company_id}">
+            <td>${escapeHtml(c.company_name)}</td>
+            <td>${escapeHtml(c.city || '')}</td>
+            <td>${escapeHtml(c.state || '')}</td>
+            <td>${escapeHtml(c.zip || '')}</td>
+          </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="4">No assigned companies.</td></tr>';
+
+  document.querySelectorAll('[data-open-company-from-rep]').forEach((row) => {
+    row.onclick = () => openCompany(Number(row.dataset.openCompanyFromRep));
+  });
+  setView('repAccountsView', `Accounts • ${rep?.full_name || ''}`);
 }
 
 async function loadSession() {
@@ -2079,6 +2115,10 @@ els.backBtn.onclick = async () => {
   }
   if (previous === 'companyListView') {
     setView('companyListView', 'Company list', false);
+    return;
+  }
+  if (previous === 'repAccountsView') {
+    setView('repAccountsView', document.getElementById('repAccountsTitle')?.textContent || 'Rep Accounts', false);
     return;
   }
   setView(previous, els.pageHint.textContent, false);

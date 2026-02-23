@@ -15,7 +15,7 @@
 
 body {
   margin: 0;
-  background: radial-gradient(circle at right top, #f5ddea, var(--bg) 45%);
+  background: radial-gradient(circle at right top, var(--accent-soft), var(--bg) 45%);
   color: var(--ink);
   font-family: "Work Sans", "Segoe UI", sans-serif;
 }
@@ -37,7 +37,7 @@ summary {
   align-items: center;
   padding: 1rem;
   border-bottom: 1px solid var(--line);
-  background: #fff6fb;
+  background: var(--accent-soft);
 }
 
 .topbar h1 {
@@ -155,8 +155,8 @@ button {
 }
 
 button.ghost {
-  background: #f4d9e8;
-  color: #5f2a47;
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
 button.danger {
@@ -187,7 +187,7 @@ tr.clickable {
 }
 
 tr.clickable:hover {
-  background: #f1f8f3;
+  background: var(--accent-soft);
 }
 
 .empty {
@@ -310,7 +310,7 @@ tr.clickable:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.45rem;
-  background: #f8fbf8;
+  background: var(--panel);
   display: grid;
   gap: 0.3rem;
 }
@@ -349,9 +349,9 @@ tr.clickable:hover {
 }
 
 .address-clickable:hover {
-  border-color: #8eb09a;
-  background: #e8f4ec;
-  box-shadow: 0 0 0 2px #d2e9da;
+  border-color: var(--line);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--line);
   transform: translateY(-1px);
 }
 
@@ -458,8 +458,14 @@ tr.clickable:hover {
 }
 
 .photo-tile-editable:hover {
-  border-color: #9fbea9;
-  background: #ecf6ef;
+  border-color: var(--line);
+  background: var(--accent-soft);
+}
+
+.value-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
 }
 
 .action-modal-overlay {
@@ -525,5 +531,8 @@ tr.clickable:hover {
   .docs-grid {
     justify-content: flex-start;
     direction: ltr;
+  }
+  .value-columns {
+    grid-template-columns: 1fr;
   }
 }
