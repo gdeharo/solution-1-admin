@@ -505,14 +505,13 @@ tr.clickable:hover {
 .user-filter-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  margin-left: 0.4rem;
+  margin-left: 0.25rem;
   font-size: 0.78rem;
   color: var(--muted);
 }
 
 .user-role-select {
-  min-width: 120px;
+  min-width: 90px;
   height: 36px;
 }
 
@@ -528,35 +527,35 @@ tr.clickable:hover {
 
 #userAdminCard table {
   table-layout: fixed;
+  width: 56%;
+  min-width: 520px;
 }
 
 #userAdminCard th:nth-child(1),
 #userAdminCard td:nth-child(1) {
-  width: 24%;
+  width: 18%;
 }
 
 #userAdminCard th:nth-child(2),
 #userAdminCard td:nth-child(2) {
-  width: 30%;
+  width: 22%;
 }
 
 #userAdminCard th:nth-child(3),
 #userAdminCard td:nth-child(3) {
-  width: 16%;
+  width: 10%;
 }
 
 #userAdminCard th:nth-child(4),
 #userAdminCard td:nth-child(4) {
-  width: 12%;
+  width: 7%;
 }
 
 #userAdminCard th:nth-child(5),
 #userAdminCard td:nth-child(5) {
-  width: 18%;
-}
-
-#userAdminCard td:nth-child(5) {
-  white-space: nowrap;
+  width: 17%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .action-modal h3 {
