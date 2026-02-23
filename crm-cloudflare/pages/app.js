@@ -25,6 +25,7 @@ const state = {
 };
 
 const API_BASE = window.CRM_API_BASE || '';
+const THEME_STORAGE_KEY = 'crm_theme_v1';
 
 const VIEW_IDS = [
   'authView',
@@ -279,6 +280,10 @@ function applyTheme(theme) {
   root.style.setProperty('--accent-soft', merged.accentSoft);
   root.style.setProperty('--danger', merged.danger);
   state.theme = merged;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(merged));
+  } catch {
+  }
 }
 
 function copyText(value) {

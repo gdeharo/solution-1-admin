@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CRM on Cloudflare</title>
+    <script>
+      (() => {
+        try {
+          const raw = localStorage.getItem('crm_theme_v1');
+          if (!raw) return;
+          const theme = JSON.parse(raw);
+          const root = document.documentElement;
+          if (theme.bg) root.style.setProperty('--bg', theme.bg);
+          if (theme.panel) root.style.setProperty('--panel', theme.panel);
+          if (theme.ink) root.style.setProperty('--ink', theme.ink);
+          if (theme.muted) root.style.setProperty('--muted', theme.muted);
+          if (theme.line) root.style.setProperty('--line', theme.line);
+          if (theme.accent) root.style.setProperty('--accent', theme.accent);
+          if (theme.accentSoft) root.style.setProperty('--accent-soft', theme.accentSoft);
+          if (theme.danger) root.style.setProperty('--danger', theme.danger);
+        } catch {}
+      })();
+    </script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
