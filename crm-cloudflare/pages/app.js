@@ -1765,7 +1765,7 @@ async function renderRepsView() {
             </select>
           </td>
           <td class="user-active-cell"><input class="user-active-checkbox" type="checkbox" data-user-active="${u.id}" ${u.is_active ? 'checked' : ''} /></td>
-          <td class="row wrap">
+          <td class="row user-actions">
             <button type="button" class="ghost" title="Edit" aria-label="Edit" data-edit-user="${u.id}">✎</button>
             <button type="button" class="danger small-btn" title="Delete" aria-label="Delete" data-delete-user="${u.id}">⌦</button>
             <button type="button" class="ghost" data-resend-user="${u.id}">Resend</button>

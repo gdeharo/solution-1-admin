@@ -562,6 +562,11 @@ tr.clickable:hover {
   white-space: nowrap;
 }
 
+.user-actions {
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+}
+
 .action-modal h3 {
   margin: 0 0 0.7rem;
 }
