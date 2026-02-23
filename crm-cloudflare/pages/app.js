@@ -1749,24 +1749,22 @@ async function renderRepsView() {
       <button type="submit">Create User</button>
     `;
     const visibleUsers = users.filter((u) => (state.showInactiveUsers ? !u.is_active : !!u.is_active));
-    const toggleBtn = document.getElementById('toggleInactiveUsersBtn');
-    if (toggleBtn) {
-      toggleBtn.textContent = state.showInactiveUsers ? 'Show Active' : 'Show Inactive';
-    }
+    const toggle = document.getElementById('showInactiveUsersToggle');
+    if (toggle) toggle.checked = !!state.showInactiveUsers;
     document.getElementById('usersBody').innerHTML = visibleUsers
       .map(
         (u) => `<tr>
           <td>${escapeHtml(u.full_name)}</td>
           <td>${escapeHtml(u.email)}</td>
           <td>
-            <select data-user-role="${u.id}">
+            <select class="user-role-select" data-user-role="${u.id}">
               <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>viewer</option>
               <option value="rep" ${u.role === 'rep' ? 'selected' : ''}>rep</option>
               <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>manager</option>
               <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
             </select>
           </td>
-          <td><input type="checkbox" data-user-active="${u.id}" ${u.is_active ? 'checked' : ''} /></td>
+          <td class="user-active-cell"><input class="user-active-checkbox" type="checkbox" data-user-active="${u.id}" ${u.is_active ? 'checked' : ''} /></td>
           <td class="row wrap">
             <button type="button" class="ghost" title="Edit" aria-label="Edit" data-edit-user="${u.id}">✎</button>
             <button type="button" class="danger small-btn" title="Delete" aria-label="Delete" data-delete-user="${u.id}">⌦</button>
@@ -2063,9 +2061,9 @@ function bindRepsEvents() {
     };
   }
 
-  const toggleInactiveUsersBtn = document.getElementById('toggleInactiveUsersBtn');
-  if (toggleInactiveUsersBtn && state.user?.role === 'admin') {
-    toggleInactiveUsersBtn.onclick = async () => {
+  const showInactiveUsersToggle = document.getElementById('showInactiveUsersToggle');
+  if (showInactiveUsersToggle && state.user?.role === 'admin') {
+    showInactiveUsersToggle.onchange = async () => {
       state.showInactiveUsers = !state.showInactiveUsers;
       await renderRepsView();
     };

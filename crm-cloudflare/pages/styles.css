@@ -502,6 +502,30 @@ tr.clickable:hover {
   font-weight: 600;
 }
 
+.user-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.user-role-select {
+  min-width: 120px;
+  height: 36px;
+}
+
+.user-active-cell {
+  text-align: center;
+}
+
+.user-active-checkbox {
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+
 .action-modal h3 {
   margin: 0 0 0.7rem;
 }

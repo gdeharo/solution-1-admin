@@ -230,19 +230,24 @@
           <summary>Users</summary>
           <div class="card">
             <form id="userCreateForm" class="row wrap"></form>
-            <div class="row wrap">
-              <button id="toggleInactiveUsersBtn" type="button" class="ghost">Show Inactive</button>
-            </div>
             <table>
               <thead>
                 <tr>
                   <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Active</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>
+                    <span class="row wrap">
+                      Active
+                      <label class="user-filter-toggle">
+                        <input id="showInactiveUsersToggle" type="checkbox" />
+                        Show inactive
+                      </label>
+                    </span>
+                  </th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody id="usersBody"></tbody>
             </table>
           </div>
