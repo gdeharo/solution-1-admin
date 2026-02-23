@@ -131,6 +131,27 @@ function isHexColor(value: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(value);
 }
 
+function deriveThemeFromAccent(accent: string): Record<ThemeKey, string> {
+  const hex = accent.replace('#', '');
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  const tint = (amount: number): string => {
+    const mix = (value: number): number => Math.round(value + (255 - value) * amount);
+    return `#${[mix(r), mix(g), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+  return {
+    bg: tint(0.9),
+    panel: '#ffffff',
+    ink: '#2b1b25',
+    muted: '#6a4d5d',
+    line: tint(0.72),
+    accent,
+    accentSoft: tint(0.82),
+    danger: '#9b234f'
+  };
+}
+
 async function ensureSegmentAndTypeExist(env: Env, segment?: string | null, customerType?: string | null): Promise<string | null> {
   if (segment && segment.trim()) {
     const segmentExists = await env.CRM_DB.prepare(`SELECT id FROM company_segments WHERE name = ?1`)
@@ -325,6 +346,29 @@ addRoute(
 );
 
 addRoute(
+  'DELETE',
+  /^\/api\/company-metadata\/segments\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/company-metadata\/segments\/(\d+)$/);
+    const segmentId = Number(match?.[1]);
+    if (!segmentId) return err('segment id is required');
+    const current = await env.CRM_DB.prepare(`SELECT id, name FROM company_segments WHERE id = ?1`)
+      .bind(segmentId)
+      .first<{ id: number; name: string }>();
+    if (!current) return err('Segment not found', 404);
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`DELETE FROM company_segments WHERE id = ?1`).bind(segmentId),
+      env.CRM_DB.prepare(`UPDATE companies SET segment = NULL WHERE segment = ?1`).bind(current.name),
+      env.CRM_DB.prepare(`UPDATE reps SET segment = NULL WHERE segment = ?1`).bind(current.name),
+      env.CRM_DB.prepare(`UPDATE rep_territories SET segment = NULL WHERE segment = ?1`).bind(current.name)
+    ]);
+    await audit(env, user, 'delete', 'company_segment', String(segmentId), { name: current.name });
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
   'POST',
   /^\/api\/company-metadata\/types$/,
   withAuth(async (request, env, user) => {
@@ -358,6 +402,29 @@ addRoute(
       env.CRM_DB.prepare(`UPDATE reps SET customer_type = ?1 WHERE customer_type = ?2`).bind(nextName, current.name)
     ]);
     await audit(env, user, 'update', 'company_type', String(typeId), { from: current.name, to: nextName });
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'DELETE',
+  /^\/api\/company-metadata\/types\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/company-metadata\/types\/(\d+)$/);
+    const typeId = Number(match?.[1]);
+    if (!typeId) return err('type id is required');
+    const current = await env.CRM_DB.prepare(`SELECT id, name FROM company_types WHERE id = ?1`)
+      .bind(typeId)
+      .first<{ id: number; name: string }>();
+    if (!current) return err('Type not found', 404);
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`DELETE FROM company_types WHERE id = ?1`).bind(typeId),
+      env.CRM_DB.prepare(`UPDATE companies SET customer_type = NULL WHERE customer_type = ?1`).bind(current.name),
+      env.CRM_DB.prepare(`UPDATE reps SET customer_type = NULL WHERE customer_type = ?1`).bind(current.name),
+      env.CRM_DB.prepare(`UPDATE rep_territories SET customer_type = NULL WHERE customer_type = ?1`).bind(current.name)
+    ]);
+    await audit(env, user, 'delete', 'company_type', String(typeId), { name: current.name });
     return json({ success: true });
   }) as any
 );
@@ -416,11 +483,15 @@ addRoute(
     if (!canManageReps(user.role)) return err('Forbidden', 403);
     const body = await parseJson<Record<string, string>>(request);
     if (!body) return err('theme object is required');
-    const normalized: Record<string, string> = {};
-    for (const key of THEME_KEYS) {
-      const value = String(body[key] || '');
-      if (!isHexColor(value)) return err(`Invalid color for ${key}`);
-      normalized[key] = value;
+    let normalized: Record<string, string> = {};
+    if (body.accent && isHexColor(String(body.accent))) {
+      normalized = deriveThemeFromAccent(String(body.accent));
+    } else {
+      for (const key of THEME_KEYS) {
+        const value = String(body[key] || '');
+        if (!isHexColor(value)) return err(`Invalid color for ${key}`);
+        normalized[key] = value;
+      }
     }
     await env.CRM_DB.prepare(
       `INSERT INTO app_settings (key, value_json, updated_by_user_id)
@@ -715,7 +786,7 @@ addRoute(
        ORDER BY cr.rep_id, c.name`
     ).all();
     const territories = await env.CRM_DB.prepare(
-      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact
+      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, segment, customer_type
        FROM rep_territories
        ORDER BY rep_id, territory_type`
     ).all();
@@ -1046,7 +1117,7 @@ addRoute(
     const repId = Number(url.searchParams.get('repId'));
     if (!repId) return err('repId is required');
     const rows = await env.CRM_DB.prepare(
-      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, created_at
+      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, segment, customer_type, created_at
        FROM rep_territories
        WHERE rep_id = ?1
        ORDER BY created_at DESC`
@@ -1069,6 +1140,8 @@ addRoute(
       city?: string;
       zipPrefix?: string;
       zipExact?: string;
+      segment?: string;
+      customerType?: string;
     }>(request);
     if (!body?.repId || !body.territoryType) return err('repId and territoryType are required');
     if (!['state', 'city_state', 'zip_prefix', 'zip_exact'].includes(body.territoryType)) return err('Invalid territoryType');
@@ -1077,10 +1150,12 @@ addRoute(
     if (body.territoryType === 'city_state' && (!body.city || !body.state)) return err('city and state are required');
     if (body.territoryType === 'zip_prefix' && !body.zipPrefix) return err('zipPrefix is required');
     if (body.territoryType === 'zip_exact' && !body.zipExact) return err('zipExact is required');
+    const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
+    if (metadataError) return err(metadataError);
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+      `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact, segment, customer_type)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
     )
       .bind(
         body.repId,
@@ -1088,7 +1163,9 @@ addRoute(
         body.state ?? null,
         body.city ?? null,
         body.zipPrefix ?? null,
-        body.zipExact ?? null
+        body.zipExact ?? null,
+        body.segment ?? null,
+        body.customerType ?? null
       )
       .run();
 
@@ -1118,6 +1195,8 @@ addRoute(
     const city = (url.searchParams.get('city') || '').trim();
     const state = (url.searchParams.get('state') || '').trim();
     const zip = (url.searchParams.get('zip') || '').trim();
+    const segment = (url.searchParams.get('segment') || '').trim();
+    const customerType = (url.searchParams.get('customerType') || '').trim();
 
     if (!city && !state && !zip) return err('Provide city, state, or zip');
 
@@ -1132,9 +1211,11 @@ addRoute(
            OR (t.territory_type = 'zip_exact' AND t.zip_exact = ?3)
            OR (t.territory_type = 'zip_prefix' AND ?3 LIKE (t.zip_prefix || '%'))
          )
+         AND (t.segment IS NULL OR t.segment = ?4)
+         AND (t.customer_type IS NULL OR t.customer_type = ?5)
        ORDER BY r.full_name ASC`
     )
-      .bind(state || null, city || null, zip || null)
+      .bind(state || null, city || null, zip || null, segment || null, customerType || null)
       .all();
 
     return json({ suggestedReps: rows.results });

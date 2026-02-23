@@ -76,6 +76,14 @@ summary {
   margin-bottom: 0.8rem;
 }
 
+.admin-section > summary {
+  margin-bottom: 0.35rem;
+}
+
+.admin-section > .card {
+  margin-top: 0.35rem;
+}
+
 .card {
   border: 1px solid var(--line);
   border-radius: 8px;

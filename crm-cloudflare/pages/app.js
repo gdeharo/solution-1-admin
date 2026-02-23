@@ -262,6 +262,28 @@ function applyTheme(theme) {
   state.theme = merged;
 }
 
+function deriveThemeFromAccent(accent) {
+  const hex = String(accent || '').replace('#', '');
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return { ...DEFAULT_THEME };
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  const tint = (amount) => {
+    const mix = (v) => Math.round(v + (255 - v) * amount);
+    return `#${[mix(r), mix(g), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+  return {
+    bg: tint(0.9),
+    panel: '#ffffff',
+    ink: '#2b1b25',
+    muted: '#6a4d5d',
+    line: tint(0.72),
+    accent: `#${hex.toLowerCase()}`,
+    accentSoft: tint(0.82),
+    danger: '#9b234f'
+  };
+}
+
 function bindInteractionTypeCustom(selectEl) {
   if (!selectEl) return;
   selectEl.onchange = () => {
@@ -1518,14 +1540,9 @@ async function renderRepsView() {
   }
 
   document.getElementById('themeForm').innerHTML = `
-    <label><span class="sr-only">Background</span><input name="bg" type="color" value="${escapeHtml(state.theme?.bg || DEFAULT_THEME.bg)}" aria-label="Background" /></label>
-    <label><span class="sr-only">Panel</span><input name="panel" type="color" value="${escapeHtml(state.theme?.panel || DEFAULT_THEME.panel)}" aria-label="Panel" /></label>
-    <label><span class="sr-only">Text</span><input name="ink" type="color" value="${escapeHtml(state.theme?.ink || DEFAULT_THEME.ink)}" aria-label="Text" /></label>
-    <label><span class="sr-only">Muted Text</span><input name="muted" type="color" value="${escapeHtml(state.theme?.muted || DEFAULT_THEME.muted)}" aria-label="Muted Text" /></label>
-    <label><span class="sr-only">Lines</span><input name="line" type="color" value="${escapeHtml(state.theme?.line || DEFAULT_THEME.line)}" aria-label="Lines" /></label>
-    <label><span class="sr-only">Accent</span><input name="accent" type="color" value="${escapeHtml(state.theme?.accent || DEFAULT_THEME.accent)}" aria-label="Accent" /></label>
-    <label><span class="sr-only">Accent Soft</span><input name="accentSoft" type="color" value="${escapeHtml(state.theme?.accentSoft || DEFAULT_THEME.accentSoft)}" aria-label="Accent Soft" /></label>
-    <label><span class="sr-only">Danger</span><input name="danger" type="color" value="${escapeHtml(state.theme?.danger || DEFAULT_THEME.danger)}" aria-label="Danger" /></label>
+    <label><span class="sr-only">Primary color</span><input name="accent" type="color" value="${escapeHtml(
+      state.theme?.accent || DEFAULT_THEME.accent
+    )}" aria-label="Primary color" /></label>
     <button type="submit">Save Theme</button>
   `;
 
@@ -1565,7 +1582,7 @@ async function renderRepsView() {
     .map((rep) => {
       const companies = state.repAssignments.filter((a) => a.rep_id === rep.id).map((a) => a.company_name);
       const territories = state.repTerritories.filter((t) => t.rep_id === rep.id);
-      return `<tr>
+      return `<tr class="clickable" data-open-rep-detail="${rep.id}">
         <td>${escapeHtml(rep.full_name)}</td>
         <td>${escapeHtml(rep.email || '')}</td>
         <td>${escapeHtml(rep.phone || '')}</td>
@@ -1590,6 +1607,14 @@ async function renderRepsView() {
     <input name="city" placeholder="City" />
     <input name="zipPrefix" placeholder="Zip prefix" />
     <input name="zipExact" placeholder="Zip exact" />
+    <select name="segment">
+      <option value="">All Segments</option>
+      ${state.segments.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+    </select>
+    <select name="customerType">
+      <option value="">All Types</option>
+      ${state.customerTypes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
+    </select>
     <button type="submit">Add Territory</button>
   `;
 
@@ -1603,6 +1628,7 @@ async function renderRepsView() {
       (item) => `<li>
         <span>${escapeHtml(item.name)}</span>
         <button type="button" class="ghost" data-rename-segment="${item.id}">Rename</button>
+        <button type="button" class="danger small-btn" data-delete-segment="${item.id}">Delete</button>
       </li>`
     )
     .join('');
@@ -1617,6 +1643,7 @@ async function renderRepsView() {
       (item) => `<li>
         <span>${escapeHtml(item.name)}</span>
         <button type="button" class="ghost" data-rename-type="${item.id}">Rename</button>
+        <button type="button" class="danger small-btn" data-delete-type="${item.id}">Delete</button>
       </li>`
     )
     .join('');
@@ -1659,32 +1686,40 @@ async function renderRepsView() {
     document.getElementById('usersBody').innerHTML = '';
   }
 
+  document.getElementById('repDetailCard').classList.add('hidden');
+
   bindRepsEvents();
   setView('repsView', 'Admin Panel');
 }
 
 function bindRepsEvents() {
+  document.querySelectorAll('#repsView .admin-section').forEach((section) => {
+    section.open = false;
+    section.ontoggle = () => {
+      if (!section.open) return;
+      document.querySelectorAll('#repsView .admin-section').forEach((other) => {
+        if (other !== section) other.open = false;
+      });
+    };
+  });
+
   const themeForm = document.getElementById('themeForm');
   themeForm.onsubmit = async (event) => {
     event.preventDefault();
     const fd = new FormData(themeForm);
-    const theme = {
-      bg: fd.get('bg'),
-      panel: fd.get('panel'),
-      ink: fd.get('ink'),
-      muted: fd.get('muted'),
-      line: fd.get('line'),
-      accent: fd.get('accent'),
-      accentSoft: fd.get('accentSoft'),
-      danger: fd.get('danger')
-    };
+    const accent = String(fd.get('accent') || DEFAULT_THEME.accent);
+    const theme = deriveThemeFromAccent(accent);
     try {
-      await api('/api/settings/theme', { method: 'PUT', body: JSON.stringify(theme) });
+      await api('/api/settings/theme', { method: 'PUT', body: JSON.stringify({ accent }) });
       applyTheme(theme);
       showToast('Theme updated');
     } catch (error) {
       showToast(error.message, true);
     }
+  };
+
+  themeForm.querySelector('[name="accent"]').oninput = (event) => {
+    applyTheme(deriveThemeFromAccent(event.target.value));
   };
 
   const interactionTypeValueForm = document.getElementById('interactionTypeValueForm');
@@ -1755,13 +1790,16 @@ function bindRepsEvents() {
   };
 
   document.querySelectorAll('[data-show-territories]').forEach((btn) => {
-    btn.onclick = () => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
       const repId = Number(btn.dataset.showTerritories);
       const items = state.repTerritories.filter((t) => t.rep_id === repId);
       document.getElementById('territoryList').innerHTML = items
         .map(
           (item) => `<li>
-            <span>${escapeHtml(item.territory_type)} | ${escapeHtml(item.city || '')} ${escapeHtml(item.state || '')} ${escapeHtml(item.zip_prefix || item.zip_exact || '')}</span>
+            <span>${escapeHtml(item.territory_type)} | ${escapeHtml(item.city || '')} ${escapeHtml(item.state || '')} ${escapeHtml(
+              item.zip_prefix || item.zip_exact || ''
+            )} | ${escapeHtml(item.segment || 'All Segments')} | ${escapeHtml(item.customer_type || 'All Types')}</span>
             <button class="danger" data-delete-territory="${item.id}">Delete</button>
           </li>`
         )
@@ -1794,7 +1832,9 @@ function bindRepsEvents() {
           state: fd.get('state'),
           city: fd.get('city'),
           zipPrefix: fd.get('zipPrefix'),
-          zipExact: fd.get('zipExact')
+          zipExact: fd.get('zipExact'),
+          segment: fd.get('segment'),
+          customerType: fd.get('customerType')
         })
       });
       territoryForm.reset();
@@ -1834,6 +1874,20 @@ function bindRepsEvents() {
       }
     };
   });
+  document.querySelectorAll('[data-delete-segment]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = Number(btn.dataset.deleteSegment);
+      if (!confirm('Delete this segment? Existing records will keep working but become unassigned.')) return;
+      try {
+        await api(`/api/company-metadata/segments/${id}`, { method: 'DELETE' });
+        await loadMetadata();
+        await Promise.all([loadCompanies(), renderRepsView()]);
+        showToast('Segment deleted');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
 
   const typeValueForm = document.getElementById('typeValueForm');
   typeValueForm.onsubmit = async (event) => {
@@ -1862,6 +1916,34 @@ function bindRepsEvents() {
       } catch (error) {
         showToast(error.message, true);
       }
+    };
+  });
+  document.querySelectorAll('[data-delete-type]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = Number(btn.dataset.deleteType);
+      if (!confirm('Delete this type? Existing records will keep working but become unassigned.')) return;
+      try {
+        await api(`/api/company-metadata/types/${id}`, { method: 'DELETE' });
+        await loadMetadata();
+        await Promise.all([loadCompanies(), renderRepsView()]);
+        showToast('Type deleted');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-open-rep-detail]').forEach((row) => {
+    row.onclick = () => {
+      const repId = Number(row.dataset.openRepDetail);
+      const rep = state.reps.find((r) => r.id === repId);
+      const companies = state.repAssignments.filter((a) => a.rep_id === repId);
+      const detailCard = document.getElementById('repDetailCard');
+      document.getElementById('repDetailTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
+      document.getElementById('repDetailCompanies').innerHTML = companies.length
+        ? companies.map((c) => `<li>${escapeHtml(c.company_name)} (${escapeHtml([c.city, c.state].filter(Boolean).join(', ') || '-')})</li>`).join('')
+        : '<li>No assigned companies.</li>';
+      detailCard.classList.remove('hidden');
     };
   });
 
