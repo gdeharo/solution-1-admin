@@ -1122,31 +1122,71 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
 
   const form = document.getElementById('interactionCreateForm');
   form.innerHTML = `
-    <label><span class="sr-only">Company</span><input value="${escapeHtml(company.company.name)}" placeholder="Company" aria-label="Company" disabled /></label>
-    <label><span class="sr-only">Contact</span>
-      <select name="customerId" aria-label="Contact">
-        <option value="">Contact</option>
-        <option value="__new_contact__">+ Create Contact…</option>
-        ${customers.customers
-          .map(
-            (c) =>
-              `<option value="${c.id}" ${String(initial.customerId) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`
-          )
-          .join('')}
-      </select>
-    </label>
-    <label><span class="sr-only">Type</span>
-      <select name="interactionType" id="interactionCreateType" aria-label="Type">${interactionTypeOptions(initial.interactionType)}</select>
-    </label>
-    <label class="full"><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" required>${escapeHtml(initial.meetingNotes)}</textarea></label>
-    <label class="full"><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(initial.nextAction)}" /></label>
-    <label class="full"><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${escapeHtml(initial.nextActionAt)}" /></label>
-    <label class="full"><span class="sr-only">Photo</span><input name="photo" type="file" aria-label="Photo" accept="image/*" capture="environment" /></label>
+    <div class="interaction-top-grid full">
+      <div class="card">
+        <div class="field-stack">
+          <label><span class="sr-only">Company</span><input value="${escapeHtml(
+            company.company.name
+          )}" placeholder="Company" aria-label="Company" disabled /></label>
+          <label><span class="sr-only">Contact</span>
+            <select name="customerId" aria-label="Contact">
+              <option value="">Contact</option>
+              <option value="__new_contact__">+ Create Contact…</option>
+              ${customers.customers
+                .map(
+                  (c) =>
+                    `<option value="${c.id}" ${String(initial.customerId) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`
+                )
+                .join('')}
+            </select>
+          </label>
+          <label><span class="sr-only">Type</span>
+            <select name="interactionType" id="interactionCreateType" aria-label="Type">${interactionTypeOptions(
+              initial.interactionType
+            )}</select>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <strong>Photo</strong>
+        <input id="interactionCreatePhotoInput" name="photo" type="file" accept="image/*" capture="environment" class="hidden" />
+        <div id="interactionCreatePhotoTile" class="photo-tile photo-tile-editable">
+          <div id="interactionCreatePhotoPreview" class="photo-preview"><span class="muted">Click to add photo</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="interaction-assets-grid full">
+      <div class="card">
+        <strong>Meeting Notes</strong>
+        <label><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" required>${escapeHtml(
+          initial.meetingNotes
+        )}</textarea></label>
+        <label><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(
+          initial.nextAction
+        )}" /></label>
+        <label><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${escapeHtml(
+          initial.nextActionAt
+        )}" /></label>
+      </div>
+    </div>
     <div class="row wrap full">
       <button type="submit">Create Interaction</button>
     </div>
   `;
   bindInteractionTypeCustom(document.getElementById('interactionCreateType'));
+
+  const createPhotoInput = document.getElementById('interactionCreatePhotoInput');
+  const createPhotoTile = document.getElementById('interactionCreatePhotoTile');
+  const createPhotoPreview = document.getElementById('interactionCreatePhotoPreview');
+  if (createPhotoInput && createPhotoTile && createPhotoPreview) {
+    createPhotoTile.onclick = () => createPhotoInput.click();
+    createPhotoInput.onchange = () => {
+      const file = createPhotoInput.files?.[0];
+      if (!file) return;
+      const previewUrl = URL.createObjectURL(file);
+      createPhotoPreview.innerHTML = `<img src="${previewUrl}" alt="Interaction photo preview" class="contact-photo" />`;
+    };
+  }
 
   form.querySelector('[name="customerId"]').onchange = async (event) => {
     if (event.target.value !== '__new_contact__') return;
