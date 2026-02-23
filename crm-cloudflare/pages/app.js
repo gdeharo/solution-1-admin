@@ -327,6 +327,22 @@ function showInviteEmailDialog({ to, subject, body, mailto }) {
   };
 }
 
+function buildInviteEmailPayload(adminName, email, inviteToken, temporaryPassword) {
+  const baseUrl = `${window.location.origin}${window.location.pathname}`;
+  const inviteUrl = `${baseUrl}?invite=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}`;
+  const subject = `Invitation from ${adminName} to access Company CRM`;
+  const body = [
+    'Hello, welcome to the Company CRM. By using this web application you will be able to manage companies, contacts and interactions with them easily.',
+    '',
+    `Click here to access the application and set your password: ${inviteUrl}`,
+    '',
+    `Your user ID is your email: ${email}`,
+    `Your temporary password is: ${temporaryPassword}`
+  ].join('\n');
+  const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return { to: email, subject, body, mailto };
+}
+
 function deriveThemeFromAccent(accent) {
   const hex = String(accent || '').replace('#', '');
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) return { ...DEFAULT_THEME };
@@ -1745,7 +1761,11 @@ async function renderRepsView() {
             </select>
           </td>
           <td><input type="checkbox" data-user-active="${u.id}" ${u.is_active ? 'checked' : ''} /></td>
-          <td><button type="button" data-save-user="${u.id}">Save</button></td>
+          <td class="row wrap">
+            <button type="button" class="ghost" title="Edit" aria-label="Edit" data-edit-user="${u.id}">✎</button>
+            <button type="button" class="danger small-btn" title="Delete" aria-label="Delete" data-delete-user="${u.id}">⌦</button>
+            <button type="button" class="ghost" data-resend-user="${u.id}">Resend</button>
+          </td>
         </tr>`
       )
       .join('');
@@ -2022,23 +2042,13 @@ function bindRepsEvents() {
             role: fd.get('role')
           })
         });
-        const baseUrl = `${window.location.origin}${window.location.pathname}`;
-        const inviteUrl = `${baseUrl}?invite=${encodeURIComponent(created.inviteToken)}&email=${encodeURIComponent(
-          String(fd.get('email') || '')
-        )}`;
-        const subject = `Invitation from ${state.user.fullName} to access Company CRM`;
-        const body = [
-          'Hello, welcome to the Company CRM. By using this web application you will be able to manage companies, contacts and interactions with them easily.',
-          '',
-          `Click here to access the application and set your password: ${inviteUrl}`,
-          '',
-          `Your user ID is your email: ${String(fd.get('email') || '')}`,
-          `Your temporary password is: ${created.temporaryPassword}`
-        ].join('\n');
-        const mailto = `mailto:${encodeURIComponent(String(fd.get('email') || ''))}?subject=${encodeURIComponent(
-          subject
-        )}&body=${encodeURIComponent(body)}`;
-        showInviteEmailDialog({ to: String(fd.get('email') || ''), subject, body, mailto });
+        const payload = buildInviteEmailPayload(
+          state.user.fullName,
+          String(fd.get('email') || ''),
+          created.inviteToken,
+          created.temporaryPassword
+        );
+        showInviteEmailDialog(payload);
         await renderRepsView();
         showToast('User created. Invitation ready.');
       } catch (error) {
@@ -2047,21 +2057,64 @@ function bindRepsEvents() {
     };
   }
 
-  document.querySelectorAll('[data-save-user]').forEach((btn) => {
+  document.querySelectorAll('[data-edit-user]').forEach((btn) => {
     btn.onclick = async () => {
-      const userId = Number(btn.dataset.saveUser);
+      const userId = Number(btn.dataset.editUser);
       const roleEl = document.querySelector(`[data-user-role="${userId}"]`);
       const activeEl = document.querySelector(`[data-user-active="${userId}"]`);
       if (!roleEl || !activeEl) return;
+      const row = btn.closest('tr');
+      const currentName = row?.children?.[0]?.textContent?.trim() || '';
+      const currentEmail = row?.children?.[1]?.textContent?.trim() || '';
+      const nextName = prompt('Full name', currentName);
+      if (!nextName || !nextName.trim()) return;
+      const nextEmail = prompt('Email', currentEmail);
+      if (!nextEmail || !nextEmail.trim()) return;
       try {
         await api(`/api/users/${userId}`, {
           method: 'PATCH',
           body: JSON.stringify({
             role: roleEl.value,
-            isActive: !!activeEl.checked
+            isActive: !!activeEl.checked,
+            fullName: nextName.trim(),
+            email: nextEmail.trim()
           })
         });
+        await renderRepsView();
         showToast('User updated');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-delete-user]').forEach((btn) => {
+    btn.onclick = async () => {
+      const userId = Number(btn.dataset.deleteUser);
+      if (!confirm('Delete this user? This will deactivate access.')) return;
+      try {
+        await api(`/api/users/${userId}`, { method: 'DELETE' });
+        await renderRepsView();
+        showToast('User deleted');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-resend-user]').forEach((btn) => {
+    btn.onclick = async () => {
+      const userId = Number(btn.dataset.resendUser);
+      try {
+        const invite = await api(`/api/users/${userId}/resend-invite`, { method: 'POST' });
+        const payload = buildInviteEmailPayload(
+          state.user.fullName,
+          invite.email,
+          invite.inviteToken,
+          invite.temporaryPassword
+        );
+        showInviteEmailDialog(payload);
+        showToast('Invitation regenerated');
       } catch (error) {
         showToast(error.message, true);
       }

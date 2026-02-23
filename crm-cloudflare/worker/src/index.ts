@@ -1514,20 +1514,119 @@ addRoute(
     if (!canManageUsers(user.role)) return err('Forbidden', 403);
     const match = request.url.match(/\/api\/users\/(\d+)$/);
     const userId = Number(match?.[1]);
-    const body = await parseJson<{ role?: UserRole; isActive?: boolean }>(request);
+    const body = await parseJson<{ role?: UserRole; isActive?: boolean; fullName?: string; email?: string }>(request);
     if (!userId) return err('user id is required');
-    if (!body || (body.role === undefined && body.isActive === undefined)) return err('No changes provided');
+    if (!body || (body.role === undefined && body.isActive === undefined && body.fullName === undefined && body.email === undefined)) {
+      return err('No changes provided');
+    }
     if (body.role && !['admin', 'manager', 'rep', 'viewer'].includes(body.role)) return err('Invalid role');
 
-    const current = await env.CRM_DB.prepare(`SELECT id, role, is_active FROM users WHERE id = ?1`).bind(userId).first<{ id: number; role: UserRole; is_active: number }>();
+    const current = await env.CRM_DB.prepare(`SELECT id, role, is_active, full_name, email FROM users WHERE id = ?1`)
+      .bind(userId)
+      .first<{ id: number; role: UserRole; is_active: number; full_name: string; email: string }>();
     if (!current) return err('User not found', 404);
 
-    await env.CRM_DB.prepare(`UPDATE users SET role = ?1, is_active = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3`)
-      .bind(body.role ?? current.role, body.isActive === undefined ? current.is_active : body.isActive ? 1 : 0, userId)
+    const nextRole = body.role ?? current.role;
+    const nextIsActive = body.isActive === undefined ? current.is_active : body.isActive ? 1 : 0;
+    const nextEmail = body.email?.toLowerCase().trim() || current.email;
+    const nextFullName = body.fullName?.trim() || current.full_name;
+
+    if (nextEmail !== current.email) {
+      const existing = await env.CRM_DB.prepare(`SELECT id FROM users WHERE email = ?1 AND id <> ?2`)
+        .bind(nextEmail, userId)
+        .first();
+      if (existing) return err('Email already in use', 409);
+    }
+
+    if (current.role === 'admin' && current.is_active === 1 && (nextRole !== 'admin' || nextIsActive !== 1)) {
+      const admins = await env.CRM_DB.prepare(
+        `SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND is_active = 1 AND id <> ?1`
+      )
+        .bind(userId)
+        .first<{ c: number }>();
+      if (!admins || admins.c < 1) return err('At least one active admin must remain', 409);
+    }
+
+    await env.CRM_DB.prepare(
+      `UPDATE users
+       SET role = ?1, is_active = ?2, full_name = ?3, email = ?4, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?5`
+    )
+      .bind(nextRole, nextIsActive, nextFullName, nextEmail, userId)
       .run();
 
     await audit(env, user, 'update', 'user', String(userId), body);
     return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'DELETE',
+  /^\/api\/users\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageUsers(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/users\/(\d+)$/);
+    const userId = Number(match?.[1]);
+    if (!userId) return err('user id is required');
+    if (userId === user.id) return err('You cannot delete your own account', 409);
+
+    const current = await env.CRM_DB.prepare(`SELECT id, role, is_active FROM users WHERE id = ?1`)
+      .bind(userId)
+      .first<{ id: number; role: UserRole; is_active: number }>();
+    if (!current) return err('User not found', 404);
+
+    if (current.role === 'admin' && current.is_active === 1) {
+      const admins = await env.CRM_DB.prepare(
+        `SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND is_active = 1 AND id <> ?1`
+      )
+        .bind(userId)
+        .first<{ c: number }>();
+      if (!admins || admins.c < 1) return err('At least one active admin must remain', 409);
+    }
+
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(userId),
+      env.CRM_DB.prepare(`DELETE FROM sessions WHERE user_id = ?1`).bind(userId)
+    ]);
+    await audit(env, user, 'delete', 'user', String(userId));
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/users\/(\d+)\/resend-invite$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageUsers(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/users\/(\d+)\/resend-invite$/);
+    const userId = Number(match?.[1]);
+    if (!userId) return err('user id is required');
+
+    const target = await env.CRM_DB.prepare(`SELECT id, email, full_name FROM users WHERE id = ?1`)
+      .bind(userId)
+      .first<{ id: number; email: string; full_name: string }>();
+    if (!target) return err('User not found', 404);
+
+    const temporaryPassword = randomPassword(12);
+    const pwd = await hashPassword(temporaryPassword);
+    const inviteToken = randomToken(24);
+    const inviteExpiresAt = isoAfterHours(24 * 7);
+
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(
+        `UPDATE users
+         SET password_hash = ?1, password_salt = ?2, is_active = 1, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?3`
+      ).bind(pwd.hash, pwd.salt, userId),
+      env.CRM_DB.prepare(`DELETE FROM sessions WHERE user_id = ?1`).bind(userId),
+      env.CRM_DB.prepare(
+        `INSERT INTO user_invites (token, user_id, expires_at, created_by_user_id)
+         VALUES (?1, ?2, ?3, ?4)`
+      ).bind(inviteToken, userId, inviteExpiresAt, user.id)
+    ]);
+
+    await audit(env, user, 'resend_invite', 'user', String(userId), { email: target.email });
+    return json({ temporaryPassword, inviteToken, inviteExpiresAt, email: target.email, fullName: target.full_name });
   }) as any
 );
 
