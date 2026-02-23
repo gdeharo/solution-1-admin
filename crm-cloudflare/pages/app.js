@@ -20,7 +20,8 @@ const state = {
   contactEditMode: false,
   companySectionState: {},
   adminOpenSection: '',
-  currentContactId: null
+  currentContactId: null,
+  showInactiveUsers: false
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -1747,7 +1748,12 @@ async function renderRepsView() {
       </select>
       <button type="submit">Create User</button>
     `;
-    document.getElementById('usersBody').innerHTML = users
+    const visibleUsers = users.filter((u) => (state.showInactiveUsers ? !u.is_active : !!u.is_active));
+    const toggleBtn = document.getElementById('toggleInactiveUsersBtn');
+    if (toggleBtn) {
+      toggleBtn.textContent = state.showInactiveUsers ? 'Show Active' : 'Show Inactive';
+    }
+    document.getElementById('usersBody').innerHTML = visibleUsers
       .map(
         (u) => `<tr>
           <td>${escapeHtml(u.full_name)}</td>
@@ -2054,6 +2060,14 @@ function bindRepsEvents() {
       } catch (error) {
         showToast(error.message, true);
       }
+    };
+  }
+
+  const toggleInactiveUsersBtn = document.getElementById('toggleInactiveUsersBtn');
+  if (toggleInactiveUsersBtn && state.user?.role === 'admin') {
+    toggleInactiveUsersBtn.onclick = async () => {
+      state.showInactiveUsers = !state.showInactiveUsers;
+      await renderRepsView();
     };
   }
 
