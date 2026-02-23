@@ -10,6 +10,10 @@ const state = {
   repTerritories: [],
   segments: [],
   customerTypes: [],
+  segmentValues: [],
+  typeValues: [],
+  interactionTypeValues: [],
+  theme: null,
   companyFilter: '',
   history: [],
   companyEditMode: false,
@@ -81,6 +85,16 @@ const US_STATES = [
 
 const CA_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
 const INTERACTION_TYPE_DEFAULTS = ['Store Visit', 'Other Visit', 'Phone Call', 'Other'];
+const DEFAULT_THEME = {
+  bg: '#f8eef4',
+  panel: '#ffffff',
+  ink: '#2b1b25',
+  muted: '#6a4d5d',
+  line: '#e5cfdc',
+  accent: '#c13a7d',
+  accentSoft: '#f6deea',
+  danger: '#9b234f'
+};
 
 function canWrite() {
   return ['admin', 'manager', 'rep'].includes(state.user?.role);
@@ -226,11 +240,26 @@ function buildStateField(scope, country, currentState = '', disabled = false) {
 }
 
 function interactionTypeOptions(selectedValue = '') {
-  const values = Array.from(new Set([...INTERACTION_TYPE_DEFAULTS, ...(selectedValue ? [selectedValue] : [])]));
+  const configured = (state.interactionTypeValues || []).map((x) => x.name);
+  const values = Array.from(new Set([...(configured.length ? configured : INTERACTION_TYPE_DEFAULTS), ...(selectedValue ? [selectedValue] : [])]));
   return values
     .map((v) => `<option value="${escapeHtml(v)}" ${v === selectedValue ? 'selected' : ''}>${escapeHtml(v)}</option>`)
     .concat([`<option value="__custom__">+ Add custom…</option>`])
     .join('');
+}
+
+function applyTheme(theme) {
+  const merged = { ...DEFAULT_THEME, ...(theme || {}) };
+  const root = document.documentElement;
+  root.style.setProperty('--bg', merged.bg);
+  root.style.setProperty('--panel', merged.panel);
+  root.style.setProperty('--ink', merged.ink);
+  root.style.setProperty('--muted', merged.muted);
+  root.style.setProperty('--line', merged.line);
+  root.style.setProperty('--accent', merged.accent);
+  root.style.setProperty('--accent-soft', merged.accentSoft);
+  root.style.setProperty('--danger', merged.danger);
+  state.theme = merged;
 }
 
 function bindInteractionTypeCustom(selectEl) {
@@ -299,9 +328,21 @@ async function loadReps() {
 
 async function loadMetadata() {
   const data = await api('/api/company-metadata');
-  state.segments = (data.segments || []).map((x) => x.name);
-  state.customerTypes = (data.types || []).map((x) => x.name);
+  state.segmentValues = data.segments || [];
+  state.typeValues = data.types || [];
+  state.interactionTypeValues = data.interactionTypes || [];
+  state.segments = state.segmentValues.map((x) => x.name);
+  state.customerTypes = state.typeValues.map((x) => x.name);
   renderCreateCompanySelects();
+}
+
+async function loadTheme() {
+  try {
+    const data = await api('/api/settings/theme');
+    applyTheme(data.theme || DEFAULT_THEME);
+  } catch {
+    applyTheme(DEFAULT_THEME);
+  }
 }
 
 function renderCreateCompanySelects() {
@@ -1465,6 +1506,41 @@ async function renderRepsView() {
   state.reps = data.reps;
   state.repAssignments = data.assignments;
   state.repTerritories = data.territories;
+  const isAdmin = state.user?.role === 'admin';
+  let users = [];
+  if (isAdmin) {
+    try {
+      const usersData = await api('/api/users');
+      users = usersData.users || [];
+    } catch {
+      users = [];
+    }
+  }
+
+  document.getElementById('themeForm').innerHTML = `
+    <label><span class="sr-only">Background</span><input name="bg" type="color" value="${escapeHtml(state.theme?.bg || DEFAULT_THEME.bg)}" aria-label="Background" /></label>
+    <label><span class="sr-only">Panel</span><input name="panel" type="color" value="${escapeHtml(state.theme?.panel || DEFAULT_THEME.panel)}" aria-label="Panel" /></label>
+    <label><span class="sr-only">Text</span><input name="ink" type="color" value="${escapeHtml(state.theme?.ink || DEFAULT_THEME.ink)}" aria-label="Text" /></label>
+    <label><span class="sr-only">Muted Text</span><input name="muted" type="color" value="${escapeHtml(state.theme?.muted || DEFAULT_THEME.muted)}" aria-label="Muted Text" /></label>
+    <label><span class="sr-only">Lines</span><input name="line" type="color" value="${escapeHtml(state.theme?.line || DEFAULT_THEME.line)}" aria-label="Lines" /></label>
+    <label><span class="sr-only">Accent</span><input name="accent" type="color" value="${escapeHtml(state.theme?.accent || DEFAULT_THEME.accent)}" aria-label="Accent" /></label>
+    <label><span class="sr-only">Accent Soft</span><input name="accentSoft" type="color" value="${escapeHtml(state.theme?.accentSoft || DEFAULT_THEME.accentSoft)}" aria-label="Accent Soft" /></label>
+    <label><span class="sr-only">Danger</span><input name="danger" type="color" value="${escapeHtml(state.theme?.danger || DEFAULT_THEME.danger)}" aria-label="Danger" /></label>
+    <button type="submit">Save Theme</button>
+  `;
+
+  document.getElementById('interactionTypeValueForm').innerHTML = `
+    <input name="name" placeholder="Add meeting type" required />
+    <button type="submit">Add Meeting Type</button>
+  `;
+  document.getElementById('interactionTypeList').innerHTML = (state.interactionTypeValues || [])
+    .map(
+      (item) => `<li>
+        <span>${escapeHtml(item.name)}</span>
+        <button type="button" class="ghost" data-rename-interaction-type="${item.id}">Rename</button>
+      </li>`
+    )
+    .join('');
 
   document.getElementById('repCreateForm').innerHTML = `
     <input name="fullName" placeholder="Full name" required />
@@ -1520,22 +1596,128 @@ async function renderRepsView() {
   document.getElementById('segmentValueForm').innerHTML = `
     <strong>Segments</strong>
     <input name="name" placeholder="Add segment value" required />
-    <button type="submit">Add Segment</button>
-    <span class="muted">${escapeHtml(state.segments.join(', '))}</span>
+    <button type="submit">Add</button>
   `;
+  document.getElementById('segmentValueList').innerHTML = (state.segmentValues || [])
+    .map(
+      (item) => `<li>
+        <span>${escapeHtml(item.name)}</span>
+        <button type="button" class="ghost" data-rename-segment="${item.id}">Rename</button>
+      </li>`
+    )
+    .join('');
 
   document.getElementById('typeValueForm').innerHTML = `
     <strong>Types</strong>
     <input name="name" placeholder="Add type value" required />
-    <button type="submit">Add Type</button>
-    <span class="muted">${escapeHtml(state.customerTypes.join(', '))}</span>
+    <button type="submit">Add</button>
   `;
+  document.getElementById('typeValueList').innerHTML = (state.typeValues || [])
+    .map(
+      (item) => `<li>
+        <span>${escapeHtml(item.name)}</span>
+        <button type="button" class="ghost" data-rename-type="${item.id}">Rename</button>
+      </li>`
+    )
+    .join('');
+
+  const userCard = document.getElementById('userAdminCard');
+  userCard.classList.toggle('hidden', !isAdmin);
+  if (isAdmin) {
+    document.getElementById('userCreateForm').innerHTML = `
+      <input name="fullName" placeholder="Full name" required />
+      <input name="email" placeholder="Email" type="email" required />
+      <select name="role" required>
+        <option value="viewer">Viewer</option>
+        <option value="rep">Rep</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+      </select>
+      <input name="password" placeholder="Temporary password" type="password" required />
+      <button type="submit">Create User</button>
+    `;
+    document.getElementById('usersBody').innerHTML = users
+      .map(
+        (u) => `<tr>
+          <td>${escapeHtml(u.full_name)}</td>
+          <td>${escapeHtml(u.email)}</td>
+          <td>
+            <select data-user-role="${u.id}">
+              <option value="viewer" ${u.role === 'viewer' ? 'selected' : ''}>viewer</option>
+              <option value="rep" ${u.role === 'rep' ? 'selected' : ''}>rep</option>
+              <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>manager</option>
+              <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
+            </select>
+          </td>
+          <td><input type="checkbox" data-user-active="${u.id}" ${u.is_active ? 'checked' : ''} /></td>
+          <td><button type="button" data-save-user="${u.id}">Save</button></td>
+        </tr>`
+      )
+      .join('');
+  } else {
+    document.getElementById('userCreateForm').innerHTML = '';
+    document.getElementById('usersBody').innerHTML = '';
+  }
 
   bindRepsEvents();
-  setView('repsView', 'Manage reps');
+  setView('repsView', 'Admin Panel');
 }
 
 function bindRepsEvents() {
+  const themeForm = document.getElementById('themeForm');
+  themeForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(themeForm);
+    const theme = {
+      bg: fd.get('bg'),
+      panel: fd.get('panel'),
+      ink: fd.get('ink'),
+      muted: fd.get('muted'),
+      line: fd.get('line'),
+      accent: fd.get('accent'),
+      accentSoft: fd.get('accentSoft'),
+      danger: fd.get('danger')
+    };
+    try {
+      await api('/api/settings/theme', { method: 'PUT', body: JSON.stringify(theme) });
+      applyTheme(theme);
+      showToast('Theme updated');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  const interactionTypeValueForm = document.getElementById('interactionTypeValueForm');
+  interactionTypeValueForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(interactionTypeValueForm);
+    try {
+      await api('/api/interaction-types', { method: 'POST', body: JSON.stringify({ name: fd.get('name') }) });
+      await loadMetadata();
+      await renderRepsView();
+      showToast('Meeting type added');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  document.querySelectorAll('[data-rename-interaction-type]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = Number(btn.dataset.renameInteractionType);
+      const current = state.interactionTypeValues.find((x) => x.id === id);
+      const next = prompt('Rename meeting type', current?.name || '');
+      if (!next || !next.trim()) return;
+      try {
+        await api(`/api/interaction-types/${id}`, { method: 'PATCH', body: JSON.stringify({ name: next.trim() }) });
+        await loadMetadata();
+        await renderRepsView();
+        showToast('Meeting type renamed');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
+
   const repCreateForm = document.getElementById('repCreateForm');
   repCreateForm.onsubmit = async (event) => {
     event.preventDefault();
@@ -1636,6 +1818,22 @@ function bindRepsEvents() {
       showToast(error.message, true);
     }
   };
+  document.querySelectorAll('[data-rename-segment]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = Number(btn.dataset.renameSegment);
+      const current = state.segmentValues.find((x) => x.id === id);
+      const next = prompt('Rename segment', current?.name || '');
+      if (!next || !next.trim()) return;
+      try {
+        await api(`/api/company-metadata/segments/${id}`, { method: 'PATCH', body: JSON.stringify({ name: next.trim() }) });
+        await loadMetadata();
+        await Promise.all([loadCompanies(), renderRepsView()]);
+        showToast('Segment renamed');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
 
   const typeValueForm = document.getElementById('typeValueForm');
   typeValueForm.onsubmit = async (event) => {
@@ -1650,6 +1848,66 @@ function bindRepsEvents() {
       showToast(error.message, true);
     }
   };
+  document.querySelectorAll('[data-rename-type]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = Number(btn.dataset.renameType);
+      const current = state.typeValues.find((x) => x.id === id);
+      const next = prompt('Rename type', current?.name || '');
+      if (!next || !next.trim()) return;
+      try {
+        await api(`/api/company-metadata/types/${id}`, { method: 'PATCH', body: JSON.stringify({ name: next.trim() }) });
+        await loadMetadata();
+        await Promise.all([loadCompanies(), renderRepsView()]);
+        showToast('Type renamed');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
+
+  const userCreateForm = document.getElementById('userCreateForm');
+  if (userCreateForm && state.user?.role === 'admin') {
+    userCreateForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const fd = new FormData(userCreateForm);
+      try {
+        await api('/api/users', {
+          method: 'POST',
+          body: JSON.stringify({
+            fullName: fd.get('fullName'),
+            email: fd.get('email'),
+            role: fd.get('role'),
+            password: fd.get('password')
+          })
+        });
+        await renderRepsView();
+        showToast('User created');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
+
+  document.querySelectorAll('[data-save-user]').forEach((btn) => {
+    btn.onclick = async () => {
+      const userId = Number(btn.dataset.saveUser);
+      const roleEl = document.querySelector(`[data-user-role="${userId}"]`);
+      const activeEl = document.querySelector(`[data-user-active="${userId}"]`);
+      if (!roleEl || !activeEl) return;
+      try {
+        await api(`/api/users/${userId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            role: roleEl.value,
+            isActive: !!activeEl.checked
+          })
+        });
+        showToast('User updated');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
 }
 
 async function loadSession() {
@@ -1667,7 +1925,7 @@ async function loadSession() {
     els.manageRepsBtn.classList.toggle('hidden', !canManageReps());
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
-    await Promise.all([loadCompanies(), loadReps(), loadMetadata()]);
+    await Promise.all([loadCompanies(), loadReps(), loadMetadata(), loadTheme()]);
     setView('companyListView', 'Company list', false);
   } catch {
     localStorage.removeItem('crm_token');
@@ -1797,4 +2055,5 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
   }
 };
 
+applyTheme(DEFAULT_THEME);
 loadSession();

@@ -14,7 +14,7 @@
       </div>
       <div class="top-actions">
         <button id="backBtn" class="ghost hidden" type="button">Back</button>
-        <button id="manageRepsBtn" class="hidden" type="button">Manage Reps</button>
+        <button id="manageRepsBtn" class="hidden" type="button">Admin Panel</button>
         <span id="whoami" class="whoami hidden"></span>
         <button id="logoutBtn" class="hidden" type="button">Log out</button>
       </div>
@@ -154,7 +154,18 @@
 
       <section id="repsView" class="panel hidden">
         <div class="row between">
-          <h2>Reps and Assigned Companies</h2>
+          <h2>Admin Control Panel</h2>
+        </div>
+
+        <div class="card">
+          <h3>Theme Colors</h3>
+          <form id="themeForm" class="row wrap"></form>
+        </div>
+
+        <div class="card">
+          <h3>Interaction Types</h3>
+          <form id="interactionTypeValueForm" class="row wrap"></form>
+          <ul id="interactionTypeList" class="list"></ul>
         </div>
 
         <form id="repCreateForm" class="row wrap"></form>
@@ -185,6 +196,25 @@
             <form id="segmentValueForm" class="row wrap"></form>
             <form id="typeValueForm" class="row wrap"></form>
           </div>
+          <ul id="segmentValueList" class="list"></ul>
+          <ul id="typeValueList" class="list"></ul>
+        </div>
+
+        <div id="userAdminCard" class="card hidden">
+          <h3>Users</h3>
+          <form id="userCreateForm" class="row wrap"></form>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Active</th>
+                <th>Save</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody"></tbody>
+          </table>
         </div>
       </section>
     </main>

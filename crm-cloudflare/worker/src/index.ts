@@ -124,6 +124,12 @@ async function getAuthedUser(request: Request, env: Env): Promise<AuthedUser | n
 const canWrite = (role: UserRole): boolean => role === 'admin' || role === 'manager' || role === 'rep';
 const canManageUsers = (role: UserRole): boolean => role === 'admin';
 const canManageReps = (role: UserRole): boolean => role === 'admin' || role === 'manager';
+const THEME_KEYS = ['bg', 'panel', 'ink', 'muted', 'line', 'accent', 'accentSoft', 'danger'] as const;
+type ThemeKey = (typeof THEME_KEYS)[number];
+
+function isHexColor(value: string): boolean {
+  return /^#[0-9a-fA-F]{6}$/.test(value);
+}
 
 async function ensureSegmentAndTypeExist(env: Env, segment?: string | null, customerType?: string | null): Promise<string | null> {
   if (segment && segment.trim()) {
@@ -271,11 +277,12 @@ addRoute(
   'GET',
   /^\/api\/company-metadata$/,
   withAuth(async (_request, env) => {
-    const [segments, types] = await Promise.all([
-      env.CRM_DB.prepare(`SELECT name FROM company_segments ORDER BY name ASC`).all(),
-      env.CRM_DB.prepare(`SELECT name FROM company_types ORDER BY name ASC`).all()
+    const [segments, types, interactionTypes] = await Promise.all([
+      env.CRM_DB.prepare(`SELECT id, name FROM company_segments ORDER BY name ASC`).all(),
+      env.CRM_DB.prepare(`SELECT id, name FROM company_types ORDER BY name ASC`).all(),
+      env.CRM_DB.prepare(`SELECT id, name FROM interaction_types ORDER BY name ASC`).all()
     ]);
-    return json({ segments: segments.results, types: types.results });
+    return json({ segments: segments.results, types: types.results, interactionTypes: interactionTypes.results });
   }) as any
 );
 
@@ -293,6 +300,31 @@ addRoute(
 );
 
 addRoute(
+  'PATCH',
+  /^\/api\/company-metadata\/segments\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/company-metadata\/segments\/(\d+)$/);
+    const segmentId = Number(match?.[1]);
+    if (!segmentId) return err('segment id is required');
+    const body = await parseJson<{ name: string }>(request);
+    if (!body?.name?.trim()) return err('name is required');
+    const current = await env.CRM_DB.prepare(`SELECT id, name FROM company_segments WHERE id = ?1`)
+      .bind(segmentId)
+      .first<{ id: number; name: string }>();
+    if (!current) return err('Segment not found', 404);
+    const nextName = body.name.trim();
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`UPDATE company_segments SET name = ?1 WHERE id = ?2`).bind(nextName, segmentId),
+      env.CRM_DB.prepare(`UPDATE companies SET segment = ?1 WHERE segment = ?2`).bind(nextName, current.name),
+      env.CRM_DB.prepare(`UPDATE reps SET segment = ?1 WHERE segment = ?2`).bind(nextName, current.name)
+    ]);
+    await audit(env, user, 'update', 'company_segment', String(segmentId), { from: current.name, to: nextName });
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
   'POST',
   /^\/api\/company-metadata\/types$/,
   withAuth(async (request, env, user) => {
@@ -302,6 +334,103 @@ addRoute(
     await env.CRM_DB.prepare(`INSERT OR IGNORE INTO company_types (name) VALUES (?1)`).bind(body.name.trim()).run();
     await audit(env, user, 'create', 'company_type', body.name.trim());
     return json({ success: true }, 201);
+  }) as any
+);
+
+addRoute(
+  'PATCH',
+  /^\/api\/company-metadata\/types\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/company-metadata\/types\/(\d+)$/);
+    const typeId = Number(match?.[1]);
+    if (!typeId) return err('type id is required');
+    const body = await parseJson<{ name: string }>(request);
+    if (!body?.name?.trim()) return err('name is required');
+    const current = await env.CRM_DB.prepare(`SELECT id, name FROM company_types WHERE id = ?1`)
+      .bind(typeId)
+      .first<{ id: number; name: string }>();
+    if (!current) return err('Type not found', 404);
+    const nextName = body.name.trim();
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`UPDATE company_types SET name = ?1 WHERE id = ?2`).bind(nextName, typeId),
+      env.CRM_DB.prepare(`UPDATE companies SET customer_type = ?1 WHERE customer_type = ?2`).bind(nextName, current.name),
+      env.CRM_DB.prepare(`UPDATE reps SET customer_type = ?1 WHERE customer_type = ?2`).bind(nextName, current.name)
+    ]);
+    await audit(env, user, 'update', 'company_type', String(typeId), { from: current.name, to: nextName });
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/interaction-types$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const body = await parseJson<{ name: string }>(request);
+    if (!body?.name?.trim()) return err('name is required');
+    await env.CRM_DB.prepare(`INSERT OR IGNORE INTO interaction_types (name) VALUES (?1)`).bind(body.name.trim()).run();
+    await audit(env, user, 'create', 'interaction_type', body.name.trim());
+    return json({ success: true }, 201);
+  }) as any
+);
+
+addRoute(
+  'PATCH',
+  /^\/api\/interaction-types\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/interaction-types\/(\d+)$/);
+    const typeId = Number(match?.[1]);
+    if (!typeId) return err('interaction type id is required');
+    const body = await parseJson<{ name: string }>(request);
+    if (!body?.name?.trim()) return err('name is required');
+    const current = await env.CRM_DB.prepare(`SELECT id, name FROM interaction_types WHERE id = ?1`)
+      .bind(typeId)
+      .first<{ id: number; name: string }>();
+    if (!current) return err('Interaction type not found', 404);
+    const nextName = body.name.trim();
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`UPDATE interaction_types SET name = ?1 WHERE id = ?2`).bind(nextName, typeId),
+      env.CRM_DB.prepare(`UPDATE interactions SET interaction_type = ?1 WHERE interaction_type = ?2`).bind(nextName, current.name)
+    ]);
+    await audit(env, user, 'update', 'interaction_type', String(typeId), { from: current.name, to: nextName });
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/settings\/theme$/,
+  withAuth(async (_request, env) => {
+    const row = await env.CRM_DB.prepare(`SELECT value_json FROM app_settings WHERE key = 'theme'`).first<{ value_json: string }>();
+    if (!row) return json({ theme: null });
+    return json({ theme: JSON.parse(row.value_json) });
+  }) as any
+);
+
+addRoute(
+  'PUT',
+  /^\/api\/settings\/theme$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const body = await parseJson<Record<string, string>>(request);
+    if (!body) return err('theme object is required');
+    const normalized: Record<string, string> = {};
+    for (const key of THEME_KEYS) {
+      const value = String(body[key] || '');
+      if (!isHexColor(value)) return err(`Invalid color for ${key}`);
+      normalized[key] = value;
+    }
+    await env.CRM_DB.prepare(
+      `INSERT INTO app_settings (key, value_json, updated_by_user_id)
+       VALUES ('theme', ?1, ?2)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_by_user_id = excluded.updated_by_user_id, updated_at = CURRENT_TIMESTAMP`
+    )
+      .bind(JSON.stringify(normalized), user.id)
+      .run();
+    await audit(env, user, 'update', 'setting', 'theme', normalized);
+    return json({ success: true });
   }) as any
 );
 
