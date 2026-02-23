@@ -330,7 +330,7 @@ function showInviteEmailDialog({ to, subject, body, mailto }) {
 
 function buildInviteEmailPayload(adminName, email, inviteToken, temporaryPassword) {
   const baseUrl = `${window.location.origin}${window.location.pathname}`;
-  const inviteUrl = `${baseUrl}?invite=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}`;
+  const inviteUrl = `${baseUrl}?invite=${inviteToken}`;
   const subject = `Invitation from ${adminName} to access Company CRM`;
   const body = [
     'Hello, welcome to the Company CRM. By using this web application you will be able to manage companies, contacts and interactions with them easily.',
@@ -2188,7 +2188,6 @@ function initInviteSetupForm() {
   const bootstrapForm = document.getElementById('bootstrapForm');
   const url = new URL(window.location.href);
   const inviteToken = url.searchParams.get('invite');
-  const email = url.searchParams.get('email') || '';
 
   if (!inviteToken) {
     form.classList.add('hidden');
@@ -2200,7 +2199,15 @@ function initInviteSetupForm() {
   form.classList.remove('hidden');
   loginForm.classList.add('hidden');
   bootstrapForm.classList.add('hidden');
-  form.querySelector('[name="email"]').value = email;
+  form.querySelector('[name="email"]').value = '';
+
+  api(`/api/auth/invite/${encodeURIComponent(inviteToken)}`)
+    .then((data) => {
+      form.querySelector('[name="email"]').value = data.email || '';
+    })
+    .catch((error) => {
+      showToast(error.message, true);
+    });
 
   form.onsubmit = async (event) => {
     event.preventDefault();
@@ -2217,7 +2224,6 @@ function initInviteSetupForm() {
         body: JSON.stringify({ token: inviteToken, password })
       });
       url.searchParams.delete('invite');
-      url.searchParams.delete('email');
       window.history.replaceState({}, '', url.toString());
       form.reset();
       form.classList.add('hidden');

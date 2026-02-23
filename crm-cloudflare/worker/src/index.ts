@@ -273,6 +273,24 @@ addRoute('POST', /^\/api\/auth\/logout$/, async (request, env) => {
   return json({ success: true });
 });
 
+addRoute('GET', /^\/api\/auth\/invite\/([^/]+)$/, async (request, env) => {
+  const match = request.url.match(/\/api\/auth\/invite\/([^/]+)$/);
+  const token = decodeURIComponent(match?.[1] || '');
+  if (!token) return err('token is required');
+  const invite = await env.CRM_DB.prepare(
+    `SELECT ui.id, ui.user_id, ui.expires_at, ui.used_at, u.email
+     FROM user_invites ui
+     JOIN users u ON u.id = ui.user_id
+     WHERE ui.token = ?1`
+  )
+    .bind(token)
+    .first<{ id: number; user_id: number; expires_at: string; used_at: string | null; email: string }>();
+  if (!invite) return err('Invalid invite token', 404);
+  if (invite.used_at) return err('Invite token already used', 409);
+  if (new Date(invite.expires_at).getTime() < Date.now()) return err('Invite token expired', 410);
+  return json({ email: invite.email });
+});
+
 addRoute('POST', /^\/api\/auth\/invite\/accept$/, async (request, env) => {
   const body = await parseJson<{ token: string; password: string }>(request);
   if (!body?.token || !body?.password) return err('token and password are required');
