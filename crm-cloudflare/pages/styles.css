@@ -108,7 +108,7 @@ summary {
 
 .form-grid {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.28rem;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
@@ -119,7 +119,7 @@ summary {
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.08rem;
   color: var(--muted);
   font-size: 0.88rem;
 }
@@ -258,8 +258,8 @@ tr.clickable:hover {
 
 .field-stack {
   display: grid;
-  gap: 0.45rem;
-  margin-top: 0.45rem;
+  gap: 0.24rem;
+  margin-top: 0.24rem;
 }
 
 .address-row {
@@ -407,6 +407,28 @@ tr.clickable:hover {
   align-items: start;
 }
 
+.interaction-top-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 2fr 1fr;
+  align-items: start;
+}
+
+.interaction-assets-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 2fr 1fr;
+  align-items: start;
+}
+
+#interactionCreateForm input,
+#interactionCreateForm select,
+#interactionEditForm input,
+#interactionEditForm select {
+  min-height: 42px;
+  height: 42px;
+}
+
 .name-row {
   display: grid;
   gap: 0.45rem;
@@ -480,7 +502,9 @@ tr.clickable:hover {
   }
   .contact-top-grid,
   .contact-top-grid-two,
-  .contact-assets-grid {
+  .contact-assets-grid,
+  .interaction-top-grid,
+  .interaction-assets-grid {
     grid-template-columns: 1fr;
   }
   .name-row {

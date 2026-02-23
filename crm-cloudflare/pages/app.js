@@ -817,16 +817,19 @@ async function openContactDetail(contactId) {
       <div class="card">
         <strong>Contact</strong>
         <div class="field-stack">
-          <label><span class="sr-only">First name</span>${
+          ${
             isEditing
-              ? `<input name="firstName" value="${escapeHtml(customer.first_name)}" placeholder="First name" aria-label="First name" ${readOnly} required />`
-              : `<div class="readonly-value">${escapeHtml(customer.first_name || '-')}</div>`
-          }</label>
-          <label><span class="sr-only">Last name</span>${
-            isEditing
-              ? `<input name="lastName" value="${escapeHtml(customer.last_name)}" placeholder="Last name" aria-label="Last name" ${readOnly} required />`
-              : `<div class="readonly-value">${escapeHtml(customer.last_name || '-')}</div>`
-          }</label>
+              ? `<label><span class="sr-only">First name</span><input name="firstName" value="${escapeHtml(
+                  customer.first_name
+                )}" placeholder="First name" aria-label="First name" ${readOnly} required /></label>
+                 <label><span class="sr-only">Last name</span><input name="lastName" value="${escapeHtml(
+                   customer.last_name
+                 )}" placeholder="Last name" aria-label="Last name" ${readOnly} required /></label>`
+              : `<div class="name-row">
+                   <div class="readonly-value">${escapeHtml(customer.first_name || '-')}</div>
+                   <div class="readonly-value">${escapeHtml(customer.last_name || '-')}</div>
+                 </div>`
+          }
           <label><span class="sr-only">Email</span>${
             isEditing
               ? `<input name="email" type="email" value="${escapeHtml(customer.email || '')}" placeholder="Email" aria-label="Email" ${readOnly} />`
@@ -1176,10 +1179,16 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
       });
       const photo = fd.get('photo');
       if (photo instanceof File && photo.size > 0) {
+        const processedPhoto = await toSquareImageFile(photo);
         const formData = new FormData();
         formData.set('entityType', 'interaction');
         formData.set('entityId', String(created.id));
-        formData.set('file', photo);
+        formData.set(
+          'file',
+          new File([processedPhoto], `interaction-photo-${Date.now()}.jpg`, {
+            type: processedPhoto.type || 'image/jpeg'
+          })
+        );
         await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
       }
       await openInteractionDetail(created.id);
@@ -1199,25 +1208,61 @@ async function openInteractionDetail(interactionId) {
   const form = document.getElementById('interactionEditForm');
 
   form.innerHTML = `
-    <label><span class="sr-only">Company</span><input value="${escapeHtml(interaction.company_name)}" placeholder="Company" aria-label="Company" disabled /></label>
-    <label><span class="sr-only">Contact</span>
-      <select name="customerId" aria-label="Contact" ${readOnly}>
-        <option value="">Contact</option>
-        ${companyCustomers.customers
-          .map(
-            (c) =>
-              `<option value="${c.id}" ${interaction.customer_id === c.id ? 'selected' : ''}>${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`
-          )
-          .join('')}
-      </select>
-    </label>
-    <label><span class="sr-only">Editor</span><input value="${escapeHtml(interaction.created_by_name || '')}" placeholder="Editor" aria-label="Editor" disabled /></label>
-    <label><span class="sr-only">Type</span><select name="interactionType" id="interactionDetailType" aria-label="Type" ${readOnly}>${interactionTypeOptions(interaction.interaction_type || '')}</select></label>
-    <label class="full"><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" ${readOnly} required>${escapeHtml(interaction.meeting_notes || '')}</textarea></label>
-    <label class="full"><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
-    <label class="full"><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${
-      interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 10) : ''
-    }" ${readOnly} /></label>
+    <div class="interaction-top-grid full">
+      <div class="card">
+        <div class="field-stack">
+          <label><span class="sr-only">Company</span><input value="${escapeHtml(
+            interaction.company_name
+          )}" placeholder="Company" aria-label="Company" disabled /></label>
+          <label><span class="sr-only">Contact</span>
+            <select name="customerId" aria-label="Contact" ${readOnly}>
+              <option value="">Contact</option>
+              ${companyCustomers.customers
+                .map(
+                  (c) =>
+                    `<option value="${c.id}" ${interaction.customer_id === c.id ? 'selected' : ''}>${escapeHtml(c.first_name)} ${escapeHtml(c.last_name)}</option>`
+                )
+                .join('')}
+            </select>
+          </label>
+          <label><span class="sr-only">Editor</span><input value="${escapeHtml(
+            interaction.created_by_name || ''
+          )}" placeholder="Editor" aria-label="Editor" disabled /></label>
+          <label><span class="sr-only">Type</span><select name="interactionType" id="interactionDetailType" aria-label="Type" ${readOnly}>${interactionTypeOptions(
+            interaction.interaction_type || ''
+          )}</select></label>
+        </div>
+      </div>
+      <div class="card">
+        <strong>Photo</strong>
+        <input id="interactionPhotoInput" type="file" accept="image/*" capture="environment" class="hidden" />
+        <div id="interactionPhotoTile" class="photo-tile ${canWrite() ? 'photo-tile-editable' : ''}">
+          <div id="interactionPhotoPreview" class="photo-preview"></div>
+        </div>
+      </div>
+    </div>
+    <div class="interaction-assets-grid full">
+      <div class="card">
+        <strong>Meeting Notes</strong>
+        <label><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" ${readOnly} required>${escapeHtml(
+          interaction.meeting_notes || ''
+        )}</textarea></label>
+        <label><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(
+          interaction.next_action || ''
+        )}" ${readOnly} /></label>
+        <label><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${
+          interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 10) : ''
+        }" ${readOnly} /></label>
+      </div>
+      <div class="card">
+        <strong>Files</strong>
+        <div class="row wrap ${canWrite() ? '' : 'hidden'}">
+          <input id="interactionFileInput" type="file" />
+          <button id="uploadInteractionFileBtn" type="button">Add File</button>
+        </div>
+        <div id="interactionFilesList" class="docs-grid"></div>
+      </div>
+    </div>
     <div class="row wrap full">
       <button type="submit" ${readOnly}>Save Interaction</button>
       <button id="deleteInteractionBtn" type="button" class="danger" ${readOnly}>Delete Interaction</button>
@@ -1258,6 +1303,115 @@ async function openInteractionDetail(interactionId) {
       showToast(error.message, true);
     }
   };
+
+  const renderInteractionAssets = async () => {
+    try {
+      const files = await api(`/api/attachments?entityType=interaction&entityId=${interactionId}`);
+      const attachments = files.attachments || [];
+      const photo = attachments.find((a) => (a.file_name || '').startsWith('interaction-photo-')) ||
+        attachments.find((a) => String(a.mime_type || '').toLowerCase().startsWith('image/'));
+      const photoKey = photo?.file_key || null;
+
+      const photoContainer = document.getElementById('interactionPhotoPreview');
+      if (photoKey) {
+        photoContainer.innerHTML = `<img src="${API_BASE}/api/files/${encodeURIComponent(photoKey)}?token=${encodeURIComponent(
+          state.token || ''
+        )}" alt="Interaction photo" class="contact-photo" />`;
+      } else {
+        photoContainer.innerHTML = '<span class="muted">Click to add photo</span>';
+      }
+
+      const docs = attachments.filter((a) => a.file_key !== photoKey);
+      document.getElementById('interactionFilesList').innerHTML = docs
+        .map(
+          (file) => `<div class="doc-card">
+            <div class="doc-name">
+              <a href="${API_BASE}/api/files/${encodeURIComponent(file.file_key)}?token=${encodeURIComponent(
+                state.token || ''
+              )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a>
+            </div>
+            <div class="muted">${escapeHtml(file.mime_type || '')}</div>
+            ${
+              canWrite()
+                ? `<button type="button" class="danger small-btn" data-delete-interaction-file="${file.id}">Delete</button>`
+                : ''
+            }
+          </div>`
+        )
+        .join('');
+
+      if (canWrite()) {
+        document.querySelectorAll('[data-delete-interaction-file]').forEach((btn) => {
+          btn.onclick = async () => {
+            if (!confirm('Delete this file?')) return;
+            try {
+              await api(`/api/attachments/${Number(btn.dataset.deleteInteractionFile)}`, { method: 'DELETE' });
+              await renderInteractionAssets();
+              showToast('File deleted');
+            } catch (error) {
+              showToast(error.message, true);
+            }
+          };
+        });
+      }
+    } catch {
+      document.getElementById('interactionPhotoPreview').innerHTML = '<span class="muted">Could not load photo.</span>';
+      document.getElementById('interactionFilesList').innerHTML = '<div class="muted">Could not load files.</div>';
+    }
+  };
+
+  const interactionPhotoTile = document.getElementById('interactionPhotoTile');
+  const interactionPhotoInput = document.getElementById('interactionPhotoInput');
+  if (interactionPhotoTile && interactionPhotoInput && canWrite()) {
+    interactionPhotoTile.onclick = () => interactionPhotoInput.click();
+    interactionPhotoInput.onchange = async () => {
+      const rawFile = interactionPhotoInput.files?.[0];
+      if (!rawFile) return;
+      try {
+        const processedFile = await toSquareImageFile(rawFile);
+        const formData = new FormData();
+        formData.set('entityType', 'interaction');
+        formData.set('entityId', String(interactionId));
+        formData.set(
+          'file',
+          new File([processedFile], `interaction-photo-${Date.now()}.jpg`, { type: processedFile.type || 'image/jpeg' })
+        );
+        await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        await renderInteractionAssets();
+        showToast('Photo uploaded');
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        interactionPhotoInput.value = '';
+      }
+    };
+  }
+
+  const uploadInteractionFileBtn = document.getElementById('uploadInteractionFileBtn');
+  if (uploadInteractionFileBtn && canWrite()) {
+    uploadInteractionFileBtn.onclick = async () => {
+      const input = document.getElementById('interactionFileInput');
+      const file = input.files?.[0];
+      if (!file) {
+        showToast('Choose a file first', true);
+        return;
+      }
+      const formData = new FormData();
+      formData.set('entityType', 'interaction');
+      formData.set('entityId', String(interactionId));
+      formData.set('file', file);
+      try {
+        await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        input.value = '';
+        await renderInteractionAssets();
+        showToast('File uploaded');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
+
+  await renderInteractionAssets();
 
   setView('interactionDetailView', `Interaction • ${interaction.company_name}`);
 }
