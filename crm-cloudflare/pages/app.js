@@ -31,6 +31,7 @@ const VIEW_IDS = [
 ];
 
 const els = {
+  pageTitle: document.getElementById('pageTitle'),
   pageHint: document.getElementById('pageHint'),
   backBtn: document.getElementById('backBtn'),
   manageRepsBtn: document.getElementById('manageRepsBtn'),
@@ -86,7 +87,7 @@ function canWrite() {
 }
 
 function canManageReps() {
-  return ['admin', 'manager'].includes(state.user?.role);
+  return ['admin', 'manager', 'owner'].includes(state.user?.role);
 }
 
 function showToast(message, isError = false) {
@@ -217,9 +218,9 @@ function buildStateField(scope, country, currentState = '', disabled = false) {
     const options = (country === 'US' ? US_STATES : CA_PROVINCES)
       .map((code) => `<option value="${code}" ${code === currentState ? 'selected' : ''}>${code}</option>`)
       .join('');
-    inner = `State/Province <select name="state" ${dis}><option value="">--</option>${options}</select>`;
+    inner = `<span class="sr-only">State/Province</span><select name="state" aria-label="State/Province" ${dis}><option value="">State/Province</option>${options}</select>`;
   } else {
-    inner = `State/Province <input name="state" value="${value}" ${dis} placeholder="Enter region" />`;
+    inner = `<span class="sr-only">State/Province</span><input name="state" value="${value}" ${dis} placeholder="State/Province" aria-label="State/Province" />`;
   }
   return { wrapId, inner };
 }
@@ -261,6 +262,7 @@ function setView(viewId, hint, pushHistory = true) {
   VIEW_IDS.forEach((v) => document.getElementById(v).classList.add('hidden'));
   document.getElementById(viewId).classList.remove('hidden');
 
+  els.pageTitle.textContent = hint;
   els.pageHint.textContent = hint;
   els.backBtn.classList.toggle('hidden', viewId === 'companyListView' || viewId === 'authView');
 }
@@ -307,10 +309,10 @@ function renderCreateCompanySelects() {
   const typeSelect = document.getElementById('createCompanyType');
   if (!segmentSelect || !typeSelect) return;
 
-  segmentSelect.innerHTML = `<option value="">--</option>${state.segments
+  segmentSelect.innerHTML = `<option value="">Segment</option>${state.segments
     .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
     .join('')}`;
-  typeSelect.innerHTML = `<option value="">--</option>${state.customerTypes
+  typeSelect.innerHTML = `<option value="">Type</option>${state.customerTypes
     .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
     .join('')}`;
 
@@ -391,14 +393,14 @@ function renderCompanyDetail() {
   const assignedRepNames = (c.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
   const companyPhoneHref = telHref(c.main_phone || '', c.country || 'US');
   const mapsUrl = companyMapUrl(c);
-  const segmentOptions = [`<option value="">--</option>`]
+  const segmentOptions = [`<option value="">Segment</option>`]
     .concat(
       state.segments.map(
         (name) => `<option value="${escapeHtml(name)}" ${c.segment === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
       )
     )
     .join('');
-  const typeOptions = [`<option value="">--</option>`]
+  const typeOptions = [`<option value="">Type</option>`]
     .concat(
       state.customerTypes.map(
         (name) =>
@@ -409,14 +411,14 @@ function renderCompanyDetail() {
 
   document.getElementById('companyEditForm').innerHTML = `
     <div class="company-top-row full">
-      <label>Name ${
+      <label><span class="sr-only">Name</span>${
         isEditing
-          ? `<input name="name" value="${escapeHtml(c.name || '')}" ${readOnly} required />`
+          ? `<input name="name" value="${escapeHtml(c.name || '')}" placeholder="Name" aria-label="Name" ${readOnly} required />`
           : `<div class="readonly-value">${escapeHtml(c.name || '-')}</div>`
       }</label>
-      <label>Main phone ${
+      <label><span class="sr-only">Main phone</span>${
         isEditing
-          ? `<input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" ${readOnly} />`
+          ? `<input name="mainPhone" value="${escapeHtml(c.main_phone || '')}" placeholder="Main phone" aria-label="Main phone" ${readOnly} />`
           : c.main_phone && companyPhoneHref
             ? `<a class="phone-link" href="${companyPhoneHref}">${escapeHtml(c.main_phone)}</a>`
             : `<div class="readonly-value">${escapeHtml(c.main_phone || '-')}</div>`
@@ -426,27 +428,27 @@ function renderCompanyDetail() {
       <div id="companyAddressBox" class="card company-box ${isEditing ? '' : 'address-clickable'}" ${isEditing ? '' : `title="Open in Google Maps"`}>
         <strong>Address</strong>
         <div class="field-stack">
-          <label>Street ${
+          <label><span class="sr-only">Street</span>${
             isEditing
-              ? `<textarea name="address" rows="1" class="street-field" ${readOnly}>${escapeHtml(c.address || '')}</textarea>`
+              ? `<textarea name="address" rows="1" class="street-field" placeholder="Street" aria-label="Street" ${readOnly}>${escapeHtml(c.address || '')}</textarea>`
               : `<div class="readonly-value">${escapeHtml(c.address || '-')}</div>`
           }</label>
-          <label>City ${
+          <label><span class="sr-only">City</span>${
             isEditing
-              ? `<input name="city" value="${escapeHtml(c.city || '')}" ${readOnly} />`
+              ? `<input name="city" value="${escapeHtml(c.city || '')}" placeholder="City" aria-label="City" ${readOnly} />`
               : `<div class="readonly-value">${escapeHtml(c.city || '-')}</div>`
           }</label>
           <div class="address-row">
             <label id="companyStateWrap"></label>
-            <label>Postal Code ${
+            <label><span class="sr-only">Postal Code</span>${
               isEditing
-                ? `<input name="zip" value="${escapeHtml(c.zip || '')}" ${readOnly} />`
+                ? `<input name="zip" value="${escapeHtml(c.zip || '')}" placeholder="Postal Code" aria-label="Postal Code" ${readOnly} />`
                 : `<div class="readonly-value">${escapeHtml(c.zip || '-')}</div>`
             }</label>
           </div>
-          <label>Country ${
+          <label><span class="sr-only">Country</span>${
             isEditing
-              ? `<select name="country" id="companyCountry" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select>`
+              ? `<select name="country" id="companyCountry" aria-label="Country" ${readOnly}>${buildCountryOptions(c.country || 'US')}</select>`
               : `<div class="readonly-value">${escapeHtml(c.country || 'US')}</div>`
           }</label>
         </div>
@@ -454,35 +456,35 @@ function renderCompanyDetail() {
       <div class="card company-box">
         <strong>Details</strong>
         <div class="field-stack">
-          <label>URL ${
+          <label><span class="sr-only">URL</span>${
             isEditing
-              ? `<input name="url" value="${escapeHtml(c.url || '')}" ${readOnly} />`
+              ? `<input name="url" value="${escapeHtml(c.url || '')}" placeholder="URL" aria-label="URL" ${readOnly} />`
               : c.url
                 ? `<a class="url-link" href="${escapeHtml(c.url)}" target="_blank" rel="noreferrer">${escapeHtml(c.url)}</a>`
                 : `<div class="readonly-value">-</div>`
           }</label>
-          <label>Segment ${
+          <label><span class="sr-only">Segment</span>${
             isEditing
-              ? `<select name="segment" ${readOnly}>${segmentOptions}</select>`
+              ? `<select name="segment" aria-label="Segment" ${readOnly}>${segmentOptions}</select>`
               : `<div class="readonly-value">${escapeHtml(c.segment || '-')}</div>`
           }</label>
-          <label>Type ${
+          <label><span class="sr-only">Type</span>${
             isEditing
-              ? `<select name="customerType" ${readOnly}>${typeOptions}</select>`
+              ? `<select name="customerType" aria-label="Type" ${readOnly}>${typeOptions}</select>`
               : `<div class="readonly-value">${escapeHtml(c.customer_type || '-')}</div>`
           }</label>
-          <label>Assigned reps ${
+          <label><span class="sr-only">Assigned reps</span>${
             isEditing
-              ? `<input value="${escapeHtml(assignedRepNames)}" disabled />`
+              ? `<input value="${escapeHtml(assignedRepNames)}" placeholder="Assigned reps" aria-label="Assigned reps" disabled />`
               : `<div class="readonly-value">${escapeHtml(assignedRepNames)}</div>`
           }</label>
         </div>
       </div>
       <div class="card company-box">
         <strong>Comments</strong>
-        <label>Comments ${
+        <label><span class="sr-only">Comments</span>${
           isEditing
-            ? `<textarea name="notes" rows="6" ${readOnly}>${escapeHtml(c.notes || '')}</textarea>`
+            ? `<textarea name="notes" rows="6" placeholder="Comments" aria-label="Comments" ${readOnly}>${escapeHtml(c.notes || '')}</textarea>`
             : `<div class="readonly-value readonly-multiline">${escapeHtml(c.notes || '-')}</div>`
         }</label>
       </div>
@@ -493,8 +495,8 @@ function renderCompanyDetail() {
       </div>
       <div class="documents-layout">
         <div class="documents-controls">
-          <input id="companyFileInput" type="file" ${readOnly} />
-          <button type="button" id="uploadCompanyFileBtn" ${readOnly}>Add File</button>
+          <input id="companyFileInput" type="file" ${canWrite() ? '' : 'disabled'} />
+          <button type="button" id="uploadCompanyFileBtn" ${canWrite() ? '' : 'disabled'}>Add File</button>
         </div>
         <div id="companyFilesList" class="docs-grid"></div>
       </div>
@@ -567,7 +569,7 @@ function renderCompanyDetail() {
       };
     }
   } else {
-    document.getElementById('companyStateWrap').innerHTML = `State/Province <div class="readonly-value">${escapeHtml(c.state || '-')}</div>`;
+    document.getElementById('companyStateWrap').innerHTML = `<span class="sr-only">State/Province</span><div class="readonly-value">${escapeHtml(c.state || '-')}</div>`;
   }
   loadCompanyAttachments(c.id);
 }
@@ -610,12 +612,12 @@ async function loadCompanyAttachments(companyId) {
               )}" target="_blank" rel="noreferrer">${escapeHtml(file.file_name)}</a>
             </div>
             <div class="muted">${escapeHtml(file.mime_type || '')}</div>
-            ${canWrite() ? `<button type="button" class="danger small-btn" data-delete-company-file="${file.id}">Delete</button>` : ''}
+            ${canWrite() && state.companyEditMode ? `<button type="button" class="danger small-btn" data-delete-company-file="${file.id}">Delete</button>` : ''}
           </div>`
       )
       .join('');
 
-    if (canWrite()) {
+    if (canWrite() && state.companyEditMode) {
       document.querySelectorAll('[data-delete-company-file]').forEach((btn) => {
         btn.onclick = async () => {
           if (!confirm('Delete this file?')) return;
@@ -752,13 +754,13 @@ async function openContactCreate(companyId, options = {}) {
   const companyCountry = company?.country || 'US';
   const form = document.getElementById('contactCreateForm');
   form.innerHTML = `
-    <label>Company <input value="${escapeHtml(company?.name || '')}" disabled /></label>
-    <label>First name <input name="firstName" required /></label>
-    <label>Last name <input name="lastName" required /></label>
-    <label>Email <input name="email" type="email" /></label>
-    <label>Phone <input name="phone" /></label>
-    <label>Other <input name="otherPhone" /></label>
-    <label class="full">Notes <textarea name="notes"></textarea></label>
+    <label><span class="sr-only">Company</span><input value="${escapeHtml(company?.name || '')}" placeholder="Company" aria-label="Company" disabled /></label>
+    <label><span class="sr-only">First name</span><input name="firstName" placeholder="First name" aria-label="First name" required /></label>
+    <label><span class="sr-only">Last name</span><input name="lastName" placeholder="Last name" aria-label="Last name" required /></label>
+    <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" /></label>
+    <label><span class="sr-only">Main phone</span><input name="phone" placeholder="Main phone" aria-label="Main phone" /></label>
+    <label><span class="sr-only">Other phone</span><input name="otherPhone" placeholder="Other phone" aria-label="Other phone" /></label>
+    <label class="full"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" aria-label="Notes"></textarea></label>
     <div class="row wrap full">
       <button type="submit">Create Contact</button>
     </div>
@@ -815,33 +817,33 @@ async function openContactDetail(contactId) {
       <div class="card">
         <strong>Contact</strong>
         <div class="field-stack">
-          <label>First name ${
+          <label><span class="sr-only">First name</span>${
             isEditing
-              ? `<input name="firstName" value="${escapeHtml(customer.first_name)}" ${readOnly} required />`
+              ? `<input name="firstName" value="${escapeHtml(customer.first_name)}" placeholder="First name" aria-label="First name" ${readOnly} required />`
               : `<div class="readonly-value">${escapeHtml(customer.first_name || '-')}</div>`
           }</label>
-          <label>Last name ${
+          <label><span class="sr-only">Last name</span>${
             isEditing
-              ? `<input name="lastName" value="${escapeHtml(customer.last_name)}" ${readOnly} required />`
+              ? `<input name="lastName" value="${escapeHtml(customer.last_name)}" placeholder="Last name" aria-label="Last name" ${readOnly} required />`
               : `<div class="readonly-value">${escapeHtml(customer.last_name || '-')}</div>`
           }</label>
-          <label>Email ${
+          <label><span class="sr-only">Email</span>${
             isEditing
-              ? `<input name="email" type="email" value="${escapeHtml(customer.email || '')}" ${readOnly} />`
+              ? `<input name="email" type="email" value="${escapeHtml(customer.email || '')}" placeholder="Email" aria-label="Email" ${readOnly} />`
               : customer.email
                 ? `<a class="email-link" href="mailto:${encodeURIComponent(customer.email)}">${escapeHtml(customer.email)}</a>`
                 : `<div class="readonly-value">-</div>`
           }</label>
-          <label>Main phone ${
+          <label><span class="sr-only">Main phone</span>${
             isEditing
-              ? `<input name="phone" value="${escapeHtml(customer.phone || '')}" ${readOnly} />`
+              ? `<input name="phone" value="${escapeHtml(customer.phone || '')}" placeholder="Main phone" aria-label="Main phone" ${readOnly} />`
               : customer.phone && contactPhoneHref
                 ? `<a class="phone-link" href="${contactPhoneHref}">${escapeHtml(customer.phone)}</a>`
                 : `<div class="readonly-value">${escapeHtml(customer.phone || '-')}</div>`
           }</label>
-          <label>Other phone ${
+          <label><span class="sr-only">Other phone</span>${
             isEditing
-              ? `<input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" ${readOnly} />`
+              ? `<input name="otherPhone" value="${escapeHtml(customer.other_phone || '')}" placeholder="Other phone" aria-label="Other phone" ${readOnly} />`
               : customer.other_phone && contactOtherPhoneHref
                 ? `<a class="phone-link" href="${contactOtherPhoneHref}">${escapeHtml(customer.other_phone)}</a>`
                 : `<div class="readonly-value">${escapeHtml(customer.other_phone || '-')}</div>`
@@ -859,15 +861,15 @@ async function openContactDetail(contactId) {
     <div class="contact-assets-grid full">
       <div class="card">
         <strong>Notes</strong>
-        <label>Notes ${
+        <label><span class="sr-only">Notes</span>${
           isEditing
-            ? `<textarea name="notes" rows="8" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea>`
+            ? `<textarea name="notes" rows="8" placeholder="Notes" aria-label="Notes" ${readOnly}>${escapeHtml(customer.notes || '')}</textarea>`
             : `<div class="readonly-value readonly-multiline">${escapeHtml(customer.notes || '-')}</div>`
         }</label>
       </div>
       <div class="card">
         <strong>Files</strong>
-        <div class="row wrap ${isEditing && canWrite() ? '' : 'hidden'}">
+        <div class="row wrap ${canWrite() ? '' : 'hidden'}">
           <input id="contactFileInput" type="file" />
           <button id="uploadContactFileBtn" type="button">Add File</button>
         </div>
@@ -978,7 +980,7 @@ async function openContactDetail(contactId) {
   };
 
   const uploadContactFileBtn = document.getElementById('uploadContactFileBtn');
-  if (uploadContactFileBtn && isEditing && canWrite()) {
+  if (uploadContactFileBtn && canWrite()) {
     uploadContactFileBtn.onclick = async () => {
       const input = document.getElementById('contactFileInput');
       const file = input.files?.[0];
@@ -1050,9 +1052,9 @@ async function openContactDetail(contactId) {
 
   const photoInput = document.getElementById('contactPhotoInput');
   const photoTile = document.getElementById('contactPhotoTile');
-  if (photoInput && photoTile && isEditing && canWrite()) {
+  if (photoInput && photoTile && canWrite()) {
     photoTile.onclick = async () => {
-      if (!customer.photo_key) {
+      if (!customer.photo_key || !isEditing) {
         photoInput.click();
         return;
       }
@@ -1100,7 +1102,7 @@ async function openContactDetail(contactId) {
   }
 
   await renderContactAssets();
-  setView('contactDetailView', `Contact • ${customer.first_name} ${customer.last_name}`);
+  setView('contactDetailView', `${customer.first_name} ${customer.last_name}`);
 }
 async function openInteractionCreate(companyId, draft = null, selectedContactId = null) {
   const [company, customers] = await Promise.all([
@@ -1117,10 +1119,10 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
 
   const form = document.getElementById('interactionCreateForm');
   form.innerHTML = `
-    <label>Company <input value="${escapeHtml(company.company.name)}" disabled /></label>
-    <label>Contact
-      <select name="customerId">
-        <option value="">--</option>
+    <label><span class="sr-only">Company</span><input value="${escapeHtml(company.company.name)}" placeholder="Company" aria-label="Company" disabled /></label>
+    <label><span class="sr-only">Contact</span>
+      <select name="customerId" aria-label="Contact">
+        <option value="">Contact</option>
         <option value="__new_contact__">+ Create Contact…</option>
         ${customers.customers
           .map(
@@ -1130,13 +1132,13 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
           .join('')}
       </select>
     </label>
-    <label>Type
-      <select name="interactionType" id="interactionCreateType">${interactionTypeOptions(initial.interactionType)}</select>
+    <label><span class="sr-only">Type</span>
+      <select name="interactionType" id="interactionCreateType" aria-label="Type">${interactionTypeOptions(initial.interactionType)}</select>
     </label>
-    <label class="full">Meeting notes <textarea name="meetingNotes" required>${escapeHtml(initial.meetingNotes)}</textarea></label>
-    <label class="full">Next action <input name="nextAction" value="${escapeHtml(initial.nextAction)}" /></label>
-    <label class="full">Next action date <input name="nextActionAt" type="date" value="${escapeHtml(initial.nextActionAt)}" /></label>
-    <label class="full">Photo <input name="photo" type="file" accept="image/*" capture="environment" /></label>
+    <label class="full"><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" required>${escapeHtml(initial.meetingNotes)}</textarea></label>
+    <label class="full"><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(initial.nextAction)}" /></label>
+    <label class="full"><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${escapeHtml(initial.nextActionAt)}" /></label>
+    <label class="full"><span class="sr-only">Photo</span><input name="photo" type="file" aria-label="Photo" accept="image/*" capture="environment" /></label>
     <div class="row wrap full">
       <button type="submit">Create Interaction</button>
     </div>
@@ -1197,10 +1199,10 @@ async function openInteractionDetail(interactionId) {
   const form = document.getElementById('interactionEditForm');
 
   form.innerHTML = `
-    <label>Company <input value="${escapeHtml(interaction.company_name)}" disabled /></label>
-    <label>Contact
-      <select name="customerId" ${readOnly}>
-        <option value="">--</option>
+    <label><span class="sr-only">Company</span><input value="${escapeHtml(interaction.company_name)}" placeholder="Company" aria-label="Company" disabled /></label>
+    <label><span class="sr-only">Contact</span>
+      <select name="customerId" aria-label="Contact" ${readOnly}>
+        <option value="">Contact</option>
         ${companyCustomers.customers
           .map(
             (c) =>
@@ -1209,11 +1211,11 @@ async function openInteractionDetail(interactionId) {
           .join('')}
       </select>
     </label>
-    <label>Editor <input value="${escapeHtml(interaction.created_by_name || '')}" disabled /></label>
-    <label>Type <select name="interactionType" id="interactionDetailType" ${readOnly}>${interactionTypeOptions(interaction.interaction_type || '')}</select></label>
-    <label class="full">Meeting notes <textarea name="meetingNotes" ${readOnly} required>${escapeHtml(interaction.meeting_notes || '')}</textarea></label>
-    <label class="full">Next action <input name="nextAction" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
-    <label class="full">Next action date <input name="nextActionAt" type="date" value="${
+    <label><span class="sr-only">Editor</span><input value="${escapeHtml(interaction.created_by_name || '')}" placeholder="Editor" aria-label="Editor" disabled /></label>
+    <label><span class="sr-only">Type</span><select name="interactionType" id="interactionDetailType" aria-label="Type" ${readOnly}>${interactionTypeOptions(interaction.interaction_type || '')}</select></label>
+    <label class="full"><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" ${readOnly} required>${escapeHtml(interaction.meeting_notes || '')}</textarea></label>
+    <label class="full"><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(interaction.next_action || '')}" ${readOnly} /></label>
+    <label class="full"><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${
       interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 10) : ''
     }" ${readOnly} /></label>
     <div class="row wrap full">

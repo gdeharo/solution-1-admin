@@ -9,8 +9,8 @@
   <body>
     <header class="topbar">
       <div>
-        <h1>Customer Relationship Manager</h1>
-        <p id="pageHint">Company list</p>
+        <h1 id="pageTitle">Company list</h1>
+        <p id="pageHint" class="hidden">Company list</p>
       </div>
       <div class="top-actions">
         <button id="backBtn" class="ghost hidden" type="button">Back</button>
@@ -26,16 +26,16 @@
         <div class="split">
           <form id="bootstrapForm" class="card">
             <h3>Initial Admin Setup</h3>
-            <label>Email <input name="email" type="email" required /></label>
-            <label>Full name <input name="fullName" required /></label>
-            <label>Password <input name="password" type="password" required /></label>
+            <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" required /></label>
+            <label><span class="sr-only">Full name</span><input name="fullName" placeholder="Full name" aria-label="Full name" required /></label>
+            <label><span class="sr-only">Password</span><input name="password" type="password" placeholder="Password" aria-label="Password" required /></label>
             <button type="submit">Create first admin</button>
           </form>
 
           <form id="loginForm" class="card">
             <h3>Log in</h3>
-            <label>Email <input name="email" type="email" required /></label>
-            <label>Password <input name="password" type="password" required /></label>
+            <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" required /></label>
+            <label><span class="sr-only">Password</span><input name="password" type="password" placeholder="Password" aria-label="Password" required /></label>
             <button type="submit">Sign in</button>
           </form>
         </div>
@@ -56,19 +56,19 @@
 
         <form id="createCompanyForm" class="card hidden form-grid">
           <h3>New Company</h3>
-          <label>Name <input name="name" required /></label>
-          <label>Main phone <input name="mainPhone" /></label>
-          <label class="full">Street <textarea name="address" rows="1" class="street-field"></textarea></label>
-          <label>City <input name="city" /></label>
+          <label><span class="sr-only">Name</span><input name="name" placeholder="Name" aria-label="Name" required /></label>
+          <label><span class="sr-only">Main phone</span><input name="mainPhone" placeholder="Main phone" aria-label="Main phone" /></label>
+          <label class="full"><span class="sr-only">Street</span><textarea name="address" rows="1" class="street-field" placeholder="Street" aria-label="Street"></textarea></label>
+          <label><span class="sr-only">City</span><input name="city" placeholder="City" aria-label="City" /></label>
           <div class="address-row full">
-            <label id="createCompanyStateWrap">State <input name="state" /></label>
-            <label>Postal Code <input name="zip" /></label>
+            <label id="createCompanyStateWrap"><span class="sr-only">State/Province</span><input name="state" placeholder="State/Province" aria-label="State/Province" /></label>
+            <label><span class="sr-only">Postal Code</span><input name="zip" placeholder="Postal Code" aria-label="Postal Code" /></label>
           </div>
-          <label>Country <select name="country" id="createCompanyCountry"></select></label>
-          <label>URL <input name="url" type="url" /></label>
-          <label>Segment <select name="segment" id="createCompanySegment"></select></label>
-          <label>Type <select name="customerType" id="createCompanyType"></select></label>
-          <label class="full">Notes <textarea name="notes"></textarea></label>
+          <label><span class="sr-only">Country</span><select name="country" id="createCompanyCountry" aria-label="Country"></select></label>
+          <label><span class="sr-only">URL</span><input name="url" type="url" placeholder="URL" aria-label="URL" /></label>
+          <label><span class="sr-only">Segment</span><select name="segment" id="createCompanySegment" aria-label="Segment"></select></label>
+          <label><span class="sr-only">Type</span><select name="customerType" id="createCompanyType" aria-label="Type"></select></label>
+          <label class="full"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" aria-label="Notes"></textarea></label>
           <div class="row wrap full">
             <button type="submit">Create</button>
             <button id="cancelCreateCompanyBtn" type="button" class="ghost">Cancel</button>
@@ -89,7 +89,7 @@
 
       <section id="companyDetailView" class="hidden">
         <details id="companyMainSection" class="panel">
-          <summary>Main Company Information</summary>
+          <summary>Company Information</summary>
           <form id="companyEditForm" class="form-grid"></form>
         </details>
 
@@ -133,12 +133,12 @@
       </section>
 
       <section id="contactDetailView" class="panel hidden">
-        <h2>Contact Detail</h2>
+        <h2 class="hidden">Contact Detail</h2>
         <form id="contactEditForm" class="form-grid"></form>
       </section>
 
       <section id="contactCreateView" class="panel hidden">
-        <h2>New Contact</h2>
+        <h2 class="hidden">New Contact</h2>
         <form id="contactCreateForm" class="form-grid"></form>
       </section>
 
