@@ -280,6 +280,53 @@ function applyTheme(theme) {
   state.theme = merged;
 }
 
+function copyText(value) {
+  const text = String(value || '');
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const temp = document.createElement('textarea');
+  temp.value = text;
+  document.body.appendChild(temp);
+  temp.select();
+  document.execCommand('copy');
+  temp.remove();
+  return Promise.resolve();
+}
+
+function showInviteEmailDialog({ to, subject, body, mailto }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'action-modal-overlay';
+  overlay.innerHTML = `
+    <div class="action-modal invite-modal">
+      <h3>Send Invitation</h3>
+      <p class="muted">Automatic compose is blocked by Safari. Use one of these options:</p>
+      <label><span class="sr-only">To</span><input value="${escapeHtml(to)}" readonly /></label>
+      <label><span class="sr-only">Subject</span><input id="inviteSubject" value="${escapeHtml(subject)}" readonly /></label>
+      <label><span class="sr-only">Body</span><textarea id="inviteBody" rows="8" readonly>${escapeHtml(body)}</textarea></label>
+      <div class="row wrap">
+        <a class="button-link" href="${escapeHtml(mailto)}" target="_blank" rel="noreferrer">Open Email App</a>
+        <button type="button" class="ghost" id="copyInviteSubjectBtn">Copy Subject</button>
+        <button type="button" class="ghost" id="copyInviteBodyBtn">Copy Body</button>
+        <button type="button" id="closeInviteDialogBtn">Close</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.onclick = (event) => {
+    if (event.target === overlay) close();
+  };
+  overlay.querySelector('#closeInviteDialogBtn').onclick = close;
+  overlay.querySelector('#copyInviteSubjectBtn').onclick = async () => {
+    await copyText(subject);
+    showToast('Subject copied');
+  };
+  overlay.querySelector('#copyInviteBodyBtn').onclick = async () => {
+    await copyText(body);
+    showToast('Body copied');
+  };
+}
+
 function deriveThemeFromAccent(accent) {
   const hex = String(accent || '').replace('#', '');
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) return { ...DEFAULT_THEME };
@@ -1988,12 +2035,12 @@ function bindRepsEvents() {
           `Your user ID is your email: ${String(fd.get('email') || '')}`,
           `Your temporary password is: ${created.temporaryPassword}`
         ].join('\n');
-        window.open(
-          `mailto:${encodeURIComponent(String(fd.get('email') || ''))}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
-          '_blank'
-        );
+        const mailto = `mailto:${encodeURIComponent(String(fd.get('email') || ''))}?subject=${encodeURIComponent(
+          subject
+        )}&body=${encodeURIComponent(body)}`;
+        showInviteEmailDialog({ to: String(fd.get('email') || ''), subject, body, mailto });
         await renderRepsView();
-        showToast('User created. Draft email opened');
+        showToast('User created. Invitation ready.');
       } catch (error) {
         showToast(error.message, true);
       }

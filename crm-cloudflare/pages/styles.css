@@ -485,6 +485,23 @@ tr.clickable:hover {
   min-width: 280px;
 }
 
+.invite-modal {
+  width: min(640px, 92vw);
+}
+
+.button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border-radius: 7px;
+  padding: 0.45rem 0.7rem;
+  text-decoration: none;
+  color: #fff;
+  background: var(--accent);
+  font-weight: 600;
+}
+
 .action-modal h3 {
   margin: 0 0 0.7rem;
 }
