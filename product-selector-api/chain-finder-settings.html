@@ -597,9 +597,8 @@
     function lockPanelAndRedirect(message) {
       state.access.panelRole = "none";
       setStatus(message, false);
-      Object.values(ui.views).forEach((v) => v.classList.add("hidden"));
       localStorage.removeItem(HUB_PANEL_SESSION_KEY);
-      setTimeout(() => { window.location.href = "/"; }, 800);
+      window.location.href = "/";
     }
 
     function requiresHubAuth() {
