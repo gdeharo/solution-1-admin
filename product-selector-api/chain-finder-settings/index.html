@@ -423,36 +423,49 @@
         window.open("/chainsaw-chain-finder/", "_blank", "noopener");
       });
     }
-    document.getElementById("saveConn").addEventListener("click", saveConnection);
-    document.getElementById("refreshAll").addEventListener("click", refreshAll);
-    document.getElementById("saveSettings").addEventListener("click", saveSettings);
-    document.getElementById("clearSettingsForm").addEventListener("click", clearSettingsForm);
-    document.getElementById("restoreSettingsForm").addEventListener("click", restoreSettingsForm);
-    ui.btnPanelLogout.addEventListener("click", logoutFromPanel);
-    ui.errorModalAcknowledge.addEventListener("click", hideErrorModal);
-    ui.errorModalBackdrop.addEventListener("click", (e) => {
-      if (e.target === ui.errorModalBackdrop) hideErrorModal();
-    });
-    ui.confirmDeleteCancel.addEventListener("click", hideConfirmDeleteModal);
-    ui.confirmDeleteConfirm.addEventListener("click", deletePendingRow);
-    ui.confirmDeleteModalBackdrop.addEventListener("click", (e) => {
-      if (e.target === ui.confirmDeleteModalBackdrop) hideConfirmDeleteModal();
-    });
-    ui.lookupModalCancel.addEventListener("click", () => closeLookupModal(null));
-    ui.lookupModalSave.addEventListener("click", saveLookupModalValue);
-    ui.lookupModalInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        saveLookupModalValue();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        closeLookupModal(null);
-      }
-    });
-    ui.lookupModalBackdrop.addEventListener("click", (e) => {
-      if (e.target === ui.lookupModalBackdrop) closeLookupModal(null);
-    });
-    ui.btnLoadSearchLog.addEventListener("click", () => loadSearchLogView(true));
+    const saveConnBtn = document.getElementById("saveConn");
+    if (saveConnBtn) saveConnBtn.addEventListener("click", saveConnection);
+    const refreshAllBtn = document.getElementById("refreshAll");
+    if (refreshAllBtn) refreshAllBtn.addEventListener("click", refreshAll);
+    const saveSettingsBtn = document.getElementById("saveSettings");
+    if (saveSettingsBtn) saveSettingsBtn.addEventListener("click", saveSettings);
+    const clearSettingsBtn = document.getElementById("clearSettingsForm");
+    if (clearSettingsBtn) clearSettingsBtn.addEventListener("click", clearSettingsForm);
+    const restoreSettingsBtn = document.getElementById("restoreSettingsForm");
+    if (restoreSettingsBtn) restoreSettingsBtn.addEventListener("click", restoreSettingsForm);
+    if (ui.btnPanelLogout) ui.btnPanelLogout.addEventListener("click", logoutFromPanel);
+    if (ui.errorModalAcknowledge) ui.errorModalAcknowledge.addEventListener("click", hideErrorModal);
+    if (ui.errorModalBackdrop) {
+      ui.errorModalBackdrop.addEventListener("click", (e) => {
+        if (e.target === ui.errorModalBackdrop) hideErrorModal();
+      });
+    }
+    if (ui.confirmDeleteCancel) ui.confirmDeleteCancel.addEventListener("click", hideConfirmDeleteModal);
+    if (ui.confirmDeleteConfirm) ui.confirmDeleteConfirm.addEventListener("click", deletePendingRow);
+    if (ui.confirmDeleteModalBackdrop) {
+      ui.confirmDeleteModalBackdrop.addEventListener("click", (e) => {
+        if (e.target === ui.confirmDeleteModalBackdrop) hideConfirmDeleteModal();
+      });
+    }
+    if (ui.lookupModalCancel) ui.lookupModalCancel.addEventListener("click", () => closeLookupModal(null));
+    if (ui.lookupModalSave) ui.lookupModalSave.addEventListener("click", saveLookupModalValue);
+    if (ui.lookupModalInput) {
+      ui.lookupModalInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveLookupModalValue();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          closeLookupModal(null);
+        }
+      });
+    }
+    if (ui.lookupModalBackdrop) {
+      ui.lookupModalBackdrop.addEventListener("click", (e) => {
+        if (e.target === ui.lookupModalBackdrop) closeLookupModal(null);
+      });
+    }
+    if (ui.btnLoadSearchLog) ui.btnLoadSearchLog.addEventListener("click", () => loadSearchLogView(true));
 
     for (const slug of Object.keys(ENTITIES)) {
       renderEntityScaffold(slug);
