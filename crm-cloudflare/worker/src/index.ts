@@ -837,7 +837,21 @@ addRoute(
   /^\/api\/reps\/with-assignments$/,
   withAuth(async (_request, env, user) => {
     if (!canManageReps(user.role)) return err('Forbidden', 403);
-    const reps = await env.CRM_DB.prepare(`SELECT * FROM reps WHERE deleted_at IS NULL ORDER BY full_name ASC`).all();
+    const reps = await env.CRM_DB.prepare(
+      `SELECT
+         r.*,
+         (
+           SELECT MAX(i.created_at)
+           FROM interactions i
+           JOIN users u ON u.id = i.created_by_user_id
+           WHERE i.deleted_at IS NULL
+             AND r.email IS NOT NULL
+             AND lower(u.email) = lower(r.email)
+         ) AS last_entry_at
+       FROM reps r
+       WHERE r.deleted_at IS NULL
+       ORDER BY r.full_name ASC`
+    ).all();
     const assignments = await env.CRM_DB.prepare(
       `SELECT cr.rep_id, c.id AS company_id, c.name AS company_name, c.city, c.state, c.zip
        FROM company_reps cr
@@ -1108,7 +1122,20 @@ addRoute(
   withAuth(async (_request, env, user) => {
     if (!canManageUsers(user.role)) return err('Forbidden', 403);
     const rows = await env.CRM_DB.prepare(
-      `SELECT id, email, full_name, role, is_active, created_at FROM users ORDER BY created_at DESC`
+      `SELECT
+         u.id,
+         u.email,
+         u.full_name,
+         u.role,
+         u.is_active,
+         u.created_at,
+         (
+           SELECT MAX(a.created_at)
+           FROM audit_log a
+           WHERE a.actor_user_id = u.id AND a.action = 'login'
+         ) AS last_login_at
+       FROM users u
+       ORDER BY u.created_at DESC`
     ).all();
     return json({ users: rows.results });
   }) as any

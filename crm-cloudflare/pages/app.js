@@ -1677,6 +1677,7 @@ async function renderRepsView() {
         <td>${escapeHtml(rep.full_name)}</td>
         <td>${escapeHtml(rep.email || '')}</td>
         <td>${escapeHtml(rep.phone || '')}</td>
+        <td>${rep.last_entry_at ? new Date(rep.last_entry_at).toLocaleDateString() : '-'}</td>
         <td>${escapeHtml(companies.join(', ') || '-')}</td>
         <td><button class="ghost" data-show-territories="${rep.id}">Show (${territories.length})</button></td>
       </tr>`;
@@ -1772,6 +1773,7 @@ async function renderRepsView() {
               <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
             </select>
           </td>
+          <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : '-'}</td>
           <td class="user-active-cell"><input class="user-active-checkbox" type="checkbox" data-user-active="${u.id}" ${u.is_active ? 'checked' : ''} /></td>
           <td class="row user-actions">
             <button type="button" class="ghost" title="Edit" aria-label="Edit" data-edit-user="${u.id}">✎</button>
