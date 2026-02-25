@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Hub</title>
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --card: #ffffff;
+      --text: #132033;
+      --muted: #5c6b83;
+      --line: #d7dfec;
+      --brand: rgb(20, 111, 248);
+      --danger: #b42318;
+      --ok: #067647;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top right, #dfeaff, var(--bg));
+    }
+    .wrap { max-width: 1080px; margin: 24px auto; padding: 0 14px 26px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: 24px; }
+    h2 { font-size: 19px; }
+    h3 { font-size: 15px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .row-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+    .row > *, .row-3 > * { min-width: 0; }
+    input, select, button {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #b8c6dc;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+    button {
+      cursor: pointer;
+      background: var(--brand);
+      color: #fff;
+      border-color: var(--brand);
+      font-weight: 600;
+    }
+    button.secondary {
+      background: #fff;
+      color: var(--text);
+      border-color: #b8c6dc;
+      font-weight: 500;
+    }
+    button.danger {
+      background: #fff;
+      color: var(--danger);
+      border-color: #e6b8b8;
+    }
+    #status.ok { color: var(--ok); }
+    #status.err { color: var(--danger); }
+    .hidden { display: none; }
+    .panels {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .panel-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      background: linear-gradient(180deg, #fff, #f7faff);
+    }
+    .panel-card p { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .toolbar button { width: auto; min-width: 130px; }
+    #status {
+      margin: 0 0 12px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      font-size: 13px;
+    }
+    #status.ok { color: var(--ok); border-color: #b7e5ce; background: #f1fcf6; }
+    #status.err { color: var(--danger); border-color: #efc5c1; background: #fff5f4; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid var(--line); padding: 7px; text-align: left; }
+    @media (max-width: 900px) {
+      .row, .row-3 { grid-template-columns: 1fr 1fr; }
+      .panels { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .row, .row-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Shared Admin Hub</h1>
+    <div id="status" class="muted">Ready.</div>
+    <section id="view-login" class="card">
+      <h2>Sign In</h2>
+      <p class="muted">Sign in against the Hub API in your Cloudflare Worker.</p>
+      <div class="row-3">
+        <input id="loginUser" placeholder="Username" />
+        <input id="loginPass" placeholder="Password" type="password" />
+        <button id="btnLogin">Sign In</button>
+      </div>
+    </section>
+
+    <section id="view-hub" class="card hidden">
+      <div class="toolbar">
+        <button id="btnLogout" class="secondary">Log Out</button>
+        <button id="btnOpenAccess" class="secondary">Manage Access</button>
+      </div>
+      <h2 id="welcomeTitle">Welcome</h2>
+      <p class="muted" id="welcomeMeta"></p>
+      <div class="panels" id="panelGrid"></div>
+    </section>
+
+    <section id="view-access" class="card hidden">
+      <div class="toolbar">
+        <button id="btnBackHub" class="secondary">Back To Hub</button>
+      </div>
+      <h2>Access Management</h2>
+      <p class="muted" id="accessHelpText">Create users and assign role to control panel visibility.</p>
+      <div class="row-3 hidden" id="panelScopeRow">
+        <select id="panelScopeSelect"></select>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="row">
+        <input id="newUserName" placeholder="Username (e.g. ops1)" />
+        <input id="newUserPass" placeholder="Password" />
+        <select id="newUserRole">
+          <option value="viewer">viewer</option>
+          <option value="editor">editor</option>
+          <option value="owner">owner</option>
+        </select>
+        <button id="btnAddUser">Add User</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>User</th><th>Role</th><th>Panels</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="usersTableBody"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    const HUB_API_BASE = "https://product-selector-api.gdeharo.workers.dev";
+    const STORAGE_HUB_TOKEN_KEY = "admin_hub_token_v1";
+    const STORAGE_PANEL_SESSION_KEY = "admin_hub_panel_session_v1";
+
+    const PANELS = [
+      { id: "kmc-chain-finder-admin", name: "KMC Chain Finder Admin", description: "Manage KMC chains, chainsaw list, settings, and search log.", url: "./chain-finder-settings/", minPanelRole: "viewer" },
+      { id: "future-tooling", name: "Future Tool Placeholder", description: "Reserve this card for the next internal tool.", url: "#", minPanelRole: "manager" },
+    ];
+    const PANEL_ROLE_WEIGHT = { none: 0, viewer: 1, editor: 2, manager: 3 };
+
+    const ui = {
+      login: document.getElementById("view-login"),
+      hub: document.getElementById("view-hub"),
+      access: document.getElementById("view-access"),
+      status: document.getElementById("status"),
+      loginUser: document.getElementById("loginUser"),
+      loginPass: document.getElementById("loginPass"),
+      welcomeTitle: document.getElementById("welcomeTitle"),
+      welcomeMeta: document.getElementById("welcomeMeta"),
+      panelGrid: document.getElementById("panelGrid"),
+      usersTableBody: document.getElementById("usersTableBody"),
+      accessHelpText: document.getElementById("accessHelpText"),
+      panelScopeRow: document.getElementById("panelScopeRow"),
+      panelScopeSelect: document.getElementById("panelScopeSelect"),
+      newUserName: document.getElementById("newUserName"),
+      newUserPass: document.getElementById("newUserPass"),
+      newUserRole: document.getElementById("newUserRole"),
+    };
+
+    let sessionToken = "";
+    let sessionUser = null;
+    let usersCache = [];
+    let accessMode = "owner";
+    let activePanelScope = "";
+
+    document.getElementById("btnLogin").addEventListener("click", signIn);
+    document.getElementById("btnLogout").addEventListener("click", signOut);
+    document.getElementById("btnOpenAccess").addEventListener("click", openAccess);
+    document.getElementById("btnBackHub").addEventListener("click", openHub);
+    document.getElementById("btnAddUser").addEventListener("click", addUser);
+    ui.panelScopeSelect.addEventListener("change", async () => {
+      activePanelScope = ui.panelScopeSelect.value;
+      await loadUsers();
+      renderUsersTable();
+    });
+
+    restoreSession();
+
+    async function api(path, method = "GET", body, withAuth = true) {
+      const headers = { "Content-Type": "application/json" };
+      if (withAuth && sessionToken) headers["x-hub-session"] = sessionToken;
+      const res = await fetch(HUB_API_BASE + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+      if (data && data.ok === false) throw new Error(data.error || "Request failed");
+      return data;
+    }
+
+    async function restoreSession() {
+      sessionToken = localStorage.getItem(STORAGE_HUB_TOKEN_KEY) || "";
+      if (!sessionToken) {
+        renderLoggedOut();
+        return;
+      }
+      try {
+        const data = await api("/hub/me", "GET");
+        sessionUser = normalizeHubUser(data.user);
+        renderLoggedIn();
+      } catch {
+        sessionToken = "";
+        localStorage.removeItem(STORAGE_HUB_TOKEN_KEY);
+        renderLoggedOut();
+      }
+    }
+
+    async function signIn() {
+      const username = ui.loginUser.value.trim();
+      const password = ui.loginPass.value;
+      if (!username || !password) {
+        setStatus("Username and password are required.", false);
+        return;
+      }
+      try {
+        const data = await api("/hub/auth/login", "POST", { username, password }, false);
+        sessionToken = String(data.session_token || "");
+        localStorage.setItem(STORAGE_HUB_TOKEN_KEY, sessionToken);
+        sessionUser = normalizeHubUser(data.user);
+        ui.loginPass.value = "";
+        setStatus("Signed in.", true);
+        renderLoggedIn();
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function signOut() {
+      try { if (sessionToken) await api("/hub/auth/logout", "POST", {}); } catch {}
+      sessionToken = "";
+      sessionUser = null;
+      localStorage.removeItem(STORAGE_HUB_TOKEN_KEY);
+      renderLoggedOut();
+      setStatus("Signed out.", true);
+    }
+
+    function renderLoggedOut() {
+      ui.login.classList.remove("hidden");
+      ui.hub.classList.add("hidden");
+      ui.access.classList.add("hidden");
+    }
+
+    function renderLoggedIn() { openHub(); }
+
+    function openHub() {
+      if (!sessionUser) return renderLoggedOut();
+      ui.login.classList.add("hidden");
+      ui.hub.classList.remove("hidden");
+      ui.access.classList.add("hidden");
+      renderHub();
+    }
+
+    async function openAccess() {
+      if (!sessionUser) {
+        setStatus("Sign in first.", false);
+        return;
+      }
+      const managedPanels = getManageablePanels(sessionUser);
+      if (sessionUser.global_role === "owner") accessMode = "owner";
+      else if (managedPanels.length > 0) accessMode = "panel-manager";
+      else {
+        setStatus("You do not have access-management permissions.", false);
+        return;
+      }
+      ui.login.classList.add("hidden");
+      ui.hub.classList.add("hidden");
+      ui.access.classList.remove("hidden");
+      configureAccessView();
+      await loadUsers();
+      renderUsersTable();
+    }
+
+    function configureAccessView() {
+      const managedPanels = getManageablePanels(sessionUser);
+      if (accessMode === "owner") {
+        ui.accessHelpText.textContent = "Create users and assign global role plus per-panel roles.";
+        ui.panelScopeRow.classList.add("hidden");
+        ui.newUserRole.innerHTML = `
+          <option value="viewer">viewer</option>
+          <option value="editor">editor</option>
+          <option value="owner">owner</option>
+        `;
+        ui.newUserRole.value = "viewer";
+        return;
+      }
+      if (!activePanelScope || !managedPanels.includes(activePanelScope)) {
+        activePanelScope = managedPanels[0] || "";
+      }
+      ui.accessHelpText.textContent = "Panel manager mode: create users and assign roles for your managed panel only.";
+      ui.panelScopeSelect.innerHTML = managedPanels
+        .map((id) => `<option value="${escapeHtml(id)}">${escapeHtml(panelNameById(id))}</option>`)
+        .join("");
+      ui.panelScopeSelect.value = activePanelScope;
+      ui.panelScopeRow.classList.remove("hidden");
+      ui.newUserRole.innerHTML = `
+        <option value="viewer">viewer</option>
+        <option value="editor">editor</option>
+        <option value="manager">manager</option>
+      `;
+      ui.newUserRole.value = "viewer";
+    }
+
+    function renderHub() {
+      ui.welcomeTitle.textContent = `Welcome, ${sessionUser.username}`;
+      ui.welcomeMeta.textContent = `Role: ${sessionUser.global_role}`;
+      const canManage = sessionUser.global_role === "owner" || getManageablePanels(sessionUser).length > 0;
+      document.getElementById("btnOpenAccess").classList.toggle("hidden", !canManage);
+      const permitted = PANELS.filter((p) => hasPanelAccess(sessionUser, p));
+      ui.panelGrid.innerHTML = permitted.map((p) => `
+        <article class="panel-card">
+          <h3>${escapeHtml(p.name)}</h3>
+          <p>${escapeHtml(p.description)}</p>
+          <button onclick="openPanel('${escapeHtml(p.url)}', '${escapeHtml(p.id)}')">Open</button>
+        </article>
+      `).join("");
+    }
+
+    function openPanel(url, panelId) {
+      if (!url || url === "#") return;
+      localStorage.setItem(STORAGE_PANEL_SESSION_KEY, JSON.stringify({
+        username: sessionUser.username,
+        hubRole: sessionUser.global_role,
+        panelId,
+        panelRole: getPanelRole(sessionUser, panelId),
+      }));
+      window.location.href = url;
+    }
+    window.openPanel = openPanel;
+
+    async function loadUsers() {
+      const data = accessMode === "owner"
+        ? await api("/hub/users", "GET")
+        : await api(`/hub/panels/${encodeURIComponent(activePanelScope)}/users`, "GET");
+      usersCache = (Array.isArray(data.users) ? data.users : []).map(normalizeHubUser);
+      usersCache.sort((a, b) => a.username.localeCompare(b.username));
+    }
+
+    async function addUser() {
+      const username = ui.newUserName.value.trim();
+      const password = ui.newUserPass.value;
+      const globalRole = normalizeGlobalRole(ui.newUserRole.value);
+      if (!username || !password) {
+        setStatus("Username and password are required.", false);
+        return;
+      }
+      try {
+        if (accessMode === "owner") {
+          await api("/hub/users", "POST", { username, password, global_role: globalRole, panel_roles: defaultPanelRolesForRole(globalRole) });
+        } else {
+          await api(`/hub/panels/${encodeURIComponent(activePanelScope)}/users`, "POST", {
+            username,
+            password,
+            panel_role: normalizePanelRole(ui.newUserRole.value),
+          });
+        }
+        ui.newUserName.value = "";
+        ui.newUserPass.value = "";
+        ui.newUserRole.value = "viewer";
+        await loadUsers();
+        renderUsersTable();
+        setStatus("User added.", true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    function renderUsersTable() {
+      if (accessMode === "owner") {
+        const ownerCount = usersCache.filter((u) => normalizeGlobalRole(u.global_role) === "owner").length;
+        ui.usersTableBody.innerHTML = usersCache.map((u) => `
+          <tr>
+            <td>${escapeHtml(u.username)}${sessionUser && sessionUser.username === u.username ? " (current)" : ""}</td>
+            <td>
+              <select onchange="changeRole('${escapeHtml(u.username)}', this.value)">
+                <option value="viewer" ${u.global_role === "viewer" ? "selected" : ""}>viewer</option>
+                <option value="editor" ${u.global_role === "editor" ? "selected" : ""}>editor</option>
+                <option value="owner" ${u.global_role === "owner" ? "selected" : ""}>owner</option>
+              </select>
+            </td>
+            <td>${renderPanelAccessControls(u)}</td>
+            <td>
+              <button class="secondary" onclick="setUserPassword('${escapeHtml(u.username)}')">Set Password</button>
+              ${canRemoveUser(u, ownerCount)
+                ? `<button class="danger" onclick="removeUser('${escapeHtml(u.username)}')">Remove</button>`
+                : `<button class="danger" disabled title="At least one owner must remain assigned.">Remove</button>`}
+            </td>
+          </tr>
+        `).join("");
+        return;
+      }
+      const visibleUsers = usersCache.filter((u) => u.username !== (sessionUser && sessionUser.username));
+      ui.usersTableBody.innerHTML = visibleUsers.map((u) => `
+        <tr>
+          <td>${escapeHtml(u.username)}${sessionUser && sessionUser.username === u.username ? " (current)" : ""}</td>
+          <td>${escapeHtml(u.global_role)}</td>
+          <td>
+            <select onchange="setPanelRole('${escapeHtml(u.username)}', '${escapeHtml(activePanelScope)}', this.value)">
+              <option value="none" ${getPanelRole(u, activePanelScope) === "none" ? "selected" : ""}>none</option>
+              <option value="viewer" ${getPanelRole(u, activePanelScope) === "viewer" ? "selected" : ""}>viewer</option>
+              <option value="editor" ${getPanelRole(u, activePanelScope) === "editor" ? "selected" : ""}>editor</option>
+              <option value="manager" ${getPanelRole(u, activePanelScope) === "manager" ? "selected" : ""}>manager</option>
+            </select>
+          </td>
+          <td><span class="muted">Panel manager mode</span></td>
+        </tr>
+      `).join("");
+    }
+
+    async function changeRole(username, role) {
+      if (accessMode !== "owner") return;
+      try {
+        await api(`/hub/users/${encodeURIComponent(username)}/role`, "POST", { global_role: normalizeGlobalRole(role) });
+        await refreshCurrentUser();
+        await loadUsers();
+        renderUsersTable();
+        setStatus("Role updated.", true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function setUserPassword(username) {
+      if (accessMode !== "owner") {
+        setStatus("Only owner can set passwords from this screen.", false);
+        return;
+      }
+      const next = prompt(`Set new password for ${username}:`, "");
+      if (next == null) return;
+      const password = String(next).trim();
+      if (!password) {
+        setStatus("Password cannot be empty.", false);
+        return;
+      }
+      try {
+        await api(`/hub/users/${encodeURIComponent(username)}/password`, "POST", { password });
+        setStatus(`Password updated for ${username}.`, true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function setPanelRole(username, panelId, panelRole) {
+      try {
+        if (accessMode === "owner") {
+          await api(`/hub/users/${encodeURIComponent(username)}/panel-role`, "POST", {
+            panel_id: panelId,
+            panel_role: normalizePanelRole(panelRole),
+          });
+        } else {
+          await api(`/hub/panels/${encodeURIComponent(panelId)}/users/${encodeURIComponent(username)}/panel-role`, "POST", {
+            panel_role: normalizePanelRole(panelRole),
+          });
+        }
+        await refreshCurrentUser();
+        await loadUsers();
+        renderUsersTable();
+        setStatus("Panel role updated.", true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function removeUser(username) {
+      if (accessMode !== "owner") return;
+      const target = usersCache.find((u) => u.username === username);
+      const ownerCount = usersCache.filter((u) => normalizeGlobalRole(u.global_role) === "owner").length;
+      if (!canRemoveUser(target, ownerCount)) {
+        setStatus("Cannot remove this owner. At least one owner must remain assigned.", false);
+        return;
+      }
+      try {
+        await api(`/hub/users/${encodeURIComponent(username)}`, "DELETE");
+        await loadUsers();
+        renderUsersTable();
+        setStatus("User removed.", true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function refreshCurrentUser() {
+      try {
+        const me = await api("/hub/me", "GET");
+        sessionUser = normalizeHubUser(me.user);
+      } catch {}
+    }
+
+    window.changeRole = changeRole;
+    window.setUserPassword = setUserPassword;
+    window.setPanelRole = setPanelRole;
+    window.removeUser = removeUser;
+
+    function normalizeHubUser(user) {
+      const globalRole = normalizeGlobalRole(user && user.global_role);
+      return {
+        username: String((user && user.username) || ""),
+        global_role: globalRole,
+        panel_roles: normalizePanelRoles(user && user.panel_roles, globalRole),
+      };
+    }
+
+    function normalizeGlobalRole(role) {
+      const r = String(role || "").trim().toLowerCase();
+      if (r === "owner" || r === "editor") return r;
+      return "viewer";
+    }
+
+    function normalizePanelRole(role) {
+      const r = String(role || "").trim().toLowerCase();
+      if (r === "manager" || r === "editor" || r === "viewer") return r;
+      return "none";
+    }
+
+    function defaultPanelRolesForRole(globalRole) {
+      const role = normalizeGlobalRole(globalRole);
+      const out = {};
+      for (const p of PANELS) {
+        out[p.id] = role === "owner" ? "manager" : "none";
+      }
+      return out;
+    }
+
+    function normalizePanelRoles(raw, globalRole) {
+      const base = defaultPanelRolesForRole(globalRole);
+      if (normalizeGlobalRole(globalRole) === "owner") return base;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        for (const p of PANELS) {
+          if (Object.prototype.hasOwnProperty.call(raw, p.id)) base[p.id] = normalizePanelRole(raw[p.id]);
+        }
+      }
+      return base;
+    }
+
+    function getPanelRole(user, panelId) {
+      if (!user) return "none";
+      if (normalizeGlobalRole(user.global_role) === "owner") return "manager";
+      const roles = normalizePanelRoles(user.panel_roles, user.global_role);
+      return normalizePanelRole(roles[panelId]);
+    }
+
+    function hasPanelAccess(user, panel) {
+      const have = PANEL_ROLE_WEIGHT[getPanelRole(user, panel.id)] || 0;
+      const need = PANEL_ROLE_WEIGHT[normalizePanelRole(panel.minPanelRole || "viewer")] || 0;
+      return have >= need;
+    }
+
+    function canRemoveUser(user, ownerCount) {
+      if (!user) return false;
+      if (normalizeGlobalRole(user.global_role) !== "owner") return true;
+      return Number(ownerCount || 0) > 1;
+    }
+
+    function getManageablePanels(user) {
+      if (!user) return [];
+      if (normalizeGlobalRole(user.global_role) === "owner") return PANELS.map((p) => p.id);
+      return PANELS.filter((p) => getPanelRole(user, p.id) === "manager").map((p) => p.id);
+    }
+
+    function panelNameById(panelId) {
+      const found = PANELS.find((p) => p.id === panelId);
+      return found ? found.name : panelId;
+    }
+
+    function renderPanelAccessControls(user) {
+      const roles = normalizePanelRoles(user.panel_roles, user.global_role);
+      return PANELS.map((p) => {
+        const cur = normalizePanelRole(roles[p.id]);
+        const disabled = user.global_role === "owner" ? "disabled" : "";
+        const note = user.global_role === "owner" ? ` title="Owner is always manager"` : "";
+        return `<label style="display:block;white-space:nowrap;margin-bottom:4px;">
+          <span style="display:inline-block;min-width:145px;">${escapeHtml(p.name)}</span>
+          <select style="width:auto;display:inline-block;" ${disabled}${note}
+            onchange="setPanelRole('${escapeHtml(user.username)}','${escapeHtml(p.id)}',this.value)">
+            <option value="none" ${cur === "none" ? "selected" : ""}>none</option>
+            <option value="viewer" ${cur === "viewer" ? "selected" : ""}>viewer</option>
+            <option value="editor" ${cur === "editor" ? "selected" : ""}>editor</option>
+            <option value="manager" ${cur === "manager" ? "selected" : ""}>manager</option>
+          </select>
+        </label>`;
+      }).join("");
+    }
+
+    function setStatus(msg, ok) {
+      ui.status.textContent = msg;
+      ui.status.className = ok ? "ok" : "err";
+    }
+
+    function escapeHtml(v) {
+      return String(v == null ? "" : v)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+  </script>
+</body>
+</html>

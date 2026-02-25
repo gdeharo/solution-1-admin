@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chainsaw Chain Finder</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --card-tint-percent: 20%;
+    }
+    body {
+      margin: 0;
+      padding: 32px 16px;
+      font-family: Arial, sans-serif;
+      background: #f7f7f8;
+      color: #111;
+    }
+    .page {
+      max-width: 760px;
+      margin: 0 auto;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      color: var(--accent-color, rgb(20, 111, 248));
+    }
+    .row { margin-bottom: 10px; }
+    select, button {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #bbb;
+      font-size: 14px;
+      background: #fff;
+    }
+    button {
+      cursor: pointer;
+      background: var(--accent-color, rgb(20, 111, 248));
+      color: #fff;
+      border-color: var(--accent-color, rgb(20, 111, 248));
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    .results {
+      margin-top: 14px;
+      display: grid;
+      gap: 8px;
+    }
+    .card {
+      border: 1px solid var(--accent-color, rgb(20, 111, 248));
+      border-radius: 8px;
+      padding: 10px;
+      background: color-mix(
+        in srgb,
+        var(--accent-color, rgb(20, 111, 248)) var(--card-tint-percent),
+        #ffffff calc(100% - var(--card-tint-percent))
+      );
+      color: #0f2850;
+    }
+    .card-link {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      transition: box-shadow 0.12s ease, transform 0.12s ease;
+    }
+    .card-link:hover,
+    .card-link:focus-visible {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(20, 111, 248, 0.22);
+    }
+    .card-columns {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+    }
+    .card-col {
+      display: grid;
+      gap: 8px;
+    }
+    .card-row strong {
+      display: block;
+      font-size: 12px;
+      line-height: 1.2;
+      opacity: 0.9;
+    }
+    .card-row span {
+      display: block;
+      margin-top: 2px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+    .error { color: #b00020; }
+    .hint {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1 id="formTitle">KMC Chainsaw Chain Finder</h1>
+
+    <div id="widget">
+      <div class="row"><select id="brand"><option value="">Select Brand</option></select></div>
+      <div class="row"><select id="model" disabled><option value="">Select Model</option></select></div>
+      <div class="row"><select id="barLength" disabled><option value="">Select Bar Length</option></select></div>
+      <div class="row"><button id="findBtn" disabled>Find Chains</button></div>
+      <div id="results" class="results"></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const API = "https://product-selector-api.gdeharo.workers.dev";
+
+      const brandSel = document.getElementById("brand");
+      const modelSel = document.getElementById("model");
+      const barSel = document.getElementById("barLength");
+      const findBtn = document.getElementById("findBtn");
+      const results = document.getElementById("results");
+      const formTitle = document.getElementById("formTitle");
+      const defaults = {
+        form_title: "KMC Chainsaw Chain Finder",
+        accent_color: "rgb(20, 111, 248)",
+        button_label: "Find Chains",
+        card_tint_percent: "20",
+        no_result_message: "we don't offer this chainsaw chain at the moment, please check again in the future",
+      };
+      let config = { ...defaults };
+
+      function setOptions(select, values, placeholder) {
+        select.innerHTML = `<option value="">${placeholder}</option>` +
+          values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+        select.disabled = values.length === 0;
+      }
+
+      function resetFrom(level) {
+        if (level <= 2) setOptions(modelSel, [], "Select Model");
+        if (level <= 3) setOptions(barSel, [], "Select Bar Length");
+        findBtn.disabled = true;
+        results.innerHTML = "";
+      }
+
+      async function getJson(url) {
+        const res = await fetch(url);
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || "Request failed");
+        return body;
+      }
+
+      function applyConfig() {
+        formTitle.textContent = config.form_title || defaults.form_title;
+        findBtn.textContent = config.button_label || defaults.button_label;
+        document.documentElement.style.setProperty("--accent-color", config.accent_color || defaults.accent_color);
+        document.documentElement.style.setProperty("--card-tint-percent", normalizeTintPercent(config.card_tint_percent));
+      }
+
+      async function loadConfig() {
+        try {
+          const data = await getJson(`${API}/catalog/config`);
+          config = { ...defaults, ...data };
+        } catch (_err) {
+          config = { ...defaults };
+        }
+        applyConfig();
+      }
+
+      async function loadBrands() {
+        const data = await getJson(`${API}/catalog/brands`);
+        setOptions(brandSel, data.brands || [], "Select Brand");
+      }
+
+      brandSel.addEventListener("change", async function () {
+        resetFrom(2);
+        if (!brandSel.value) return;
+
+        try {
+          const url = new URL(`${API}/catalog/models`);
+          url.searchParams.set("brand", brandSel.value);
+          const data = await getJson(url.toString());
+          setOptions(modelSel, data.models || [], "Select Model");
+        } catch (err) {
+          results.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        }
+      });
+
+      modelSel.addEventListener("change", async function () {
+        resetFrom(3);
+        if (!brandSel.value || !modelSel.value) return;
+
+        try {
+          const url = new URL(`${API}/catalog/bar-lengths`);
+          url.searchParams.set("brand", brandSel.value);
+          url.searchParams.set("model", modelSel.value);
+          const data = await getJson(url.toString());
+          setOptions(barSel, data.bar_lengths || [], "Select Bar Length");
+        } catch (err) {
+          results.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        }
+      });
+
+      barSel.addEventListener("change", function () {
+        findBtn.disabled = !(brandSel.value && modelSel.value && barSel.value);
+      });
+
+      findBtn.addEventListener("click", async function () {
+        results.innerHTML = "";
+
+        try {
+          const url = new URL(`${API}/catalog/results`);
+          url.searchParams.set("brand", brandSel.value);
+          url.searchParams.set("model", modelSel.value);
+          url.searchParams.set("barLength", barSel.value);
+
+          const data = await getJson(url.toString());
+          const chains = data.chains || [];
+
+          if (!chains.length) {
+            results.innerHTML = `<div class='card'>${escapeHtml(config.no_result_message || defaults.no_result_message)}</div>`;
+          } else {
+            results.innerHTML = chains.map((c) => `
+              ${c.url ? `
+                <a class="card card-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">
+                  <div class="card-columns">
+                    <div class="card-col">
+                      <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(c.pitch || "N/A")}</span></div>
+                      <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(c.gauge || "N/A")}</span></div>
+                      <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(c.chisel_style || "N/A")}</span></div>
+                    </div>
+                    <div class="card-col">
+                      <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(c.ansi_low_kickback || "N/A")}</span></div>
+                      <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(c.profile_class || "N/A")}</span></div>
+                      <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(c.kerf_type || "N/A")}</span></div>
+                      <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(c.sequence_type || "N/A")}</span></div>
+                    </div>
+                  </div>
+                </a>
+              ` : `
+                <div class="card">
+                  <div class="card-columns">
+                    <div class="card-col">
+                      <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(c.pitch || "N/A")}</span></div>
+                      <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(c.gauge || "N/A")}</span></div>
+                      <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(c.chisel_style || "N/A")}</span></div>
+                    </div>
+                    <div class="card-col">
+                      <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(c.ansi_low_kickback || "N/A")}</span></div>
+                      <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(c.profile_class || "N/A")}</span></div>
+                      <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(c.kerf_type || "N/A")}</span></div>
+                      <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(c.sequence_type || "N/A")}</span></div>
+                    </div>
+                  </div>
+                </div>
+              `}
+            `).join("");
+          }
+        } catch (err) {
+          results.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        }
+      });
+
+      function escapeHtml(value) {
+        return String(value == null ? "" : value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function normalizeTintPercent(value) {
+        const numeric = Number(String(value == null ? "" : value).replace("%", "").trim());
+        if (!Number.isFinite(numeric)) return `${defaults.card_tint_percent}%`;
+        const clamped = Math.min(100, Math.max(0, numeric));
+        return `${clamped}%`;
+      }
+
+      loadConfig()
+        .then(loadBrands)
+        .catch(function (err) {
+          results.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+        });
+    })();
+  </script>
+</body>
+</html>

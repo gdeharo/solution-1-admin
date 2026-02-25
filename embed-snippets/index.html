@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Embed Snippets</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f5f7fb; color: #111; }
+    .wrap { max-width: 1040px; margin: 24px auto; padding: 0 14px 30px; }
+    h1 { margin: 0 0 8px; font-size: 24px; color: rgb(20, 111, 248); }
+    p { margin: 0 0 14px; color: #555; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+    h2 { margin: 0 0 8px; font-size: 17px; }
+    textarea {
+      width: 100%;
+      min-height: 170px;
+      box-sizing: border-box;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      background: #fafafa;
+      resize: vertical;
+    }
+    button {
+      margin-top: 8px;
+      width: auto;
+      padding: 8px 12px;
+      border-radius: 7px;
+      border: 1px solid rgb(20, 111, 248);
+      background: rgb(20, 111, 248);
+      color: #fff;
+      cursor: pointer;
+    }
+    .status { margin-top: 8px; font-size: 12px; color: #0a7d2f; min-height: 16px; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>Chainsaw Finder Embed Snippets</h1>
+    <p style="margin:0 0 12px;">
+      <a href="/chain-finder-settings/" style="display:inline-block;padding:8px 12px;border:1px solid #bbb;border-radius:7px;text-decoration:none;color:#111;background:#fff;">
+        Return To Menu
+      </a>
+    </p>
+    <p>Copy and paste one of these snippets into Shopify.</p>
+
+    <section class="card">
+      <h2>Quick Embed (Recommended)</h2>
+      <textarea id="quickCode" readonly><div style="max-width:1100px;margin:0 auto;padding:16px 0;">
+  <iframe
+    src="https://solution-1-admin.pages.dev/chainsaw-chain-finder/"
+    title="KMC Chainsaw Chain Finder"
+    style="width:100%;min-height:1000px;border:0;border-radius:12px;background:#fff;"
+    loading="lazy"
+    referrerpolicy="no-referrer-when-downgrade"
+  ></iframe>
+</div></textarea>
+      <button type="button" onclick="copyText('quickCode')">Copy Quick Embed</button>
+      <div id="quickStatus" class="status"></div>
+    </section>
+
+    <section class="card">
+      <h2>Reusable Shopify Section</h2>
+      <textarea id="sectionCode" readonly>{% schema %}
+{
+  "name": "Chainsaw Chain Finder",
+  "tag": "section",
+  "class": "section",
+  "settings": [
+    { "type": "text", "id": "title", "label": "Title", "default": "KMC Chainsaw Chain Finder" },
+    { "type": "url", "id": "finder_url", "label": "Finder URL", "default": "https://solution-1-admin.pages.dev/chainsaw-chain-finder/" },
+    { "type": "range", "id": "iframe_height", "label": "Iframe height (px)", "min": 600, "max": 1600, "step": 50, "default": 1000 }
+  ],
+  "presets": [{ "name": "Chainsaw Chain Finder" }]
+}
+{% endschema %}
+
+<section class="chainsaw-finder-section">
+  {% if section.settings.title != blank %}<h2>{{ section.settings.title }}</h2>{% endif %}
+  <div style="max-width:1100px;margin:0 auto;">
+    <iframe
+      src="{{ section.settings.finder_url | escape }}"
+      title="KMC Chainsaw Chain Finder"
+      loading="lazy"
+      referrerpolicy="no-referrer-when-downgrade"
+      style="width:100%;min-height:{{ section.settings.iframe_height }}px;border:0;border-radius:12px;background:#fff;"
+    ></iframe>
+  </div>
+</section></textarea>
+      <button type="button" onclick="copyText('sectionCode')">Copy Section Code</button>
+      <div id="sectionStatus" class="status"></div>
+    </section>
+  </main>
+
+  <script>
+    async function copyText(textareaId) {
+      const area = document.getElementById(textareaId);
+      if (!area) return;
+      const isQuick = textareaId === "quickCode";
+      const status = document.getElementById(isQuick ? "quickStatus" : "sectionStatus");
+      try {
+        await navigator.clipboard.writeText(area.value);
+        if (status) status.textContent = "Copied.";
+      } catch {
+        area.focus();
+        area.select();
+        area.setSelectionRange(0, 99999);
+        if (status) status.textContent = "Clipboard blocked. Select text and copy manually.";
+        return;
+      }
+      setTimeout(() => { if (status) status.textContent = ""; }, 1200);
+    }
+  </script>
+</body>
+</html>
