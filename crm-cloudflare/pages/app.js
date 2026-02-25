@@ -1703,6 +1703,7 @@ async function renderRepsView() {
       <option value="zip_prefix">Zip Prefix</option>
       <option value="zip_exact">Zip Exact</option>
     </select>
+    <textarea name="bulkValues" rows="2" placeholder="Bulk values (comma/new line)"></textarea>
     <select name="state">
       <option value="">State/Province</option>
       ${TERRITORY_STATE_OPTIONS.map(([code, name]) => `<option value="${code}">${code} - ${name}</option>`).join('')}
@@ -1925,19 +1926,40 @@ function bindRepsEvents() {
   territoryForm.onsubmit = async (event) => {
     event.preventDefault();
     const fd = new FormData(territoryForm);
+    const territoryType = String(fd.get('territoryType') || '');
+    const bulkRaw = String(fd.get('bulkValues') || '')
+      .split(/[\n,]/g)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const payload = {
+      repId: Number(fd.get('repId')),
+      territoryType,
+      state: fd.get('state'),
+      city: fd.get('city'),
+      zipPrefix: fd.get('zipPrefix'),
+      zipExact: fd.get('zipExact'),
+      segment: fd.get('segment'),
+      customerType: fd.get('customerType')
+    };
+    if (bulkRaw.length > 0) {
+      if (territoryType === 'state') payload.states = bulkRaw;
+      if (territoryType === 'zip_prefix') payload.zipPrefixes = bulkRaw;
+      if (territoryType === 'zip_exact') payload.zipExacts = bulkRaw;
+      if (territoryType === 'city_state') payload.cityStates = bulkRaw
+        .map((entry) => {
+          const parts = entry.split(',').map((x) => x.trim());
+          if (parts.length < 2) return null;
+          const state = parts.pop();
+          const city = parts.join(', ');
+          if (!city || !state) return null;
+          return { city, state };
+        })
+        .filter(Boolean);
+    }
     try {
       await api('/api/rep-territories', {
         method: 'POST',
-        body: JSON.stringify({
-          repId: Number(fd.get('repId')),
-          territoryType: fd.get('territoryType'),
-          state: fd.get('state'),
-          city: fd.get('city'),
-          zipPrefix: fd.get('zipPrefix'),
-          zipExact: fd.get('zipExact'),
-          segment: fd.get('segment'),
-          customerType: fd.get('customerType')
-        })
+        body: JSON.stringify(payload)
       });
       territoryForm.reset();
       await renderRepsView();

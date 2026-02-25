@@ -177,6 +177,128 @@ async function ensureSegmentAndTypeExist(env: Env, segment?: string | null, cust
   return null;
 }
 
+function normalizedText(value: string | null | undefined): string {
+  return String(value || '').trim();
+}
+
+function splitCsvValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => normalizedText(String(v))).filter(Boolean);
+  if (typeof value !== 'string') return [];
+  return value
+    .split(/[\n,]/g)
+    .map((part) => normalizedText(part))
+    .filter(Boolean);
+}
+
+function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: number): string {
+  return `EXISTS (
+    SELECT 1
+    FROM rep_territories t
+    JOIN reps r ON r.id = t.rep_id
+    WHERE r.deleted_at IS NULL
+      AND r.email IS NOT NULL
+      AND lower(r.email) = lower(?${emailParamIndex})
+      AND (
+        (t.territory_type = 'state'
+          AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(${companyAlias}.state, ''))))
+        OR
+        (t.territory_type = 'city_state'
+          AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(${companyAlias}.state, '')))
+          AND upper(trim(coalesce(t.city, ''))) = upper(trim(coalesce(${companyAlias}.city, ''))))
+        OR
+        (t.territory_type = 'zip_exact'
+          AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') =
+              replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', ''))
+        OR
+        (t.territory_type = 'zip_prefix'
+          AND trim(coalesce(t.zip_prefix, '')) <> ''
+          AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
+              (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+      )
+      AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ${companyAlias}.segment)
+      AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ${companyAlias}.customer_type)
+  )`;
+}
+
+async function repCanAccessCompany(env: Env, user: AuthedUser, companyId: number): Promise<boolean> {
+  const row = await env.CRM_DB.prepare(
+    `SELECT c.id
+     FROM companies c
+     WHERE c.id = ?1
+       AND c.deleted_at IS NULL
+       AND ${repTerritoryCompanyScopeClause('c', 2)}`
+  )
+    .bind(companyId, user.email)
+    .first<{ id: number }>();
+  return !!row;
+}
+
+async function ensureRepCanAccessCompany(env: Env, user: AuthedUser, companyId: number): Promise<Response | null> {
+  if (user.role !== 'rep') return null;
+  if (!companyId) return err('company id is required');
+  const allowed = await repCanAccessCompany(env, user, companyId);
+  if (!allowed) return err('This company is outside your assigned territory.', 403);
+  return null;
+}
+
+async function ensureRepCanAccessCustomer(env: Env, user: AuthedUser, customerId: number): Promise<Response | null> {
+  if (user.role !== 'rep') return null;
+  const row = await env.CRM_DB.prepare(`SELECT company_id FROM customers WHERE id = ?1 AND deleted_at IS NULL`)
+    .bind(customerId)
+    .first<{ company_id: number }>();
+  if (!row) return err('Contact not found', 404);
+  return ensureRepCanAccessCompany(env, user, row.company_id);
+}
+
+async function ensureRepCanAccessInteraction(env: Env, user: AuthedUser, interactionId: number): Promise<Response | null> {
+  if (user.role !== 'rep') return null;
+  const row = await env.CRM_DB.prepare(`SELECT company_id FROM interactions WHERE id = ?1 AND deleted_at IS NULL`)
+    .bind(interactionId)
+    .first<{ company_id: number }>();
+  if (!row) return err('Interaction not found', 404);
+  return ensureRepCanAccessCompany(env, user, row.company_id);
+}
+
+async function repCanCreateCompanyInTerritory(
+  env: Env,
+  user: AuthedUser,
+  data: { city?: string; state?: string; zip?: string; segment?: string; customerType?: string }
+): Promise<boolean> {
+  const row = await env.CRM_DB.prepare(
+    `SELECT 1 AS ok
+     WHERE EXISTS (
+       SELECT 1
+       FROM rep_territories t
+       JOIN reps r ON r.id = t.rep_id
+       WHERE r.deleted_at IS NULL
+         AND r.email IS NOT NULL
+         AND lower(r.email) = lower(?1)
+         AND (
+           (t.territory_type = 'state'
+             AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?2, ''))))
+           OR
+           (t.territory_type = 'city_state'
+             AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?2, '')))
+             AND upper(trim(coalesce(t.city, ''))) = upper(trim(coalesce(?3, ''))))
+           OR
+           (t.territory_type = 'zip_exact'
+             AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') =
+                 replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', ''))
+           OR
+           (t.territory_type = 'zip_prefix'
+             AND trim(coalesce(t.zip_prefix, '')) <> ''
+             AND replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', '') LIKE
+                 (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+         )
+         AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ?5)
+         AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ?6)
+     )`
+  )
+    .bind(user.email, data.state ?? null, data.city ?? null, data.zip ?? null, data.segment ?? null, data.customerType ?? null)
+    .first<{ ok: number }>();
+  return !!row;
+}
+
 async function audit(env: Env, user: AuthedUser | null, action: string, entityType: string, entityId: string, details?: unknown) {
   await env.CRM_DB.prepare(
     `INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, details_json) VALUES (?1, ?2, ?3, ?4, ?5)`
@@ -333,17 +455,34 @@ addRoute('GET', /^\/api\/auth\/me$/, async (request, env) => {
 addRoute(
   'GET',
   /^\/api\/lookups$/,
-  withAuth(async (_request, env) => {
+  withAuth(async (_request, env, user) => {
+    const companyBinds: unknown[] = [];
+    let companySql = `SELECT id, name FROM companies WHERE deleted_at IS NULL`;
+    if (user.role === 'rep') {
+      companySql += ` AND ${repTerritoryCompanyScopeClause('companies', 1)}`;
+      companyBinds.push(user.email);
+    }
+    companySql += ` ORDER BY name ASC`;
+
     const [companies, reps, customers] = await Promise.all([
-      env.CRM_DB.prepare(`SELECT id, name FROM companies WHERE deleted_at IS NULL ORDER BY name ASC`).all(),
+      companyBinds.length ? env.CRM_DB.prepare(companySql).bind(...companyBinds).all() : env.CRM_DB.prepare(companySql).all(),
       env.CRM_DB.prepare(`SELECT id, full_name FROM reps WHERE deleted_at IS NULL ORDER BY full_name ASC`).all(),
-      env.CRM_DB.prepare(
-        `SELECT customers.id, customers.first_name, customers.last_name, companies.name AS company_name
-         FROM customers
-         JOIN companies ON companies.id = customers.company_id
-         WHERE customers.deleted_at IS NULL
-         ORDER BY customers.first_name, customers.last_name`
-      ).all()
+      (async () => {
+        const customerBinds: unknown[] = [];
+        let customerSql =
+          `SELECT customers.id, customers.first_name, customers.last_name, companies.name AS company_name
+           FROM customers
+           JOIN companies ON companies.id = customers.company_id
+           WHERE customers.deleted_at IS NULL`;
+        if (user.role === 'rep') {
+          customerSql += ` AND ${repTerritoryCompanyScopeClause('companies', 1)}`;
+          customerBinds.push(user.email);
+        }
+        customerSql += ` ORDER BY customers.first_name, customers.last_name`;
+        return customerBinds.length
+          ? env.CRM_DB.prepare(customerSql).bind(...customerBinds).all()
+          : env.CRM_DB.prepare(customerSql).all();
+      })()
     ]);
 
     return json({
@@ -568,16 +707,21 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/companies$/,
-  withAuth(async (_request, env) => {
-    const companies = await env.CRM_DB.prepare(
+  withAuth(async (_request, env, user) => {
+    const binds: unknown[] = [];
+    let sql =
       `SELECT
          c.*, 
          (SELECT COUNT(*) FROM customers cu WHERE cu.company_id = c.id AND cu.deleted_at IS NULL) AS customer_count,
          (SELECT COUNT(*) FROM company_reps cr WHERE cr.company_id = c.id) AS rep_count
        FROM companies c
-       WHERE c.deleted_at IS NULL
-       ORDER BY c.name ASC`
-    ).all();
+       WHERE c.deleted_at IS NULL`;
+    if (user.role === 'rep') {
+      sql += ` AND ${repTerritoryCompanyScopeClause('c', 1)}`;
+      binds.push(user.email);
+    }
+    sql += ` ORDER BY c.name ASC`;
+    const companies = binds.length ? await env.CRM_DB.prepare(sql).bind(...binds).all() : await env.CRM_DB.prepare(sql).all();
     return json({ companies: companies.results });
   }) as any
 );
@@ -604,6 +748,18 @@ addRoute(
     if (!body?.name) return err('Company name is required');
     const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
     if (metadataError) return err(metadataError);
+    if (user.role === 'rep') {
+      const inScope = await repCanCreateCompanyInTerritory(env, user, {
+        city: body.city,
+        state: body.state,
+        zip: body.zip,
+        segment: body.segment,
+        customerType: body.customerType
+      });
+      if (!inScope) {
+        return err('This company is outside your assigned territory (state/city/zip and segment/type).', 403);
+      }
+    }
 
     const result = await env.CRM_DB.prepare(
       `INSERT INTO companies (name, address, city, state, country, zip, main_phone, url, segment, customer_type, notes)
@@ -644,6 +800,8 @@ addRoute(
     const companyId = Number(match?.[1]);
     const body = await parseJson<{ repIds: number[] }>(request);
     if (!Array.isArray(body?.repIds)) return err('repIds must be an array');
+    const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
+    if (repAccessError) return repAccessError;
 
     await env.CRM_DB.prepare(`DELETE FROM company_reps WHERE company_id = ?1`).bind(companyId).run();
     for (const repId of body.repIds) {
@@ -658,9 +816,11 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/companies\/(\d+)\/customers$/,
-  withAuth(async (request, env) => {
+  withAuth(async (request, env, user) => {
     const match = request.url.match(/\/api\/companies\/(\d+)\/customers$/);
     const companyId = Number(match?.[1]);
+    const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
+    if (repAccessError) return repAccessError;
     const rows = await env.CRM_DB.prepare(
       `SELECT id, first_name, last_name, email, phone FROM customers WHERE company_id = ?1 AND deleted_at IS NULL ORDER BY first_name, last_name`
     )
@@ -673,10 +833,12 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/companies\/(\d+)$/,
-  withAuth(async (request, env) => {
+  withAuth(async (request, env, user) => {
     const match = request.url.match(/\/api\/companies\/(\d+)$/);
     const companyId = Number(match?.[1]);
     if (!companyId) return err('company id is required');
+    const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
+    if (repAccessError) return repAccessError;
 
     const company = await env.CRM_DB.prepare(
       `SELECT
@@ -708,9 +870,11 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/customers$/,
-  withAuth(async (_request, env, _user, url) => {
+  withAuth(async (_request, env, user, url) => {
     const companyId = url.searchParams.get('companyId');
     if (companyId) {
+      const repAccessError = await ensureRepCanAccessCompany(env, user, Number(companyId));
+      if (repAccessError) return repAccessError;
       const rows = await env.CRM_DB.prepare(
         `SELECT cu.*, c.name AS company_name
          FROM customers cu
@@ -723,13 +887,18 @@ addRoute(
       return json({ customers: rows.results });
     }
 
-    const rows = await env.CRM_DB.prepare(
+    const binds: unknown[] = [];
+    let sql =
       `SELECT cu.*, c.name AS company_name
        FROM customers cu
        JOIN companies c ON c.id = cu.company_id
-       WHERE cu.deleted_at IS NULL
-       ORDER BY c.name, cu.first_name, cu.last_name`
-    ).all();
+       WHERE cu.deleted_at IS NULL`;
+    if (user.role === 'rep') {
+      sql += ` AND ${repTerritoryCompanyScopeClause('c', 1)}`;
+      binds.push(user.email);
+    }
+    sql += ` ORDER BY c.name, cu.first_name, cu.last_name`;
+    const rows = binds.length ? await env.CRM_DB.prepare(sql).bind(...binds).all() : await env.CRM_DB.prepare(sql).all();
     return json({ customers: rows.results });
   }) as any
 );
@@ -751,6 +920,8 @@ addRoute(
     }>(request);
 
     if (!body?.companyId || !body.firstName || !body.lastName) return err('companyId, firstName, and lastName are required');
+    const repAccessError = await ensureRepCanAccessCompany(env, user, body.companyId);
+    if (repAccessError) return repAccessError;
 
     const result = await env.CRM_DB.prepare(
       `INSERT INTO customers (company_id, first_name, last_name, email, phone, other_phone, photo_key, notes)
@@ -788,6 +959,8 @@ addRoute(
     const customerId = Number(match?.[1]);
     const body = await parseJson<{ repIds: number[] }>(request);
     if (!Array.isArray(body?.repIds)) return err('repIds must be an array');
+    const repAccessError = await ensureRepCanAccessCustomer(env, user, customerId);
+    if (repAccessError) return repAccessError;
 
     await env.CRM_DB.prepare(`DELETE FROM customer_reps WHERE customer_id = ?1`).bind(customerId).run();
     for (const repId of body.repIds) {
@@ -802,10 +975,12 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/customers\/(\d+)$/,
-  withAuth(async (request, env) => {
+  withAuth(async (request, env, user) => {
     const match = request.url.match(/\/api\/customers\/(\d+)$/);
     const customerId = Number(match?.[1]);
     if (!customerId) return err('customer id is required');
+    const repAccessError = await ensureRepCanAccessCustomer(env, user, customerId);
+    if (repAccessError) return repAccessError;
 
     const customer = await env.CRM_DB.prepare(
       `SELECT cu.*, c.name AS company_name
@@ -907,10 +1082,12 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/interactions\/(\d+)$/,
-  withAuth(async (request, env) => {
+  withAuth(async (request, env, user) => {
     const match = request.url.match(/\/api\/interactions\/(\d+)$/);
     const interactionId = Number(match?.[1]);
     if (!interactionId) return err('interaction id is required');
+    const repAccessError = await ensureRepCanAccessInteraction(env, user, interactionId);
+    if (repAccessError) return repAccessError;
 
     const interaction = await env.CRM_DB.prepare(
       `SELECT i.*, c.name AS company_name,
@@ -935,9 +1112,17 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/interactions$/,
-  withAuth(async (_request, env, _user, url) => {
+  withAuth(async (_request, env, user, url) => {
     const companyId = url.searchParams.get('companyId');
     const customerId = url.searchParams.get('customerId');
+    if (user.role === 'rep' && companyId) {
+      const repAccessError = await ensureRepCanAccessCompany(env, user, Number(companyId));
+      if (repAccessError) return repAccessError;
+    }
+    if (user.role === 'rep' && customerId) {
+      const repAccessError = await ensureRepCanAccessCustomer(env, user, Number(customerId));
+      if (repAccessError) return repAccessError;
+    }
 
     let sql =
       `SELECT i.*, c.name AS company_name,
@@ -959,6 +1144,10 @@ addRoute(
     if (customerId) {
       sql += ` AND i.customer_id = ?${binds.length + 1}`;
       binds.push(Number(customerId));
+    }
+    if (user.role === 'rep') {
+      sql += ` AND ${repTerritoryCompanyScopeClause('c', binds.length + 1)}`;
+      binds.push(user.email);
     }
     sql += ` ORDER BY i.created_at DESC`;
 
@@ -985,6 +1174,8 @@ addRoute(
     }>(request);
 
     if (!body?.companyId || !body?.meetingNotes) return err('companyId and meetingNotes are required');
+    const repAccessError = await ensureRepCanAccessCompany(env, user, body.companyId);
+    if (repAccessError) return repAccessError;
 
     const result = await env.CRM_DB.prepare(
       `INSERT INTO interactions (company_id, customer_id, rep_id, interaction_type, meeting_notes, next_action, next_action_at, created_by_user_id)
@@ -1032,6 +1223,20 @@ addRoute(
     if (!(file instanceof File)) return err('file is required');
     if (!['company', 'customer', 'interaction'].includes(entityType)) return err('entityType must be company, customer, or interaction');
     if (!entityId) return err('entityId is required');
+    if (user.role === 'rep') {
+      if (entityType === 'company') {
+        const repAccessError = await ensureRepCanAccessCompany(env, user, entityId);
+        if (repAccessError) return repAccessError;
+      }
+      if (entityType === 'customer') {
+        const repAccessError = await ensureRepCanAccessCustomer(env, user, entityId);
+        if (repAccessError) return repAccessError;
+      }
+      if (entityType === 'interaction') {
+        const repAccessError = await ensureRepCanAccessInteraction(env, user, entityId);
+        if (repAccessError) return repAccessError;
+      }
+    }
 
     const key = `${entityType}/${entityId}/${Date.now()}-${randomToken(8)}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
@@ -1056,11 +1261,25 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/attachments$/,
-  withAuth(async (_request, env, _user, url) => {
+  withAuth(async (_request, env, user, url) => {
     const entityType = url.searchParams.get('entityType');
     const entityId = Number(url.searchParams.get('entityId'));
 
     if (!entityType || !entityId) return err('entityType and entityId are required');
+    if (user.role === 'rep') {
+      if (entityType === 'company') {
+        const repAccessError = await ensureRepCanAccessCompany(env, user, entityId);
+        if (repAccessError) return repAccessError;
+      }
+      if (entityType === 'customer') {
+        const repAccessError = await ensureRepCanAccessCustomer(env, user, entityId);
+        if (repAccessError) return repAccessError;
+      }
+      if (entityType === 'interaction') {
+        const repAccessError = await ensureRepCanAccessInteraction(env, user, entityId);
+        if (repAccessError) return repAccessError;
+      }
+    }
 
     const rows = await env.CRM_DB.prepare(
       `SELECT id, entity_type, entity_id, file_key, file_name, mime_type, size_bytes, created_at
@@ -1084,12 +1303,26 @@ addRoute(
     if (!attachmentId) return err('attachment id is required');
 
     const attachment = await env.CRM_DB.prepare(
-      `SELECT id, file_key FROM attachments WHERE id = ?1`
+      `SELECT id, entity_type, entity_id, file_key FROM attachments WHERE id = ?1`
     )
       .bind(attachmentId)
-      .first<{ id: number; file_key: string }>();
+      .first<{ id: number; entity_type: string; entity_id: number; file_key: string }>();
 
     if (!attachment) return err('Attachment not found', 404);
+    if (user.role === 'rep') {
+      if (attachment.entity_type === 'company') {
+        const repAccessError = await ensureRepCanAccessCompany(env, user, attachment.entity_id);
+        if (repAccessError) return repAccessError;
+      }
+      if (attachment.entity_type === 'customer') {
+        const repAccessError = await ensureRepCanAccessCustomer(env, user, attachment.entity_id);
+        if (repAccessError) return repAccessError;
+      }
+      if (attachment.entity_type === 'interaction') {
+        const repAccessError = await ensureRepCanAccessInteraction(env, user, attachment.entity_id);
+        if (repAccessError) return repAccessError;
+      }
+    }
 
     await env.CRM_FILES.delete(attachment.file_key);
     await env.CRM_DB.prepare(`DELETE FROM attachments WHERE id = ?1`).bind(attachmentId).run();
@@ -1102,9 +1335,29 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/files\/(.+)$/,
-  withAuth(async (request, env) => {
+  withAuth(async (request, env, user) => {
     const path = new URL(request.url).pathname;
     const key = decodeURIComponent(path.replace('/api/files/', ''));
+    if (user.role === 'rep') {
+      const attachment = await env.CRM_DB.prepare(
+        `SELECT entity_type, entity_id FROM attachments WHERE file_key = ?1 ORDER BY id DESC LIMIT 1`
+      )
+        .bind(key)
+        .first<{ entity_type: string; entity_id: number }>();
+      if (!attachment) return err('File not found', 404);
+      if (attachment.entity_type === 'company') {
+        const repAccessError = await ensureRepCanAccessCompany(env, user, attachment.entity_id);
+        if (repAccessError) return repAccessError;
+      }
+      if (attachment.entity_type === 'customer') {
+        const repAccessError = await ensureRepCanAccessCustomer(env, user, attachment.entity_id);
+        if (repAccessError) return repAccessError;
+      }
+      if (attachment.entity_type === 'interaction') {
+        const repAccessError = await ensureRepCanAccessInteraction(env, user, attachment.entity_id);
+        if (repAccessError) return repAccessError;
+      }
+    }
     const object = await env.CRM_FILES.get(key);
     if (!object) return err('File not found', 404);
 
@@ -1245,37 +1498,86 @@ addRoute(
       city?: string;
       zipPrefix?: string;
       zipExact?: string;
+      states?: string[] | string;
+      zipPrefixes?: string[] | string;
+      zipExacts?: string[] | string;
+      cityStates?: Array<{ city: string; state: string }> | string;
       segment?: string;
       customerType?: string;
     }>(request);
     if (!body?.repId || !body.territoryType) return err('repId and territoryType are required');
     if (!['state', 'city_state', 'zip_prefix', 'zip_exact'].includes(body.territoryType)) return err('Invalid territoryType');
-
-    if (body.territoryType === 'state' && !body.state) return err('state is required');
-    if (body.territoryType === 'city_state' && (!body.city || !body.state)) return err('city and state are required');
-    if (body.territoryType === 'zip_prefix' && !body.zipPrefix) return err('zipPrefix is required');
-    if (body.territoryType === 'zip_exact' && !body.zipExact) return err('zipExact is required');
     const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
     if (metadataError) return err(metadataError);
 
-    const result = await env.CRM_DB.prepare(
+    const rows: Array<{ state?: string; city?: string; zipPrefix?: string; zipExact?: string }> = [];
+    if (body.territoryType === 'state') {
+      const values = Array.from(new Set([...splitCsvValues(body.states), ...splitCsvValues(body.state)]));
+      if (values.length === 0) return err('Provide at least one state');
+      for (const state of values) rows.push({ state: state.toUpperCase() });
+    }
+    if (body.territoryType === 'zip_prefix') {
+      const values = Array.from(new Set([...splitCsvValues(body.zipPrefixes), ...splitCsvValues(body.zipPrefix)]));
+      if (values.length === 0) return err('Provide at least one zip prefix');
+      for (const zipPrefix of values) rows.push({ zipPrefix });
+    }
+    if (body.territoryType === 'zip_exact') {
+      const values = Array.from(new Set([...splitCsvValues(body.zipExacts), ...splitCsvValues(body.zipExact)]));
+      if (values.length === 0) return err('Provide at least one exact zip');
+      for (const zipExact of values) rows.push({ zipExact });
+    }
+    if (body.territoryType === 'city_state') {
+      const cityStates: Array<{ city: string; state: string }> = [];
+      if (Array.isArray(body.cityStates)) {
+        for (const item of body.cityStates) {
+          const city = normalizedText(item?.city);
+          const state = normalizedText(item?.state).toUpperCase();
+          if (city && state) cityStates.push({ city, state });
+        }
+      } else if (typeof body.cityStates === 'string') {
+        const entries = body.cityStates
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean);
+        for (const entry of entries) {
+          const parts = entry.split(',').map((part) => part.trim());
+          if (parts.length < 2) continue;
+          const state = parts.pop() || '';
+          const city = parts.join(', ');
+          if (city && state) cityStates.push({ city, state: state.toUpperCase() });
+        }
+      }
+      const singleCity = normalizedText(body.city);
+      const singleState = normalizedText(body.state).toUpperCase();
+      if (singleCity && singleState) cityStates.push({ city: singleCity, state: singleState });
+      const deduped = Array.from(new Map(cityStates.map((item) => [`${item.city.toUpperCase()}|${item.state}`, item])).values());
+      if (deduped.length === 0) return err('Provide at least one city and state');
+      for (const item of deduped) rows.push({ city: item.city, state: item.state });
+    }
+
+    if (rows.length === 0) return err('No territory rows to create');
+    const insert = env.CRM_DB.prepare(
       `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact, segment, customer_type)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
-    )
-      .bind(
+    );
+    const statements = rows.map((row) =>
+      insert.bind(
         body.repId,
         body.territoryType,
-        body.state ?? null,
-        body.city ?? null,
-        body.zipPrefix ?? null,
-        body.zipExact ?? null,
+        row.state ?? null,
+        row.city ?? null,
+        row.zipPrefix ?? null,
+        row.zipExact ?? null,
         body.segment ?? null,
         body.customerType ?? null
       )
-      .run();
-
-    await audit(env, user, 'create', 'rep_territory', String(result.meta.last_row_id), body);
-    return json({ id: result.meta.last_row_id }, 201);
+    );
+    await env.CRM_DB.batch(statements);
+    await audit(env, user, 'create', 'rep_territory', String(body.repId), {
+      ...body,
+      createdRows: rows.length
+    });
+    return json({ created: rows.length }, 201);
   }) as any
 );
 
@@ -1347,6 +1649,8 @@ addRoute(
       notes?: string;
     }>(request);
     if (!companyId || !body?.name) return err('company id and name are required');
+    const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
+    if (repAccessError) return repAccessError;
     const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
     if (metadataError) return err(metadataError);
 
@@ -1384,6 +1688,8 @@ addRoute(
     const match = request.url.match(/\/api\/companies\/(\d+)$/);
     const companyId = Number(match?.[1]);
     if (!companyId) return err('company id is required');
+    const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
+    if (repAccessError) return repAccessError;
     await env.CRM_DB.prepare(`UPDATE companies SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(companyId).run();
     await audit(env, user, 'delete', 'company', String(companyId));
     return json({ success: true });
@@ -1409,6 +1715,10 @@ addRoute(
     if (!customerId || !body?.companyId || !body.firstName || !body.lastName) {
       return err('customer id, companyId, firstName, and lastName are required');
     }
+    const repAccessError = await ensureRepCanAccessCustomer(env, user, customerId);
+    if (repAccessError) return repAccessError;
+    const repTargetAccessError = await ensureRepCanAccessCompany(env, user, body.companyId);
+    if (repTargetAccessError) return repTargetAccessError;
 
     await env.CRM_DB.prepare(
       `UPDATE customers
@@ -1440,6 +1750,8 @@ addRoute(
     const match = request.url.match(/\/api\/customers\/(\d+)$/);
     const customerId = Number(match?.[1]);
     if (!customerId) return err('customer id is required');
+    const repAccessError = await ensureRepCanAccessCustomer(env, user, customerId);
+    if (repAccessError) return repAccessError;
     await env.CRM_DB.prepare(`UPDATE customers SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(customerId).run();
     await audit(env, user, 'delete', 'customer', String(customerId));
     return json({ success: true });
@@ -1516,6 +1828,10 @@ addRoute(
     if (!interactionId || !body?.companyId || !body.meetingNotes) {
       return err('interaction id, companyId, and meetingNotes are required');
     }
+    const repAccessError = await ensureRepCanAccessInteraction(env, user, interactionId);
+    if (repAccessError) return repAccessError;
+    const repTargetAccessError = await ensureRepCanAccessCompany(env, user, body.companyId);
+    if (repTargetAccessError) return repTargetAccessError;
 
     await env.CRM_DB.prepare(
       `UPDATE interactions
@@ -1546,6 +1862,8 @@ addRoute(
     const match = request.url.match(/\/api\/interactions\/(\d+)$/);
     const interactionId = Number(match?.[1]);
     if (!interactionId) return err('interaction id is required');
+    const repAccessError = await ensureRepCanAccessInteraction(env, user, interactionId);
+    if (repAccessError) return repAccessError;
     await env.CRM_DB.prepare(`UPDATE interactions SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(interactionId).run();
     await audit(env, user, 'delete', 'interaction', String(interactionId));
     return json({ success: true });
