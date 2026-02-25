@@ -305,7 +305,6 @@
 
     // Hide these in forms only; values are still preserved in payloads.
     const FORM_HIDDEN_FIELDS = {
-      "chain-types": new Set(["Chain Type"]),
       "kmc-chains": new Set(),
       "bar-lengths": new Set(["Chain Type Code"]),
     };
@@ -758,7 +757,7 @@
         <div class="row">${inputs}</div>
         ${hiddenInputs}
         <div class="row">
-          ${["chain-types", "kmc-chains", "bar-lengths"].includes(slug)
+          ${["kmc-chains", "bar-lengths"].includes(slug)
             ? `<input id="edit-row-${slug}" type="hidden" />`
             : `<input id="edit-row-${slug}" placeholder="Editing row # (optional)" readonly />`}
           <button id="save-${slug}">Save Row</button>
@@ -789,13 +788,6 @@
         for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
           const sel = document.getElementById(fieldInputId("kmc-chains", field));
           if (sel) sel.addEventListener("change", () => handleKmcLookupChange(field, sel));
-        }
-      }
-
-      if (slug === "chain-types") {
-        for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
-          const sel = document.getElementById(fieldInputId("chain-types", field));
-          if (sel) sel.addEventListener("change", () => handleChainTypeLookupChange(field, sel));
         }
       }
 
@@ -1059,14 +1051,6 @@
           })
         );
       }
-      if (slug === "chain-types") {
-        const filters = getChainTypeFilters();
-        rows = rows.filter((r) => {
-          if (filters.gauge && !eqNormStr(r["Gauge"], filters.gauge)) return false;
-          if (filters.pitch && !eqNormStr(r["Pitch"], filters.pitch)) return false;
-          return true;
-        });
-      }
       if (slug === "kmc-chains") {
         const filters = getKmcChainFilters();
         rows = rows.filter((r) => {
@@ -1306,9 +1290,6 @@
       if (FORM_HIDDEN_FIELDS[slug] && FORM_HIDDEN_FIELDS[slug].has(fieldName)) {
         return `<input id="${id}" type="hidden" />`;
       }
-      if (slug === "chain-types" && CHAIN_TYPE_LOOKUP_FIELDS.includes(fieldName)) {
-        return `<select id="${id}"><option value="">Select ${escapeHtml(fieldName)}</option></select>`;
-      }
       if (["kmc-chains", "bar-lengths"].includes(slug) && CHAIN_TYPE_LOOKUP_FIELDS.includes(fieldName)) {
         return `<select id="${id}"><option value="">Select ${escapeHtml(fieldName)}</option></select>`;
       }
@@ -1325,14 +1306,11 @@
     }
 
     function populateChainTypeLookupOptions() {
-      const targets = ["chain-types", "kmc-chains", "bar-lengths"];
+      const targets = ["kmc-chains", "bar-lengths"];
       for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
         const fromLookups = getLookupItems("chain-types", field).map((i) => ({ ...i }));
-        const fromChainTypeRows = Array.from(
-          new Set((state.entities["chain-types"] || []).map((r) => String(r[field] || "").trim()).filter(Boolean))
-        ).map((v) => ({ value: v, sort_order: 0, active: 1 }));
         const mergedByValue = new Map();
-        for (const item of [...fromLookups, ...fromChainTypeRows]) {
+        for (const item of [...fromLookups]) {
           if (!item || !item.value) continue;
           if (!mergedByValue.has(item.value)) mergedByValue.set(item.value, item);
         }
@@ -1350,7 +1328,7 @@
             items.unshift({ value: prev, sort_order: -1, active: 1 });
           }
 
-          const addNew = slug === "chain-types" || slug === "kmc-chains";
+          const addNew = slug === "kmc-chains";
           select.innerHTML =
             `<option value="">Select ${escapeHtml(field)}</option>` +
             items.map((i) => `<option value="${escapeHtml(i.value)}">${escapeHtml(i.value)}</option>`).join("") +
@@ -1358,42 +1336,6 @@
 
           if (prev && items.some((i) => i.value === prev)) select.value = prev;
         }
-      }
-    }
-
-    async function handleChainTypeLookupChange(field, select) {
-      if (!select || select.value !== "__add_new__") {
-        if (field === "Gauge" || field === "Pitch") renderEntityTable("chain-types");
-        return;
-      }
-      if (!assertCanWrite("add lookup values")) {
-        select.value = "";
-        return;
-      }
-      const newValue = await promptLookupValue(field);
-      if (!newValue || !newValue.trim()) {
-        select.value = "";
-        return;
-      }
-      const cleanValue = newValue.trim();
-      const current = getLookupItems("chain-types", field);
-      const maxSort = current.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
-
-      try {
-        await api("/admin/lookups", "POST", {
-          field,
-          group: "chain-types",
-          value: cleanValue,
-          active: 1,
-          sort_order: maxSort + 10,
-        });
-        await loadLookups();
-        const target = document.getElementById(fieldInputId("chain-types", field));
-        if (target) target.value = cleanValue;
-        setStatus(`Added new lookup value for ${field}.`, true);
-      } catch (err) {
-        setStatus(err.message, false);
-        select.value = "";
       }
     }
 
@@ -1707,13 +1649,6 @@
       };
     }
 
-    function getChainTypeFilters() {
-      return {
-        gauge: normalizeFilterValue(val(fieldInputId("chain-types", "Gauge"))),
-        pitch: normalizeFilterValue(val(fieldInputId("chain-types", "Pitch"))),
-      };
-    }
-
     function getKmcChainFilters() {
       const out = {};
       for (const field of CHAIN_TYPE_LOOKUP_FIELDS) {
@@ -1739,70 +1674,10 @@
       return required.filter((f) => !toStr(row && row[f]).trim());
     }
 
-    function findDuplicateChainTypeRow(row, existingRows, currentRowNumber) {
-      const fields = [
-        "Gauge",
-        "Pitch",
-        "Chisel Style",
-        "ANSI Low Kickback",
-        "Profile Class",
-        "Kerf Type",
-        "Sequence Type",
-      ];
-      const sig = fields.map((f) => normalizeFilterValue(toStr(row[f]))).join("|");
-      if (!sig || sig === "||||||") return null;
-      return (existingRows || []).find((r) => {
-        if (currentRowNumber && Number(r.__row) === Number(currentRowNumber)) return false;
-        const otherSig = fields.map((f) => normalizeFilterValue(toStr(r[f]))).join("|");
-        return sig === otherSig;
-      }) || null;
-    }
-
     function normalizeFilterValue(value) {
       const v = String(value || "").trim();
       if (!v || v === "__add_new__") return "";
       return v;
-    }
-
-    const CHAIN_TYPE_GAUGE_CODE_MAP = {
-      '.043"': "A",
-      '.050"': "B",
-      '.058"': "C",
-      '.063"': "D",
-    };
-    const CHAIN_TYPE_PITCH_CODE_MAP = {
-      '1/4"': "A",
-      '3/8"': "B",
-      '3/8" LP': "C",
-      '.325"': "D",
-    };
-
-    function generateChainTypeCode(row, existingRows, currentRowNumber) {
-      const gauge = toStr(row["Gauge"]).trim();
-      const pitch = toStr(row["Pitch"]).trim();
-      if (!gauge || !pitch) return "";
-
-      const gaugeLetter = CHAIN_TYPE_GAUGE_CODE_MAP[gauge];
-      const pitchLetter = CHAIN_TYPE_PITCH_CODE_MAP[pitch];
-      if (!gaugeLetter || !pitchLetter) return "";
-      const prefix = `${gaugeLetter}${pitchLetter}`;
-
-      const samePairRows = (existingRows || []).filter((r) => {
-        if (currentRowNumber && Number(r.__row) === Number(currentRowNumber)) return false;
-        return eqNormStr(r["Gauge"], gauge) && eqNormStr(r["Pitch"], pitch);
-      });
-
-      const nums = samePairRows
-        .map((r) => {
-          const code = toStr(r["Chain Type"]).trim().toUpperCase();
-          if (!code.startsWith(prefix)) return 0;
-          const m = code.slice(prefix.length).match(/^\d+$/);
-          return m ? Number(m[0]) : 0;
-        })
-        .filter((n) => Number.isFinite(n) && n > 0);
-
-      const next = (nums.length ? Math.max(...nums) : 0) + 1;
-      return `${prefix}${String(next).padStart(2, "0")}`;
     }
 
     function shouldHighlightFieldState(slug, fieldName) {
