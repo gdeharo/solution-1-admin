@@ -461,7 +461,12 @@ async function api(path, options = {}) {
     data = null;
   }
 
-  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(data?.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
   return data;
 }
 
@@ -2131,6 +2136,40 @@ function bindRepsEvents() {
       const removed = Number.isFinite(Number(result?.removed)) ? Number(result.removed) : 0;
       showToast(`Territory scope saved (added ${created}, removed ${removed})`);
     } catch (error) {
+      if (error?.status === 409) {
+        const conflicts = Array.isArray(error?.data?.conflicts) ? error.data.conflicts : [];
+        const preview = conflicts
+          .slice(0, 5)
+          .map((c) => {
+            const where = c.territoryType === 'state' ? c.state : c.zipExact || c.zipPrefix;
+            return `${c.repName || `Rep #${c.repId}`} • ${c.segment}/${c.customerType} • ${c.territoryType}:${where}`;
+          })
+          .join('\n');
+        const msg = `Conflicts found with existing assignments:\n${preview}${conflicts.length > 5 ? `\n+${conflicts.length - 5} more` : ''}\n\nOverride and save anyway?`;
+        if (!confirm(msg)) return;
+        try {
+          const forced = await api('/api/rep-territories/sync', {
+            method: 'POST',
+            body: JSON.stringify({
+              repId,
+              segments,
+              customerTypes,
+              states,
+              zipCodes,
+              replaceScope: true,
+              allowConflicts: true
+            })
+          });
+          await renderRepsView();
+          const created = Number.isFinite(Number(forced?.created)) ? Number(forced.created) : 0;
+          const removed = Number.isFinite(Number(forced?.removed)) ? Number(forced.removed) : 0;
+          showToast(`Saved with conflicts (added ${created}, removed ${removed})`);
+          return;
+        } catch (forceError) {
+          showToast(forceError.message, true);
+          return;
+        }
+      }
       showToast(error.message, true);
     }
   };

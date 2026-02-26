@@ -1764,6 +1764,7 @@ addRoute(
       states?: string[];
       zipCodes?: string[] | string;
       replaceScope?: boolean;
+      allowConflicts?: boolean;
     }>(request);
     if (!body?.repId) return err('repId is required');
     const segments = uniqueTrimmed(Array.isArray(body.segments) ? body.segments : []);
@@ -1803,6 +1804,196 @@ addRoute(
       }
     }
     if (combos.length === 0) return err('No segment/type combinations selected');
+
+    const includeRules: Array<
+      | { territoryType: 'state'; state: string; segment: string; customerType: string }
+      | { territoryType: 'zip_exact'; zipExact: string; segment: string; customerType: string }
+      | { territoryType: 'zip_prefix'; zipPrefix: string; segment: string; customerType: string }
+    > = [];
+    for (const combo of combos) {
+      for (const state of states) {
+        includeRules.push({ territoryType: 'state', state, segment: combo.segment, customerType: combo.customerType });
+      }
+      for (const zipRow of zipRows) {
+        if (zipRow.isExclusion) continue;
+        if (zipRow.territoryType === 'zip_exact' && zipRow.zipExact) {
+          includeRules.push({
+            territoryType: 'zip_exact',
+            zipExact: zipRow.zipExact,
+            segment: combo.segment,
+            customerType: combo.customerType
+          });
+        }
+        if (zipRow.territoryType === 'zip_prefix' && zipRow.zipPrefix) {
+          includeRules.push({
+            territoryType: 'zip_prefix',
+            zipPrefix: zipRow.zipPrefix,
+            segment: combo.segment,
+            customerType: combo.customerType
+          });
+        }
+      }
+    }
+
+    const conflictMap = new Map<
+      string,
+      {
+        repId: number;
+        repName: string;
+        territoryType: string;
+        state: string | null;
+        zipPrefix: string | null;
+        zipExact: string | null;
+        segment: string;
+        customerType: string;
+      }
+    >();
+    for (const rule of includeRules) {
+      if (rule.territoryType === 'state') {
+        const rows = await env.CRM_DB.prepare(
+          `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
+                  t.segment, t.customer_type
+           FROM rep_territories t
+           LEFT JOIN reps r ON r.id = t.rep_id
+           WHERE t.rep_id <> ?1
+             AND t.is_exclusion = 0
+             AND t.territory_type = 'state'
+             AND t.segment = ?2
+             AND t.customer_type = ?3
+             AND upper(trim(coalesce(t.state, ''))) = upper(trim(?4))`
+        )
+          .bind(body.repId, rule.segment, rule.customerType, rule.state)
+          .all<{
+            rep_id: number;
+            rep_name: string;
+            territory_type: string;
+            state: string | null;
+            zip_prefix: string | null;
+            zip_exact: string | null;
+            segment: string;
+            customer_type: string;
+          }>();
+        for (const row of rows.results || []) {
+          const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
+          conflictMap.set(key, {
+            repId: row.rep_id,
+            repName: row.rep_name,
+            territoryType: row.territory_type,
+            state: row.state,
+            zipPrefix: row.zip_prefix,
+            zipExact: row.zip_exact,
+            segment: row.segment,
+            customerType: row.customer_type
+          });
+        }
+      }
+      if (rule.territoryType === 'zip_exact') {
+        const rows = await env.CRM_DB.prepare(
+          `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
+                  t.segment, t.customer_type
+           FROM rep_territories t
+           LEFT JOIN reps r ON r.id = t.rep_id
+           WHERE t.rep_id <> ?1
+             AND t.is_exclusion = 0
+             AND t.segment = ?2
+             AND t.customer_type = ?3
+             AND (
+               (t.territory_type = 'zip_exact'
+                 AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') =
+                     replace(replace(upper(trim(?4)), '-', ''), ' ', ''))
+               OR
+               (t.territory_type = 'zip_prefix'
+                 AND trim(coalesce(t.zip_prefix, '')) <> ''
+                 AND replace(replace(upper(trim(?4)), '-', ''), ' ', '') LIKE
+                     (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+             )`
+        )
+          .bind(body.repId, rule.segment, rule.customerType, rule.zipExact)
+          .all<{
+            rep_id: number;
+            rep_name: string;
+            territory_type: string;
+            state: string | null;
+            zip_prefix: string | null;
+            zip_exact: string | null;
+            segment: string;
+            customer_type: string;
+          }>();
+        for (const row of rows.results || []) {
+          const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
+          conflictMap.set(key, {
+            repId: row.rep_id,
+            repName: row.rep_name,
+            territoryType: row.territory_type,
+            state: row.state,
+            zipPrefix: row.zip_prefix,
+            zipExact: row.zip_exact,
+            segment: row.segment,
+            customerType: row.customer_type
+          });
+        }
+      }
+      if (rule.territoryType === 'zip_prefix') {
+        const rows = await env.CRM_DB.prepare(
+          `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
+                  t.segment, t.customer_type
+           FROM rep_territories t
+           LEFT JOIN reps r ON r.id = t.rep_id
+           WHERE t.rep_id <> ?1
+             AND t.is_exclusion = 0
+             AND t.segment = ?2
+             AND t.customer_type = ?3
+             AND (
+               (t.territory_type = 'zip_exact'
+                 AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') LIKE
+                     (replace(replace(upper(trim(?4)), '-', ''), ' ', '') || '%'))
+               OR
+               (t.territory_type = 'zip_prefix'
+                 AND (
+                   replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') LIKE
+                     (replace(replace(upper(trim(?4)), '-', ''), ' ', '') || '%')
+                   OR
+                   replace(replace(upper(trim(?4)), '-', ''), ' ', '') LIKE
+                     (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%')
+                 ))
+             )`
+        )
+          .bind(body.repId, rule.segment, rule.customerType, rule.zipPrefix)
+          .all<{
+            rep_id: number;
+            rep_name: string;
+            territory_type: string;
+            state: string | null;
+            zip_prefix: string | null;
+            zip_exact: string | null;
+            segment: string;
+            customer_type: string;
+          }>();
+        for (const row of rows.results || []) {
+          const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
+          conflictMap.set(key, {
+            repId: row.rep_id,
+            repName: row.rep_name,
+            territoryType: row.territory_type,
+            state: row.state,
+            zipPrefix: row.zip_prefix,
+            zipExact: row.zip_exact,
+            segment: row.segment,
+            customerType: row.customer_type
+          });
+        }
+      }
+    }
+
+    if (conflictMap.size > 0 && !body.allowConflicts) {
+      return json(
+        {
+          error: 'Territory conflicts found with existing assignments.',
+          conflicts: Array.from(conflictMap.values())
+        },
+        409
+      );
+    }
 
     const replaceScope = body.replaceScope !== false;
     let removed = 0;
