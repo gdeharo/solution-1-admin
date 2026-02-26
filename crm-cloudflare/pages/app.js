@@ -1785,7 +1785,7 @@ async function renderRepsView() {
       <div class="field-group">
         <strong>Zip Rules</strong>
         <textarea name="zipCodes" rows="2" placeholder="901, 90210, -905, -98"></textarea>
-        <p class="tiny">Use commas/new lines. Prefix with `-` to exclude. Allowed: 1-3 digit prefix or 5-digit zip.</p>
+        <p class="tiny">Use commas/new lines. Prefix with '-' to exclude. Allowed: 1-3 digit prefix or 5-digit zip.</p>
       </div>
       <div class="row wrap">
         <button type="submit">Save Territory Scope</button>
