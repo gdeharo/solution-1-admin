@@ -141,11 +141,14 @@ function escapeHtml(value) {
 }
 
 function territoryRuleText(item) {
+  const rawZip = String(item.zip_prefix || item.zip_exact || '').trim();
+  const zipDigits = rawZip.replace(/\D/g, '');
+  const zipScope = zipDigits ? zipDigits : '-';
   const scope = item.territory_type === 'city_state'
     ? `${item.city || ''}, ${item.state || ''}`.replace(/^,\s*/, '').trim()
     : item.territory_type === 'state'
       ? (item.state || '')
-      : (item.zip_prefix || item.zip_exact || '');
+      : zipScope;
   const core = `${item.territory_type}${item.is_exclusion ? ' (exclude)' : ''}: ${scope || '-'}`;
   const filters = `${item.segment || 'All Segments'} / ${item.customer_type || 'All Types'}`;
   return `${core} | ${filters}`;

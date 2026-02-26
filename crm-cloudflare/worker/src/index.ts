@@ -1620,13 +1620,25 @@ addRoute(
       const values = [...parseZipEntries(body.zipPrefixes), ...parseZipEntries(body.zipPrefix)];
       const deduped = Array.from(new Map(values.map((item) => [`${item.value}|${item.isExclusion ? 1 : 0}`, item])).values());
       if (deduped.length === 0) return err('Provide at least one zip prefix');
-      for (const item of deduped) rows.push({ zipPrefix: item.value, isExclusion: item.isExclusion || defaultExclusion });
+      for (const item of deduped) {
+        const digits = item.value.replace(/\D/g, '');
+        if (![1, 2, 3].includes(digits.length)) {
+          return err(`Invalid zip prefix: ${item.isExclusion ? '-' : ''}${item.value}. Use 1-3 digits.`);
+        }
+        rows.push({ zipPrefix: digits, isExclusion: item.isExclusion || defaultExclusion });
+      }
     }
     if (body.territoryType === 'zip_exact') {
       const values = [...parseZipEntries(body.zipExacts), ...parseZipEntries(body.zipExact)];
       const deduped = Array.from(new Map(values.map((item) => [`${item.value}|${item.isExclusion ? 1 : 0}`, item])).values());
       if (deduped.length === 0) return err('Provide at least one exact zip');
-      for (const item of deduped) rows.push({ zipExact: item.value, isExclusion: item.isExclusion || defaultExclusion });
+      for (const item of deduped) {
+        const digits = item.value.replace(/\D/g, '');
+        if (digits.length !== 5) {
+          return err(`Invalid exact zip: ${item.isExclusion ? '-' : ''}${item.value}. Use exactly 5 digits.`);
+        }
+        rows.push({ zipExact: digits, isExclusion: item.isExclusion || defaultExclusion });
+      }
     }
     if (body.territoryType === 'city_state') {
       const cityStates: Array<{ city: string; state: string }> = [];
