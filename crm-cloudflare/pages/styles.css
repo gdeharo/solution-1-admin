@@ -208,6 +208,36 @@ tr.clickable:hover {
   padding: 0.4rem 0;
 }
 
+.compact-list {
+  margin-top: 0.35rem;
+}
+
+.compact-list li {
+  padding: 0.22rem 0;
+}
+
+.tiny {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.territory-cell {
+  max-width: 380px;
+}
+
+.territory-snippet {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  max-width: 100%;
+}
+
+.territory-exclude {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .hidden {
   display: none !important;
 }

@@ -140,6 +140,23 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
+function territoryRuleText(item) {
+  const scope = item.territory_type === 'city_state'
+    ? `${item.city || ''}, ${item.state || ''}`.replace(/^,\s*/, '').trim()
+    : item.territory_type === 'state'
+      ? (item.state || '')
+      : (item.zip_prefix || item.zip_exact || '');
+  const core = `${item.territory_type}${item.is_exclusion ? ' (exclude)' : ''}: ${scope || '-'}`;
+  const filters = `${item.segment || 'All Segments'} / ${item.customer_type || 'All Types'}`;
+  return `${core} | ${filters}`;
+}
+
+function territoryRuleHtml(item, includeClass = true) {
+  const text = territoryRuleText(item);
+  const className = includeClass && item.is_exclusion ? 'territory-snippet territory-exclude' : 'territory-snippet';
+  return `<span class="${className}">${escapeHtml(text)}</span>`;
+}
+
 function companyAddressText(company) {
   return [company.address, company.city, company.state, company.zip, company.country].filter(Boolean).join(', ');
 }
@@ -1673,13 +1690,18 @@ async function renderRepsView() {
     .map((rep) => {
       const companies = state.repAssignments.filter((a) => a.rep_id === rep.id).map((a) => a.company_name);
       const territories = state.repTerritories.filter((t) => t.rep_id === rep.id);
+      const territoryPreview = territories.slice(0, 2).map((item) => territoryRuleHtml(item)).join('');
+      const territoryMore = territories.length > 2 ? `<div class="tiny">+${territories.length - 2} more</div>` : '';
       return `<tr class="clickable" data-open-rep-detail="${rep.id}">
         <td>${escapeHtml(rep.full_name)}</td>
         <td>${escapeHtml(rep.email || '')}</td>
         <td>${escapeHtml(rep.phone || '')}</td>
         <td>${rep.last_entry_at ? new Date(rep.last_entry_at).toLocaleDateString() : '-'}</td>
         <td>${escapeHtml(companies.join(', ') || '-')}</td>
-        <td><button class="ghost" data-show-territories="${rep.id}">Show (${territories.length})</button></td>
+        <td class="territory-cell">
+          ${territories.length ? `${territoryPreview}${territoryMore}` : '<span class="tiny">No territories assigned</span>'}
+          <div><button class="ghost" data-show-territories="${rep.id}">View Rules (${territories.length})</button></div>
+        </td>
       </tr>`;
     })
     .join('');
@@ -1900,9 +1922,7 @@ function bindRepsEvents() {
       document.getElementById('territoryList').innerHTML = items
         .map(
           (item) => `<li>
-            <span>${escapeHtml(item.territory_type)}${item.is_exclusion ? ' (exclude)' : ''} | ${escapeHtml(item.city || '')} ${escapeHtml(item.state || '')} ${escapeHtml(
-              item.is_exclusion ? `-${item.zip_prefix || item.zip_exact || ''}` : item.zip_prefix || item.zip_exact || ''
-            )} | ${escapeHtml(item.segment || 'All Segments')} | ${escapeHtml(item.customer_type || 'All Types')}</span>
+            ${territoryRuleHtml(item)}
             <button class="danger" data-delete-territory="${item.id}">Delete</button>
           </li>`
         )
@@ -2169,7 +2189,11 @@ function bindRepsEvents() {
 function openRepAccounts(repId) {
   const rep = state.reps.find((r) => r.id === repId);
   const companies = state.repAssignments.filter((a) => a.rep_id === repId);
+  const territories = state.repTerritories.filter((t) => t.rep_id === repId);
   document.getElementById('repAccountsTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
+  document.getElementById('repTerritorySummary').innerHTML = territories.length
+    ? territories.map((item) => `<li>${territoryRuleHtml(item)}</li>`).join('')
+    : '<li class="tiny">No territories assigned</li>';
   document.getElementById('repAccountsBody').innerHTML = companies.length
     ? companies
         .map(
