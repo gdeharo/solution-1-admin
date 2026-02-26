@@ -157,6 +157,11 @@ function territoryRuleHtml(item, includeClass = true) {
   return `<span class="${className}">${escapeHtml(text)}</span>`;
 }
 
+function toPositiveInt(value) {
+  const n = Number.parseInt(String(value ?? '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function stateCheckboxGridHtml(fieldName, states) {
   return `<div class="state-grid">${states
     .map(
@@ -1724,7 +1729,13 @@ async function renderRepsView() {
           <span class="sr-only">Rep</span>
           <select name="repId" required>
             <option value="">Rep</option>
-            ${state.reps.map((rep) => `<option value="${rep.id}">${escapeHtml(rep.full_name)}</option>`).join('')}
+            ${state.reps
+              .map((rep) => {
+                const repId = toPositiveInt(rep.id);
+                if (!repId) return '';
+                return `<option value="${repId}">${escapeHtml(rep.full_name)}</option>`;
+              })
+              .join('')}
           </select>
         </label>
         <button type="button" class="ghost" id="loadTerritoryScopeBtn">Load Current</button>
@@ -1986,8 +1997,12 @@ function bindRepsEvents() {
   const zipCodesEl = territoryForm.querySelector('[name="zipCodes"]');
   if (!repSelectEl || !zipCodesEl) return;
   const renderTerritoryList = (repId, segments, customerTypes) => {
+    if (!repId) {
+      document.getElementById('territoryList').innerHTML = '<li class="tiny">Select a rep to view rules.</li>';
+      return;
+    }
     const items = state.repTerritories.filter((t) => {
-      if (t.rep_id !== repId) return false;
+      if (toPositiveInt(t.rep_id) !== repId) return false;
       if (segments.length > 0 && !segments.includes(t.segment || '')) return false;
       if (customerTypes.length > 0 && !customerTypes.includes(t.customer_type || '')) return false;
       return true;
@@ -2019,11 +2034,11 @@ function bindRepsEvents() {
     Array.from(territoryForm.querySelectorAll(`input[name="${fieldName}"]:checked`)).map((el) => el.value);
 
   const loadTerritoryScope = () => {
-    const repId = Number(territoryForm.querySelector('[name="repId"]').value);
+    const repId = toPositiveInt(repSelectEl.value);
     if (!repId) return;
     let segments = getCheckedValues('segments');
     let customerTypes = getCheckedValues('customerTypes');
-    let scoped = state.repTerritories.filter((t) => t.rep_id === repId);
+    let scoped = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
     if (segments.length > 0) scoped = scoped.filter((t) => segments.includes(t.segment || ''));
     if (customerTypes.length > 0) scoped = scoped.filter((t) => customerTypes.includes(t.customer_type || ''));
 
@@ -2067,7 +2082,7 @@ function bindRepsEvents() {
       el.checked = false;
     });
     zipCodesEl.value = '';
-    const repId = Number(repSelectEl.value);
+    const repId = toPositiveInt(repSelectEl.value);
     if (repId) {
       renderTerritoryList(repId, [], []);
     } else {
@@ -2077,7 +2092,7 @@ function bindRepsEvents() {
 
   territoryForm.onsubmit = async (event) => {
     event.preventDefault();
-    const repId = Number(repSelectEl.value);
+    const repId = toPositiveInt(repSelectEl.value);
     const segments = getCheckedValues('segments');
     const customerTypes = getCheckedValues('customerTypes');
     const states = getCheckedValues('states');
@@ -2103,7 +2118,9 @@ function bindRepsEvents() {
         })
       });
       await renderRepsView();
-      showToast(`Territory scope saved (added ${result.created}, removed ${result.removed})`);
+      const created = Number.isFinite(Number(result?.created)) ? Number(result.created) : 0;
+      const removed = Number.isFinite(Number(result?.removed)) ? Number(result.removed) : 0;
+      showToast(`Territory scope saved (added ${created}, removed ${removed})`);
     } catch (error) {
       showToast(error.message, true);
     }
