@@ -1981,6 +1981,10 @@ function bindRepsEvents() {
   });
 
   const territoryForm = document.getElementById('territoryForm');
+  if (!territoryForm) return;
+  const repSelectEl = territoryForm.querySelector('[name="repId"]');
+  const zipCodesEl = territoryForm.querySelector('[name="zipCodes"]');
+  if (!repSelectEl || !zipCodesEl) return;
   const renderTerritoryList = (repId, segments, customerTypes) => {
     const items = state.repTerritories.filter((t) => {
       if (t.rep_id !== repId) return false;
@@ -2058,12 +2062,12 @@ function bindRepsEvents() {
   const loadBtn = territoryForm.querySelector('#loadTerritoryScopeBtn');
   if (loadBtn) loadBtn.onclick = loadTerritoryScope;
 
-  territoryForm.querySelector('[name="repId"]').onchange = () => {
+  repSelectEl.onchange = () => {
     territoryForm.querySelectorAll('input[name="states"], input[name="segments"], input[name="customerTypes"]').forEach((el) => {
       el.checked = false;
     });
-    territoryForm.querySelector('[name="zipCodes"]').value = '';
-    const repId = Number(territoryForm.querySelector('[name="repId"]').value);
+    zipCodesEl.value = '';
+    const repId = Number(repSelectEl.value);
     if (repId) {
       renderTerritoryList(repId, [], []);
     } else {
@@ -2073,11 +2077,11 @@ function bindRepsEvents() {
 
   territoryForm.onsubmit = async (event) => {
     event.preventDefault();
-    const repId = Number(territoryForm.querySelector('[name="repId"]').value);
+    const repId = Number(repSelectEl.value);
     const segments = getCheckedValues('segments');
     const customerTypes = getCheckedValues('customerTypes');
     const states = getCheckedValues('states');
-    const zipCodes = String(territoryForm.querySelector('[name="zipCodes"]').value || '');
+    const zipCodes = String(zipCodesEl.value || '');
     if (!repId) {
       showToast('Select a rep first', true);
       return;
