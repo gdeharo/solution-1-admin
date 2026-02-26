@@ -157,6 +157,17 @@ function territoryRuleHtml(item, includeClass = true) {
   return `<span class="${className}">${escapeHtml(text)}</span>`;
 }
 
+function stateCheckboxGridHtml(fieldName, states) {
+  return `<div class="state-grid">${states
+    .map(
+      (code) => `<label class="state-chip">
+      <input type="checkbox" name="${fieldName}" value="${code}" />
+      <span>${code}</span>
+    </label>`
+    )
+    .join('')}</div>`;
+}
+
 function companyAddressText(company) {
   return [company.address, company.city, company.state, company.zip, company.country].filter(Boolean).join(', ');
 }
@@ -1707,33 +1718,60 @@ async function renderRepsView() {
     .join('');
 
   document.getElementById('territoryForm').innerHTML = `
-    <select name="repId" required>
-      <option value="">Rep</option>
-      ${state.reps.map((rep) => `<option value="${rep.id}">${escapeHtml(rep.full_name)}</option>`).join('')}
-    </select>
-    <select name="segment">
-      <option value="">All Segments</option>
-      ${state.segments.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
-    </select>
-    <select name="customerType">
-      <option value="">All Types</option>
-      ${state.customerTypes.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}
-    </select>
-    <select name="territoryType" required>
-      <option value="state">State</option>
-      <option value="city_state">City + State</option>
-      <option value="zip_prefix">Zip Prefix</option>
-      <option value="zip_exact">Zip Exact</option>
-    </select>
-    <textarea name="bulkValues" rows="2" placeholder="Bulk values (comma/new line). Use -prefix or -zip to exclude."></textarea>
-    <select name="state">
-      <option value="">State/Province</option>
-      ${TERRITORY_STATE_OPTIONS.map(([code, name]) => `<option value="${code}">${code} - ${name}</option>`).join('')}
-    </select>
-    <input name="city" placeholder="City" />
-    <input name="zipPrefix" placeholder="Zip prefix (e.g. 901 or -901)" />
-    <input name="zipExact" placeholder="Zip exact (e.g. 90210 or -90210)" />
-    <button type="submit">Add Territory</button>
+    <div class="full territory-editor">
+      <div class="row wrap">
+        <label>
+          <span class="sr-only">Rep</span>
+          <select name="repId" required>
+            <option value="">Rep</option>
+            ${state.reps.map((rep) => `<option value="${rep.id}">${escapeHtml(rep.full_name)}</option>`).join('')}
+          </select>
+        </label>
+        <button type="button" class="ghost" id="loadTerritoryScopeBtn">Load Current</button>
+      </div>
+      <div class="field-group">
+        <strong>Type</strong>
+        <div class="row wrap">
+          ${state.customerTypes
+            .map(
+              (name) => `<label class="state-chip">
+            <input type="checkbox" name="customerTypes" value="${escapeHtml(name)}" />
+            <span>${escapeHtml(name)}</span>
+          </label>`
+            )
+            .join('')}
+        </div>
+      </div>
+      <div class="field-group">
+        <strong>Segment</strong>
+        <div class="row wrap">
+          ${state.segments
+            .map(
+              (name) => `<label class="state-chip">
+            <input type="checkbox" name="segments" value="${escapeHtml(name)}" />
+            <span>${escapeHtml(name)}</span>
+          </label>`
+            )
+            .join('')}
+        </div>
+      </div>
+      <div class="field-group">
+        <strong>USA States</strong>
+        ${stateCheckboxGridHtml('states', US_STATES)}
+      </div>
+      <div class="field-group">
+        <strong>Canada Provinces</strong>
+        ${stateCheckboxGridHtml('states', CA_PROVINCES)}
+      </div>
+      <div class="field-group">
+        <strong>Zip Rules</strong>
+        <textarea name="zipCodes" rows="2" placeholder="901, 90210, -905, -98"></textarea>
+        <p class="tiny">Use commas/new lines. Prefix with `-` to exclude. Allowed: 1-3 digit prefix or 5-digit zip.</p>
+      </div>
+      <div class="row wrap">
+        <button type="submit">Save Territory Scope</button>
+      </div>
+    </div>
   `;
 
   document.getElementById('segmentValueForm').innerHTML = `
@@ -1943,53 +1981,125 @@ function bindRepsEvents() {
   });
 
   const territoryForm = document.getElementById('territoryForm');
+  const renderTerritoryList = (repId, segments, customerTypes) => {
+    const items = state.repTerritories.filter((t) => {
+      if (t.rep_id !== repId) return false;
+      if (segments.length > 0 && !segments.includes(t.segment || '')) return false;
+      if (customerTypes.length > 0 && !customerTypes.includes(t.customer_type || '')) return false;
+      return true;
+    });
+    document.getElementById('territoryList').innerHTML = items.length
+      ? items
+          .map(
+            (item) => `<li>
+              ${territoryRuleHtml(item)}
+              <button class="danger" data-delete-territory="${item.id}">Delete</button>
+            </li>`
+          )
+          .join('')
+      : '<li class="tiny">No matching territory rules for current selection.</li>';
+    document.querySelectorAll('[data-delete-territory]').forEach((delBtn) => {
+      delBtn.onclick = async () => {
+        try {
+          await api(`/api/rep-territories/${Number(delBtn.dataset.deleteTerritory)}`, { method: 'DELETE' });
+          await renderRepsView();
+          showToast('Territory removed');
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      };
+    });
+  };
+
+  const getCheckedValues = (fieldName) =>
+    Array.from(territoryForm.querySelectorAll(`input[name="${fieldName}"]:checked`)).map((el) => el.value);
+
+  const loadTerritoryScope = () => {
+    const repId = Number(territoryForm.querySelector('[name="repId"]').value);
+    if (!repId) return;
+    let segments = getCheckedValues('segments');
+    let customerTypes = getCheckedValues('customerTypes');
+    let scoped = state.repTerritories.filter((t) => t.rep_id === repId);
+    if (segments.length > 0) scoped = scoped.filter((t) => segments.includes(t.segment || ''));
+    if (customerTypes.length > 0) scoped = scoped.filter((t) => customerTypes.includes(t.customer_type || ''));
+
+    if (segments.length === 0) {
+      segments = Array.from(new Set(scoped.map((t) => t.segment).filter(Boolean)));
+      territoryForm.querySelectorAll('input[name="segments"]').forEach((el) => {
+        el.checked = segments.includes(el.value);
+      });
+    }
+    if (customerTypes.length === 0) {
+      customerTypes = Array.from(new Set(scoped.map((t) => t.customer_type).filter(Boolean)));
+      territoryForm.querySelectorAll('input[name="customerTypes"]').forEach((el) => {
+        el.checked = customerTypes.includes(el.value);
+      });
+    }
+
+    const stateIncludes = Array.from(
+      new Set(scoped.filter((t) => t.territory_type === 'state' && !t.is_exclusion).map((t) => (t.state || '').toUpperCase()).filter(Boolean))
+    );
+    territoryForm.querySelectorAll('input[name="states"]').forEach((el) => {
+      el.checked = stateIncludes.includes(el.value.toUpperCase());
+    });
+
+    const zipTokens = Array.from(
+      new Set(
+        scoped
+          .filter((t) => t.territory_type === 'zip_prefix' || t.territory_type === 'zip_exact')
+          .map((t) => `${t.is_exclusion ? '-' : ''}${t.zip_prefix || t.zip_exact || ''}`)
+          .filter(Boolean)
+      )
+    );
+    territoryForm.querySelector('[name="zipCodes"]').value = zipTokens.join(', ');
+    renderTerritoryList(repId, segments, customerTypes);
+  };
+
+  const loadBtn = territoryForm.querySelector('#loadTerritoryScopeBtn');
+  if (loadBtn) loadBtn.onclick = loadTerritoryScope;
+
+  territoryForm.querySelector('[name="repId"]').onchange = () => {
+    territoryForm.querySelectorAll('input[name="states"], input[name="segments"], input[name="customerTypes"]').forEach((el) => {
+      el.checked = false;
+    });
+    territoryForm.querySelector('[name="zipCodes"]').value = '';
+    const repId = Number(territoryForm.querySelector('[name="repId"]').value);
+    if (repId) {
+      renderTerritoryList(repId, [], []);
+    } else {
+      document.getElementById('territoryList').innerHTML = '';
+    }
+  };
+
   territoryForm.onsubmit = async (event) => {
     event.preventDefault();
-    const fd = new FormData(territoryForm);
-    const territoryType = String(fd.get('territoryType') || '');
-    const bulkRaw = String(fd.get('bulkValues') || '')
-      .split(/[\n,]/g)
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const payload = {
-      repId: Number(fd.get('repId')),
-      territoryType,
-      state: fd.get('state'),
-      city: fd.get('city'),
-      zipPrefix: fd.get('zipPrefix'),
-      zipExact: fd.get('zipExact'),
-      segment: fd.get('segment'),
-      customerType: fd.get('customerType')
-    };
-    if (bulkRaw.length > 0) {
-      if (territoryType === 'state') payload.states = bulkRaw;
-      if (territoryType === 'zip_prefix') payload.zipPrefixes = bulkRaw;
-      if (territoryType === 'zip_exact') payload.zipExacts = bulkRaw;
-      if (territoryType === 'city_state') payload.cityStates = bulkRaw
-        .map((entry) => {
-          const parts = entry.split(',').map((x) => x.trim());
-          if (parts.length < 2) return null;
-          const state = parts.pop();
-          const city = parts.join(', ');
-          if (!city || !state) return null;
-          return { city, state };
-        })
-        .filter(Boolean);
+    const repId = Number(territoryForm.querySelector('[name="repId"]').value);
+    const segments = getCheckedValues('segments');
+    const customerTypes = getCheckedValues('customerTypes');
+    const states = getCheckedValues('states');
+    const zipCodes = String(territoryForm.querySelector('[name="zipCodes"]').value || '');
+    if (!repId) {
+      showToast('Select a rep first', true);
+      return;
+    }
+    if (segments.length === 0 || customerTypes.length === 0) {
+      showToast('Select at least one segment and one type', true);
+      return;
     }
     try {
-      const result = await api('/api/rep-territories', {
+      const result = await api('/api/rep-territories/sync', {
         method: 'POST',
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          repId,
+          segments,
+          customerTypes,
+          states,
+          zipCodes,
+          replaceScope: true
+        })
       });
-      territoryForm.reset();
       await renderRepsView();
-      if (result?.created > 0 && result?.skipped > 0) {
-        showToast(`Territory added (${result.created}), skipped duplicates (${result.skipped})`);
-      } else if (result?.created > 0) {
-        showToast(`Territory added (${result.created})`);
-      } else {
-        showToast('No new territory rows added (duplicates only)');
-      }
+      showToast(`Territory scope saved (added ${result.created}, removed ${result.removed})`);
     } catch (error) {
       showToast(error.message, true);
     }

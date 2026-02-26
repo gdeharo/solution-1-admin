@@ -238,6 +238,51 @@ tr.clickable:hover {
   font-weight: 600;
 }
 
+.territory-editor {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.field-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem;
+}
+
+.field-group > strong {
+  display: block;
+  margin-bottom: 0.28rem;
+}
+
+.state-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(52px, 1fr));
+  gap: 0.25rem;
+}
+
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.18rem 0.3rem;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.state-chip input {
+  margin: 0;
+}
+
+.state-chip:has(input:checked) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
 .hidden {
   display: none !important;
 }

@@ -235,6 +235,10 @@ function territoryRuleKey(input: {
   ].join('|');
 }
 
+function uniqueTrimmed(values: unknown[]): string[] {
+  return Array.from(new Set(values.map((value) => normalizedText(String(value))).filter(Boolean)));
+}
+
 function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: number): string {
   const includeClause = `EXISTS (
     SELECT 1
@@ -1733,6 +1737,190 @@ addRoute(
       skippedRows: rows.length - newRows.length
     });
     return json({ created: newRows.length, skipped: rows.length - newRows.length }, 201);
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/rep-territories\/sync$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const body = await parseJson<{
+      repId: number;
+      segments: string[];
+      customerTypes: string[];
+      states?: string[];
+      zipCodes?: string[] | string;
+      replaceScope?: boolean;
+    }>(request);
+    if (!body?.repId) return err('repId is required');
+    const segments = uniqueTrimmed(Array.isArray(body.segments) ? body.segments : []);
+    const customerTypes = uniqueTrimmed(Array.isArray(body.customerTypes) ? body.customerTypes : []);
+    if (segments.length === 0 || customerTypes.length === 0) {
+      return err('At least one segment and one type are required');
+    }
+    for (const segment of segments) {
+      const metadataError = await ensureSegmentAndTypeExist(env, segment, null);
+      if (metadataError) return err(metadataError);
+    }
+    for (const customerType of customerTypes) {
+      const metadataError = await ensureSegmentAndTypeExist(env, null, customerType);
+      if (metadataError) return err(metadataError);
+    }
+
+    const states = uniqueTrimmed(Array.isArray(body.states) ? body.states : []).map((state) => state.toUpperCase());
+    const zipTokens = [...parseZipEntries(body.zipCodes)];
+    const zipRows: Array<{ territoryType: 'zip_prefix' | 'zip_exact'; zipPrefix: string | null; zipExact: string | null; isExclusion: boolean }> = [];
+    for (const token of zipTokens) {
+      const digits = token.value.replace(/\D/g, '');
+      if (![1, 2, 3, 5].includes(digits.length)) {
+        return err(`Invalid zip token: ${token.isExclusion ? '-' : ''}${token.value}. Use 1-3 digits prefix or 5 digits exact.`);
+      }
+      zipRows.push({
+        territoryType: digits.length === 5 ? 'zip_exact' : 'zip_prefix',
+        zipPrefix: digits.length === 5 ? null : digits,
+        zipExact: digits.length === 5 ? digits : null,
+        isExclusion: token.isExclusion
+      });
+    }
+
+    const combos: Array<{ segment: string; customerType: string }> = [];
+    for (const segment of segments) {
+      for (const customerType of customerTypes) {
+        combos.push({ segment, customerType });
+      }
+    }
+    if (combos.length === 0) return err('No segment/type combinations selected');
+
+    const replaceScope = body.replaceScope !== false;
+    let removed = 0;
+    if (replaceScope) {
+      for (const combo of combos) {
+        const result = await env.CRM_DB.prepare(
+          `DELETE FROM rep_territories
+           WHERE rep_id = ?1
+             AND segment = ?2
+             AND customer_type = ?3
+             AND territory_type IN ('state', 'zip_prefix', 'zip_exact')`
+        )
+          .bind(body.repId, combo.segment, combo.customerType)
+          .run();
+        removed += Number(result.meta.changes || 0);
+      }
+    }
+
+    const existingRows = await env.CRM_DB.prepare(
+      `SELECT territory_type, state, city, zip_prefix, zip_exact, segment, customer_type, is_exclusion
+       FROM rep_territories
+       WHERE rep_id = ?1`
+    )
+      .bind(body.repId)
+      .all<{
+        territory_type: string;
+        state: string | null;
+        city: string | null;
+        zip_prefix: string | null;
+        zip_exact: string | null;
+        segment: string | null;
+        customer_type: string | null;
+        is_exclusion: number;
+      }>();
+    const existingKeys = new Set(
+      (existingRows.results || []).map((row) =>
+        territoryRuleKey({
+          territoryType: row.territory_type,
+          state: row.state,
+          city: row.city,
+          zipPrefix: row.zip_prefix,
+          zipExact: row.zip_exact,
+          segment: row.segment,
+          customerType: row.customer_type,
+          isExclusion: row.is_exclusion
+        })
+      )
+    );
+
+    const newRows: Array<{
+      territoryType: 'state' | 'zip_prefix' | 'zip_exact';
+      state?: string | null;
+      zipPrefix?: string | null;
+      zipExact?: string | null;
+      segment: string;
+      customerType: string;
+      isExclusion: boolean;
+    }> = [];
+    for (const combo of combos) {
+      for (const state of states) {
+        const key = territoryRuleKey({
+          territoryType: 'state',
+          state,
+          segment: combo.segment,
+          customerType: combo.customerType,
+          isExclusion: false
+        });
+        if (existingKeys.has(key)) continue;
+        existingKeys.add(key);
+        newRows.push({
+          territoryType: 'state',
+          state,
+          segment: combo.segment,
+          customerType: combo.customerType,
+          isExclusion: false
+        });
+      }
+      for (const zipRow of zipRows) {
+        const key = territoryRuleKey({
+          territoryType: zipRow.territoryType,
+          zipPrefix: zipRow.zipPrefix,
+          zipExact: zipRow.zipExact,
+          segment: combo.segment,
+          customerType: combo.customerType,
+          isExclusion: zipRow.isExclusion
+        });
+        if (existingKeys.has(key)) continue;
+        existingKeys.add(key);
+        newRows.push({
+          territoryType: zipRow.territoryType as 'zip_prefix' | 'zip_exact',
+          zipPrefix: zipRow.zipPrefix,
+          zipExact: zipRow.zipExact,
+          segment: combo.segment,
+          customerType: combo.customerType,
+          isExclusion: zipRow.isExclusion
+        });
+      }
+    }
+
+    if (newRows.length > 0) {
+      const insert = env.CRM_DB.prepare(
+        `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact, segment, customer_type, is_exclusion)
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8)`
+      );
+      await env.CRM_DB.batch(
+        newRows.map((row) =>
+          insert.bind(
+            body.repId,
+            row.territoryType,
+            row.state ?? null,
+            row.zipPrefix ?? null,
+            row.zipExact ?? null,
+            row.segment,
+            row.customerType,
+            row.isExclusion ? 1 : 0
+          )
+        )
+      );
+    }
+
+    await audit(env, user, 'sync', 'rep_territory', String(body.repId), {
+      segments,
+      customerTypes,
+      states,
+      zipCodes: body.zipCodes,
+      replaceScope,
+      createdRows: newRows.length,
+      removedRows: removed
+    });
+    return json({ created: newRows.length, removed, combos: combos.length });
   }) as any
 );
 
