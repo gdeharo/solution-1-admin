@@ -141,15 +141,17 @@ function escapeHtml(value) {
 }
 
 function territoryRuleText(item) {
+  const typeRaw = String(item.territory_type || '').trim();
+  const type = ['state', 'city_state', 'zip_prefix', 'zip_exact'].includes(typeRaw) ? typeRaw : 'state';
   const rawZip = String(item.zip_prefix || item.zip_exact || '').trim();
   const zipDigits = rawZip.replace(/\D/g, '');
   const zipScope = zipDigits ? zipDigits : '-';
-  const scope = item.territory_type === 'city_state'
+  const scope = type === 'city_state'
     ? `${item.city || ''}, ${item.state || ''}`.replace(/^,\s*/, '').trim()
-    : item.territory_type === 'state'
+    : type === 'state'
       ? (item.state || '')
       : zipScope;
-  const core = `${item.territory_type}${item.is_exclusion ? ' (exclude)' : ''}: ${scope || '-'}`;
+  const core = `${type}${item.is_exclusion ? ' (exclude)' : ''}: ${scope || '-'}`;
   const filters = `${item.segment || 'All Segments'} / ${item.customer_type || 'All Types'}`;
   return `${core} | ${filters}`;
 }
@@ -1652,9 +1654,9 @@ async function openInteractionDetail(interactionId) {
 
 async function renderRepsView() {
   const data = await api('/api/reps/with-assignments');
-  state.reps = data.reps;
-  state.repAssignments = data.assignments;
-  state.repTerritories = data.territories;
+  state.reps = Array.isArray(data.reps) ? data.reps : [];
+  state.repAssignments = Array.isArray(data.assignments) ? data.assignments : [];
+  state.repTerritories = Array.isArray(data.territories) ? data.territories : [];
   const isAdmin = state.user?.role === 'admin';
   let users = [];
   if (isAdmin) {
@@ -1709,10 +1711,11 @@ async function renderRepsView() {
     .map((rep) => {
       const repId = toPositiveInt(rep.id);
       if (!repId) return '';
-      const companies = state.repAssignments.filter((a) => a.rep_id === rep.id).map((a) => a.company_name);
+      const companies = state.repAssignments.filter((a) => toPositiveInt(a.rep_id) === repId).map((a) => a.company_name);
       const territories = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
+      const territoryCount = Number.isFinite(territories.length) ? territories.length : 0;
       const territoryPreview = territories.slice(0, 2).map((item) => territoryRuleHtml(item)).join('');
-      const territoryMore = territories.length > 2 ? `<div class="tiny">+${territories.length - 2} more</div>` : '';
+      const territoryMore = territoryCount > 2 ? `<div class="tiny">+${territoryCount - 2} more</div>` : '';
       return `<tr class="clickable" data-open-rep-detail="${repId}">
         <td>${escapeHtml(rep.full_name)}</td>
         <td>${escapeHtml(rep.email || '')}</td>
@@ -1720,8 +1723,8 @@ async function renderRepsView() {
         <td>${rep.last_entry_at ? new Date(rep.last_entry_at).toLocaleDateString() : '-'}</td>
         <td>${escapeHtml(companies.join(', ') || '-')}</td>
         <td class="territory-cell">
-          ${territories.length ? `${territoryPreview}${territoryMore}` : '<span class="tiny">No territories assigned</span>'}
-          <div><button class="ghost" data-show-territories="${rep.id}">View Rules (${territories.length})</button></div>
+          ${territoryCount ? `${territoryPreview}${territoryMore}` : '<span class="tiny">No territories assigned</span>'}
+          <div><button class="ghost" data-show-territories="${repId}">View Rules (${territoryCount})</button></div>
         </td>
       </tr>`;
     })
@@ -1973,7 +1976,7 @@ function bindRepsEvents() {
       event.stopPropagation();
       const repId = toPositiveInt(btn.dataset.showTerritories);
       if (!repId) return;
-      const items = state.repTerritories.filter((t) => t.rep_id === repId);
+      const items = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
       document.getElementById('territoryList').innerHTML = items
         .map(
           (item) => `<li>
