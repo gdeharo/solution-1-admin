@@ -1703,14 +1703,14 @@ async function renderRepsView() {
       <option value="zip_prefix">Zip Prefix</option>
       <option value="zip_exact">Zip Exact</option>
     </select>
-    <textarea name="bulkValues" rows="2" placeholder="Bulk values (comma/new line)"></textarea>
+    <textarea name="bulkValues" rows="2" placeholder="Bulk values (comma/new line). Use -prefix or -zip to exclude."></textarea>
     <select name="state">
       <option value="">State/Province</option>
       ${TERRITORY_STATE_OPTIONS.map(([code, name]) => `<option value="${code}">${code} - ${name}</option>`).join('')}
     </select>
     <input name="city" placeholder="City" />
-    <input name="zipPrefix" placeholder="Zip prefix" />
-    <input name="zipExact" placeholder="Zip exact" />
+    <input name="zipPrefix" placeholder="Zip prefix (e.g. 901 or -901)" />
+    <input name="zipExact" placeholder="Zip exact (e.g. 90210 or -90210)" />
     <button type="submit">Add Territory</button>
   `;
 
@@ -1900,8 +1900,8 @@ function bindRepsEvents() {
       document.getElementById('territoryList').innerHTML = items
         .map(
           (item) => `<li>
-            <span>${escapeHtml(item.territory_type)} | ${escapeHtml(item.city || '')} ${escapeHtml(item.state || '')} ${escapeHtml(
-              item.zip_prefix || item.zip_exact || ''
+            <span>${escapeHtml(item.territory_type)}${item.is_exclusion ? ' (exclude)' : ''} | ${escapeHtml(item.city || '')} ${escapeHtml(item.state || '')} ${escapeHtml(
+              item.is_exclusion ? `-${item.zip_prefix || item.zip_exact || ''}` : item.zip_prefix || item.zip_exact || ''
             )} | ${escapeHtml(item.segment || 'All Segments')} | ${escapeHtml(item.customer_type || 'All Types')}</span>
             <button class="danger" data-delete-territory="${item.id}">Delete</button>
           </li>`

@@ -190,14 +190,38 @@ function splitCsvValues(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeZip(value: string | null | undefined): string {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]/g, '');
+}
+
+function parseZipEntries(value: unknown): Array<{ value: string; isExclusion: boolean }> {
+  const out: Array<{ value: string; isExclusion: boolean }> = [];
+  for (const raw of splitCsvValues(value)) {
+    let next = raw.trim();
+    let isExclusion = false;
+    if (next.startsWith('-')) {
+      isExclusion = true;
+      next = next.slice(1).trim();
+    }
+    const normalized = normalizeZip(next);
+    if (!normalized) continue;
+    out.push({ value: normalized, isExclusion });
+  }
+  return out;
+}
+
 function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: number): string {
-  return `EXISTS (
+  const includeClause = `EXISTS (
     SELECT 1
     FROM rep_territories t
     JOIN reps r ON r.id = t.rep_id
     WHERE r.deleted_at IS NULL
       AND r.email IS NOT NULL
       AND lower(r.email) = lower(?${emailParamIndex})
+      AND t.is_exclusion = 0
       AND (
         (t.territory_type = 'state'
           AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(${companyAlias}.state, ''))))
@@ -218,6 +242,29 @@ function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: n
       AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ${companyAlias}.segment)
       AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ${companyAlias}.customer_type)
   )`;
+  const excludeClause = `NOT EXISTS (
+    SELECT 1
+    FROM rep_territories tx
+    JOIN reps rx ON rx.id = tx.rep_id
+    WHERE rx.deleted_at IS NULL
+      AND rx.email IS NOT NULL
+      AND lower(rx.email) = lower(?${emailParamIndex})
+      AND tx.is_exclusion = 1
+      AND tx.territory_type IN ('zip_prefix', 'zip_exact')
+      AND (
+        (tx.territory_type = 'zip_exact'
+          AND replace(replace(upper(trim(coalesce(tx.zip_exact, ''))), '-', ''), ' ', '') =
+              replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', ''))
+        OR
+        (tx.territory_type = 'zip_prefix'
+          AND trim(coalesce(tx.zip_prefix, '')) <> ''
+          AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
+              (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+      )
+      AND (tx.segment IS NULL OR trim(tx.segment) = '' OR tx.segment = ${companyAlias}.segment)
+      AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR tx.customer_type = ${companyAlias}.customer_type)
+  )`;
+  return `(${includeClause} AND ${excludeClause})`;
 }
 
 async function repCanAccessCompany(env: Env, user: AuthedUser, companyId: number): Promise<boolean> {
@@ -264,6 +311,7 @@ async function repCanCreateCompanyInTerritory(
   user: AuthedUser,
   data: { city?: string; state?: string; zip?: string; segment?: string; customerType?: string }
 ): Promise<boolean> {
+  const normalizedZip = normalizeZip(data.zip);
   const row = await env.CRM_DB.prepare(
     `SELECT 1 AS ok
      WHERE EXISTS (
@@ -273,6 +321,7 @@ async function repCanCreateCompanyInTerritory(
        WHERE r.deleted_at IS NULL
          AND r.email IS NOT NULL
          AND lower(r.email) = lower(?1)
+         AND t.is_exclusion = 0
          AND (
            (t.territory_type = 'state'
              AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?2, ''))))
@@ -292,9 +341,31 @@ async function repCanCreateCompanyInTerritory(
          )
          AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ?5)
          AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ?6)
+     )
+     AND NOT EXISTS (
+       SELECT 1
+       FROM rep_territories tx
+       JOIN reps rx ON rx.id = tx.rep_id
+       WHERE rx.deleted_at IS NULL
+         AND rx.email IS NOT NULL
+         AND lower(rx.email) = lower(?1)
+         AND tx.is_exclusion = 1
+         AND tx.territory_type IN ('zip_prefix', 'zip_exact')
+         AND (
+           (tx.territory_type = 'zip_exact'
+             AND replace(replace(upper(trim(coalesce(tx.zip_exact, ''))), '-', ''), ' ', '') =
+                 replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', ''))
+           OR
+           (tx.territory_type = 'zip_prefix'
+             AND trim(coalesce(tx.zip_prefix, '')) <> ''
+             AND replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', '') LIKE
+                 (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+         )
+         AND (tx.segment IS NULL OR trim(tx.segment) = '' OR tx.segment = ?5)
+         AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR tx.customer_type = ?6)
      )`
   )
-    .bind(user.email, data.state ?? null, data.city ?? null, data.zip ?? null, data.segment ?? null, data.customerType ?? null)
+    .bind(user.email, data.state ?? null, data.city ?? null, normalizedZip || null, data.segment ?? null, data.customerType ?? null)
     .first<{ ok: number }>();
   return !!row;
 }
@@ -1035,7 +1106,7 @@ addRoute(
        ORDER BY cr.rep_id, c.name`
     ).all();
     const territories = await env.CRM_DB.prepare(
-      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, segment, customer_type
+      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, segment, customer_type, is_exclusion
        FROM rep_territories
        ORDER BY rep_id, territory_type`
     ).all();
@@ -1475,7 +1546,7 @@ addRoute(
     const repId = Number(url.searchParams.get('repId'));
     if (!repId) return err('repId is required');
     const rows = await env.CRM_DB.prepare(
-      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, segment, customer_type, created_at
+      `SELECT id, rep_id, territory_type, city, state, zip_prefix, zip_exact, segment, customer_type, is_exclusion, created_at
        FROM rep_territories
        WHERE rep_id = ?1
        ORDER BY created_at DESC`
@@ -1504,27 +1575,32 @@ addRoute(
       cityStates?: Array<{ city: string; state: string }> | string;
       segment?: string;
       customerType?: string;
+      isExclusion?: boolean;
     }>(request);
     if (!body?.repId || !body.territoryType) return err('repId and territoryType are required');
     if (!['state', 'city_state', 'zip_prefix', 'zip_exact'].includes(body.territoryType)) return err('Invalid territoryType');
     const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
     if (metadataError) return err(metadataError);
 
-    const rows: Array<{ state?: string; city?: string; zipPrefix?: string; zipExact?: string }> = [];
+    const rows: Array<{ state?: string; city?: string; zipPrefix?: string; zipExact?: string; isExclusion: boolean }> = [];
+    const defaultExclusion = !!body.isExclusion;
     if (body.territoryType === 'state') {
       const values = Array.from(new Set([...splitCsvValues(body.states), ...splitCsvValues(body.state)]));
       if (values.length === 0) return err('Provide at least one state');
-      for (const state of values) rows.push({ state: state.toUpperCase() });
+      if (values.some((state) => state.startsWith('-'))) return err('State exclusions are not supported. Use zip exclusions with -prefix/-zip.');
+      for (const state of values) rows.push({ state: state.toUpperCase(), isExclusion: defaultExclusion });
     }
     if (body.territoryType === 'zip_prefix') {
-      const values = Array.from(new Set([...splitCsvValues(body.zipPrefixes), ...splitCsvValues(body.zipPrefix)]));
-      if (values.length === 0) return err('Provide at least one zip prefix');
-      for (const zipPrefix of values) rows.push({ zipPrefix });
+      const values = [...parseZipEntries(body.zipPrefixes), ...parseZipEntries(body.zipPrefix)];
+      const deduped = Array.from(new Map(values.map((item) => [`${item.value}|${item.isExclusion ? 1 : 0}`, item])).values());
+      if (deduped.length === 0) return err('Provide at least one zip prefix');
+      for (const item of deduped) rows.push({ zipPrefix: item.value, isExclusion: item.isExclusion || defaultExclusion });
     }
     if (body.territoryType === 'zip_exact') {
-      const values = Array.from(new Set([...splitCsvValues(body.zipExacts), ...splitCsvValues(body.zipExact)]));
-      if (values.length === 0) return err('Provide at least one exact zip');
-      for (const zipExact of values) rows.push({ zipExact });
+      const values = [...parseZipEntries(body.zipExacts), ...parseZipEntries(body.zipExact)];
+      const deduped = Array.from(new Map(values.map((item) => [`${item.value}|${item.isExclusion ? 1 : 0}`, item])).values());
+      if (deduped.length === 0) return err('Provide at least one exact zip');
+      for (const item of deduped) rows.push({ zipExact: item.value, isExclusion: item.isExclusion || defaultExclusion });
     }
     if (body.territoryType === 'city_state') {
       const cityStates: Array<{ city: string; state: string }> = [];
@@ -1550,15 +1626,18 @@ addRoute(
       const singleCity = normalizedText(body.city);
       const singleState = normalizedText(body.state).toUpperCase();
       if (singleCity && singleState) cityStates.push({ city: singleCity, state: singleState });
+      if (cityStates.some((item) => item.state.startsWith('-'))) {
+        return err('City/state exclusions are not supported. Use zip exclusions with -prefix/-zip.');
+      }
       const deduped = Array.from(new Map(cityStates.map((item) => [`${item.city.toUpperCase()}|${item.state}`, item])).values());
       if (deduped.length === 0) return err('Provide at least one city and state');
-      for (const item of deduped) rows.push({ city: item.city, state: item.state });
+      for (const item of deduped) rows.push({ city: item.city, state: item.state, isExclusion: defaultExclusion });
     }
 
     if (rows.length === 0) return err('No territory rows to create');
     const insert = env.CRM_DB.prepare(
-      `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact, segment, customer_type)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+      `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact, segment, customer_type, is_exclusion)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
     );
     const statements = rows.map((row) =>
       insert.bind(
@@ -1569,7 +1648,8 @@ addRoute(
         row.zipPrefix ?? null,
         row.zipExact ?? null,
         body.segment ?? null,
-        body.customerType ?? null
+        body.customerType ?? null,
+        row.isExclusion ? 1 : 0
       )
     );
     await env.CRM_DB.batch(statements);
@@ -1601,7 +1681,7 @@ addRoute(
   withAuth(async (_request, env, _user, url) => {
     const city = (url.searchParams.get('city') || '').trim();
     const state = (url.searchParams.get('state') || '').trim();
-    const zip = (url.searchParams.get('zip') || '').trim();
+    const zip = normalizeZip(url.searchParams.get('zip') || '');
     const segment = (url.searchParams.get('segment') || '').trim();
     const customerType = (url.searchParams.get('customerType') || '').trim();
 
@@ -1612,6 +1692,7 @@ addRoute(
        FROM rep_territories t
        JOIN reps r ON r.id = t.rep_id
        WHERE r.deleted_at IS NULL
+         AND t.is_exclusion = 0
          AND (
            (t.territory_type = 'state' AND t.state = ?1)
            OR (t.territory_type = 'city_state' AND t.state = ?1 AND t.city = ?2)
@@ -1620,6 +1701,19 @@ addRoute(
          )
          AND (t.segment IS NULL OR t.segment = ?4)
          AND (t.customer_type IS NULL OR t.customer_type = ?5)
+         AND NOT EXISTS (
+           SELECT 1
+           FROM rep_territories tx
+           WHERE tx.rep_id = t.rep_id
+             AND tx.is_exclusion = 1
+             AND tx.territory_type IN ('zip_prefix', 'zip_exact')
+             AND (
+               (tx.territory_type = 'zip_exact' AND tx.zip_exact = ?3)
+               OR (tx.territory_type = 'zip_prefix' AND ?3 LIKE (tx.zip_prefix || '%'))
+             )
+             AND (tx.segment IS NULL OR tx.segment = ?4)
+             AND (tx.customer_type IS NULL OR tx.customer_type = ?5)
+         )
        ORDER BY r.full_name ASC`
     )
       .bind(state || null, city || null, zip || null, segment || null, customerType || null)
