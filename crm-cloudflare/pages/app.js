@@ -1977,13 +1977,19 @@ function bindRepsEvents() {
         .filter(Boolean);
     }
     try {
-      await api('/api/rep-territories', {
+      const result = await api('/api/rep-territories', {
         method: 'POST',
         body: JSON.stringify(payload)
       });
       territoryForm.reset();
       await renderRepsView();
-      showToast('Territory added');
+      if (result?.created > 0 && result?.skipped > 0) {
+        showToast(`Territory added (${result.created}), skipped duplicates (${result.skipped})`);
+      } else if (result?.created > 0) {
+        showToast(`Territory added (${result.created})`);
+      } else {
+        showToast('No new territory rows added (duplicates only)');
+      }
     } catch (error) {
       showToast(error.message, true);
     }

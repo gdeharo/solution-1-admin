@@ -213,6 +213,28 @@ function parseZipEntries(value: unknown): Array<{ value: string; isExclusion: bo
   return out;
 }
 
+function territoryRuleKey(input: {
+  territoryType: string;
+  state?: string | null;
+  city?: string | null;
+  zipPrefix?: string | null;
+  zipExact?: string | null;
+  segment?: string | null;
+  customerType?: string | null;
+  isExclusion?: boolean | number | null;
+}): string {
+  return [
+    input.territoryType,
+    normalizedText(input.state).toUpperCase(),
+    normalizedText(input.city).toUpperCase(),
+    normalizeZip(input.zipPrefix),
+    normalizeZip(input.zipExact),
+    normalizedText(input.segment),
+    normalizedText(input.customerType),
+    input.isExclusion ? '1' : '0'
+  ].join('|');
+}
+
 function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: number): string {
   const includeClause = `EXISTS (
     SELECT 1
@@ -1635,11 +1657,63 @@ addRoute(
     }
 
     if (rows.length === 0) return err('No territory rows to create');
+    const existingRows = await env.CRM_DB.prepare(
+      `SELECT territory_type, state, city, zip_prefix, zip_exact, segment, customer_type, is_exclusion
+       FROM rep_territories
+       WHERE rep_id = ?1`
+    )
+      .bind(body.repId)
+      .all<{
+        territory_type: string;
+        state: string | null;
+        city: string | null;
+        zip_prefix: string | null;
+        zip_exact: string | null;
+        segment: string | null;
+        customer_type: string | null;
+        is_exclusion: number;
+      }>();
+
+    const existingKeys = new Set(
+      (existingRows.results || []).map((row) =>
+        territoryRuleKey({
+          territoryType: row.territory_type,
+          state: row.state,
+          city: row.city,
+          zipPrefix: row.zip_prefix,
+          zipExact: row.zip_exact,
+          segment: row.segment,
+          customerType: row.customer_type,
+          isExclusion: row.is_exclusion
+        })
+      )
+    );
+
+    const newRows = rows.filter((row) => {
+      const key = territoryRuleKey({
+        territoryType: body.territoryType,
+        state: row.state,
+        city: row.city,
+        zipPrefix: row.zipPrefix,
+        zipExact: row.zipExact,
+        segment: body.segment ?? null,
+        customerType: body.customerType ?? null,
+        isExclusion: row.isExclusion
+      });
+      if (existingKeys.has(key)) return false;
+      existingKeys.add(key);
+      return true;
+    });
+
+    if (newRows.length === 0) {
+      return json({ created: 0, skipped: rows.length }, 200);
+    }
+
     const insert = env.CRM_DB.prepare(
       `INSERT INTO rep_territories (rep_id, territory_type, state, city, zip_prefix, zip_exact, segment, customer_type, is_exclusion)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
     );
-    const statements = rows.map((row) =>
+    const statements = newRows.map((row) =>
       insert.bind(
         body.repId,
         body.territoryType,
@@ -1655,9 +1729,10 @@ addRoute(
     await env.CRM_DB.batch(statements);
     await audit(env, user, 'create', 'rep_territory', String(body.repId), {
       ...body,
-      createdRows: rows.length
+      createdRows: newRows.length,
+      skippedRows: rows.length - newRows.length
     });
-    return json({ created: rows.length }, 201);
+    return json({ created: newRows.length, skipped: rows.length - newRows.length }, 201);
   }) as any
 );
 
