@@ -1704,11 +1704,13 @@ async function renderRepsView() {
 
   document.getElementById('repsBody').innerHTML = state.reps
     .map((rep) => {
+      const repId = toPositiveInt(rep.id);
+      if (!repId) return '';
       const companies = state.repAssignments.filter((a) => a.rep_id === rep.id).map((a) => a.company_name);
-      const territories = state.repTerritories.filter((t) => t.rep_id === rep.id);
+      const territories = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
       const territoryPreview = territories.slice(0, 2).map((item) => territoryRuleHtml(item)).join('');
       const territoryMore = territories.length > 2 ? `<div class="tiny">+${territories.length - 2} more</div>` : '';
-      return `<tr class="clickable" data-open-rep-detail="${rep.id}">
+      return `<tr class="clickable" data-open-rep-detail="${repId}">
         <td>${escapeHtml(rep.full_name)}</td>
         <td>${escapeHtml(rep.email || '')}</td>
         <td>${escapeHtml(rep.phone || '')}</td>
@@ -1966,7 +1968,8 @@ function bindRepsEvents() {
   document.querySelectorAll('[data-show-territories]').forEach((btn) => {
     btn.onclick = (event) => {
       event.stopPropagation();
-      const repId = Number(btn.dataset.showTerritories);
+      const repId = toPositiveInt(btn.dataset.showTerritories);
+      if (!repId) return;
       const items = state.repTerritories.filter((t) => t.rep_id === repId);
       document.getElementById('territoryList').innerHTML = items
         .map(
@@ -2216,7 +2219,8 @@ function bindRepsEvents() {
 
   document.querySelectorAll('[data-open-rep-detail]').forEach((row) => {
     row.onclick = () => {
-      const repId = Number(row.dataset.openRepDetail);
+      const repId = toPositiveInt(row.dataset.openRepDetail);
+      if (!repId) return;
       openRepAccounts(repId);
     };
   });
@@ -2324,9 +2328,17 @@ function bindRepsEvents() {
 }
 
 function openRepAccounts(repId) {
-  const rep = state.reps.find((r) => r.id === repId);
-  const companies = state.repAssignments.filter((a) => a.rep_id === repId);
-  const territories = state.repTerritories.filter((t) => t.rep_id === repId);
+  const safeRepId = toPositiveInt(repId);
+  if (!safeRepId) {
+    document.getElementById('repAccountsTitle').textContent = 'Accounts';
+    document.getElementById('repTerritorySummary').innerHTML = '<li class="tiny">Invalid rep selection.</li>';
+    document.getElementById('repAccountsBody').innerHTML = '<tr><td colspan="4">No assigned companies.</td></tr>';
+    setView('repAccountsView', 'Accounts');
+    return;
+  }
+  const rep = state.reps.find((r) => toPositiveInt(r.id) === safeRepId);
+  const companies = state.repAssignments.filter((a) => toPositiveInt(a.rep_id) === safeRepId);
+  const territories = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === safeRepId);
   document.getElementById('repAccountsTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
   document.getElementById('repTerritorySummary').innerHTML = territories.length
     ? territories.map((item) => `<li>${territoryRuleHtml(item)}</li>`).join('')
