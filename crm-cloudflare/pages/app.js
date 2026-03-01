@@ -2081,7 +2081,10 @@ function bindRepsEvents() {
       for (const rule of eligibleRules) {
         if (rule.territory_type === 'state' && String(rule.state || '').toUpperCase() === stateCode) {
           conflictStateSet.add(stateCode);
-          conflictDetails.push(`${repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep'} has state ${stateCode}`);
+          const repName = repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep';
+          const typeName = String(rule.customer_type || 'All Types');
+          const segmentName = String(rule.segment || 'All Segments');
+          conflictDetails.push(`${repName} • ${typeName} • ${segmentName} • state:${stateCode}`);
         }
       }
     }
@@ -2105,7 +2108,9 @@ function bindRepsEvents() {
         if (!matches) continue;
         const repName = repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep';
         const where = rule.territory_type === 'zip_exact' ? ruleZipExact : ruleZipPrefix;
-        conflictDetails.push(`${repName} has ${rule.territory_type} ${where || '-'}`);
+        const typeName = String(rule.customer_type || 'All Types');
+        const segmentName = String(rule.segment || 'All Segments');
+        conflictDetails.push(`${repName} • ${typeName} • ${segmentName} • ${rule.territory_type}:${where || '-'}`);
       }
     }
     return {

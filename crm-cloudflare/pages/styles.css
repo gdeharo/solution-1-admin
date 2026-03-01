@@ -304,13 +304,18 @@ tr.clickable:hover {
 #territoryRepSelect {
   border: 1px solid var(--line);
   border-radius: 8px;
-  min-height: 150px;
+  height: 7.2rem;
+  min-height: 7.2rem;
+  max-height: 10rem;
   overflow: auto;
   background: #fff;
+  resize: vertical;
+  padding: 0.2rem;
 }
 
 #territoryRepSelect option {
-  padding: 0.35rem 0.5rem;
+  padding: 0.2rem 0.35rem;
+  line-height: 1.15;
 }
 
 .hidden {
