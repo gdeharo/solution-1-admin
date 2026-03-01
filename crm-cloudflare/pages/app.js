@@ -213,6 +213,29 @@ function companyIsInTerritory(company, territories) {
   return !matchedExclude;
 }
 
+function geographyOnlyMatch(rule, company) {
+  const ruleType = String(rule.territory_type || '');
+  const companyState = String(company.state || '').trim().toUpperCase();
+  const companyCity = String(company.city || '').trim().toUpperCase();
+  const companyZip = normalizeZipForMatch(company.zip);
+  if (ruleType === 'state') return String(rule.state || '').trim().toUpperCase() === companyState;
+  if (ruleType === 'city_state') {
+    return (
+      String(rule.state || '').trim().toUpperCase() === companyState &&
+      String(rule.city || '').trim().toUpperCase() === companyCity
+    );
+  }
+  if (ruleType === 'zip_exact') {
+    const zip = normalizeZipForMatch(rule.zip_exact);
+    return !!zip && zip === companyZip;
+  }
+  if (ruleType === 'zip_prefix') {
+    const prefix = normalizeZipForMatch(rule.zip_prefix);
+    return !!prefix && companyZip.startsWith(prefix);
+  }
+  return false;
+}
+
 function stateCheckboxGridHtml(fieldName, states) {
   return `<div class="state-grid">${states
     .map(
@@ -2513,6 +2536,7 @@ function openRepAccounts(repId) {
   if (!safeRepId) {
     document.getElementById('repAccountsTitle').textContent = 'Accounts';
     document.getElementById('repTerritorySummaryBody').innerHTML = '<tr><td colspan="3" class="tiny">Invalid rep selection.</td></tr>';
+    document.getElementById('repTerritoryMismatchBody').innerHTML = '<tr><td colspan="4" class="tiny">Invalid rep selection.</td></tr>';
     document.getElementById('repAccountsBody').innerHTML = '<tr><td colspan="4">No assigned companies.</td></tr>';
     setView('repAccountsView', 'Accounts');
     return;
@@ -2532,6 +2556,33 @@ function openRepAccounts(repId) {
     if (company) companies.set(companyId, company);
   }
   const companyRows = Array.from(companies.values()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  const includeRules = territories.filter((t) => !t.is_exclusion);
+  const mismatchRows = [];
+  for (const company of state.companies) {
+    const companyId = toPositiveInt(company.id);
+    if (!companyId || companies.has(companyId)) continue;
+    for (const rule of includeRules) {
+      if (!geographyOnlyMatch(rule, company)) continue;
+      const companySegment = String(company.segment || '-');
+      const companyType = String(company.customer_type || '-');
+      const ruleSegment = String(rule.segment || 'All Segments');
+      const ruleType = String(rule.customer_type || 'All Types');
+      const segmentMismatch = rule.segment && rule.segment !== company.segment;
+      const typeMismatch = rule.customer_type && rule.customer_type !== company.customer_type;
+      if (!segmentMismatch && !typeMismatch) continue;
+      mismatchRows.push({
+        companyId,
+        name: company.name || '',
+        state: company.state || '',
+        companyPair: `${companySegment} / ${companyType}`,
+        rulePair: `${ruleSegment} / ${ruleType}`
+      });
+      break;
+    }
+  }
+  const uniqueMismatch = Array.from(new Map(mismatchRows.map((row) => [row.companyId, row])).values()).sort((a, b) =>
+    String(a.name).localeCompare(String(b.name))
+  );
   document.getElementById('repAccountsTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
   if (!territories.length) {
     document.getElementById('repTerritorySummaryBody').innerHTML = '<tr><td colspan="3" class="tiny">No territories assigned</td></tr>';
@@ -2606,9 +2657,24 @@ function openRepAccounts(repId) {
         )
         .join('')
     : '<tr><td colspan="4">No companies match current territory rules.</td></tr>';
+  document.getElementById('repTerritoryMismatchBody').innerHTML = uniqueMismatch.length
+    ? uniqueMismatch
+        .map(
+          (row) => `<tr class="clickable" data-open-company-from-mismatch="${row.companyId}">
+            <td>${escapeHtml(row.name)}</td>
+            <td>${escapeHtml(row.state)}</td>
+            <td>${escapeHtml(row.companyPair)}</td>
+            <td>${escapeHtml(row.rulePair)}</td>
+          </tr>`
+        )
+        .join('')
+    : '<tr><td colspan="4" class="tiny">No mismatch companies.</td></tr>';
 
   document.querySelectorAll('[data-open-company-from-rep]').forEach((row) => {
     row.onclick = () => openCompany(Number(row.dataset.openCompanyFromRep));
+  });
+  document.querySelectorAll('[data-open-company-from-mismatch]').forEach((row) => {
+    row.onclick = () => openCompany(Number(row.dataset.openCompanyFromMismatch));
   });
   setView('repAccountsView', `Accounts • ${rep?.full_name || ''}`);
 }
