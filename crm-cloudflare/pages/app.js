@@ -170,6 +170,49 @@ function toPositiveInt(value) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function normalizeZipForMatch(value) {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
+function territoryRuleMatchesCompany(rule, company) {
+  const companySegment = String(company.segment || '').trim();
+  const companyType = String(company.customer_type || '').trim();
+  if (rule.segment && rule.segment !== companySegment) return false;
+  if (rule.customer_type && rule.customer_type !== companyType) return false;
+
+  const ruleType = String(rule.territory_type || '');
+  const companyState = String(company.state || '').trim().toUpperCase();
+  const companyCity = String(company.city || '').trim().toUpperCase();
+  const companyZip = normalizeZipForMatch(company.zip);
+  if (ruleType === 'state') {
+    return String(rule.state || '').trim().toUpperCase() === companyState;
+  }
+  if (ruleType === 'city_state') {
+    return (
+      String(rule.state || '').trim().toUpperCase() === companyState &&
+      String(rule.city || '').trim().toUpperCase() === companyCity
+    );
+  }
+  if (ruleType === 'zip_exact') {
+    const zip = normalizeZipForMatch(rule.zip_exact);
+    return !!zip && zip === companyZip;
+  }
+  if (ruleType === 'zip_prefix') {
+    const prefix = normalizeZipForMatch(rule.zip_prefix);
+    return !!prefix && companyZip.startsWith(prefix);
+  }
+  return false;
+}
+
+function companyIsInTerritory(company, territories) {
+  const includes = territories.filter((t) => !t.is_exclusion);
+  const excludes = territories.filter((t) => !!t.is_exclusion);
+  const matchedInclude = includes.some((rule) => territoryRuleMatchesCompany(rule, company));
+  if (!matchedInclude) return false;
+  const matchedExclude = excludes.some((rule) => territoryRuleMatchesCompany(rule, company));
+  return !matchedExclude;
+}
+
 function stateCheckboxGridHtml(fieldName, states) {
   return `<div class="state-grid">${states
     .map(
@@ -2475,8 +2518,20 @@ function openRepAccounts(repId) {
     return;
   }
   const rep = state.reps.find((r) => toPositiveInt(r.id) === safeRepId);
-  const companies = state.repAssignments.filter((a) => toPositiveInt(a.rep_id) === safeRepId);
   const territories = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === safeRepId);
+  const assignedCompanyIds = new Set(state.repAssignments.filter((a) => toPositiveInt(a.rep_id) === safeRepId).map((a) => toPositiveInt(a.company_id)));
+  const companiesFromTerritory = state.companies.filter((company) => companyIsInTerritory(company, territories));
+  const companies = new Map();
+  for (const company of companiesFromTerritory) {
+    const id = toPositiveInt(company.id);
+    if (!id) continue;
+    companies.set(id, company);
+  }
+  for (const companyId of assignedCompanyIds) {
+    const company = state.companies.find((c) => toPositiveInt(c.id) === companyId);
+    if (company) companies.set(companyId, company);
+  }
+  const companyRows = Array.from(companies.values()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
   document.getElementById('repAccountsTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
   if (!territories.length) {
     document.getElementById('repTerritorySummaryBody').innerHTML = '<tr><td colspan="3" class="tiny">No territories assigned</td></tr>';
@@ -2539,18 +2594,18 @@ function openRepAccounts(repId) {
       })
       .join('');
   }
-  document.getElementById('repAccountsBody').innerHTML = companies.length
-    ? companies
+  document.getElementById('repAccountsBody').innerHTML = companyRows.length
+    ? companyRows
         .map(
-          (c) => `<tr class="clickable" data-open-company-from-rep="${c.company_id}">
-            <td>${escapeHtml(c.company_name)}</td>
+          (c) => `<tr class="clickable" data-open-company-from-rep="${toPositiveInt(c.id)}">
+            <td>${escapeHtml(c.name || '')}</td>
             <td>${escapeHtml(c.city || '')}</td>
             <td>${escapeHtml(c.state || '')}</td>
             <td>${escapeHtml(c.zip || '')}</td>
           </tr>`
         )
         .join('')
-    : '<tr><td colspan="4">No assigned companies.</td></tr>';
+    : '<tr><td colspan="4">No companies match current territory rules.</td></tr>';
 
   document.querySelectorAll('[data-open-company-from-rep]').forEach((row) => {
     row.onclick = () => openCompany(Number(row.dataset.openCompanyFromRep));
