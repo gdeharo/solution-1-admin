@@ -2067,7 +2067,7 @@ function bindRepsEvents() {
       .filter((token) => token.digits.length > 0);
 
     const conflictStateSet = new Set();
-    const conflictDetails = [];
+    const conflictEntries = [];
     const eligibleRules = state.repTerritories.filter((rule) => {
       if (toPositiveInt(rule.rep_id) === repId) return false;
       if (rule.is_exclusion) return false;
@@ -2084,7 +2084,13 @@ function bindRepsEvents() {
           const repName = repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep';
           const typeName = String(rule.customer_type || 'All Types');
           const segmentName = String(rule.segment || 'All Segments');
-          conflictDetails.push(`${repName} • ${typeName} • ${segmentName} • state:${stateCode}`);
+          conflictEntries.push({
+            repName,
+            typeName,
+            segmentName,
+            territoryType: 'state',
+            where: stateCode
+          });
         }
       }
     }
@@ -2110,12 +2116,36 @@ function bindRepsEvents() {
         const where = rule.territory_type === 'zip_exact' ? ruleZipExact : ruleZipPrefix;
         const typeName = String(rule.customer_type || 'All Types');
         const segmentName = String(rule.segment || 'All Segments');
-        conflictDetails.push(`${repName} • ${typeName} • ${segmentName} • ${rule.territory_type}:${where || '-'}`);
+        conflictEntries.push({
+          repName,
+          typeName,
+          segmentName,
+          territoryType: rule.territory_type,
+          where: where || '-'
+        });
       }
     }
+    const grouped = new Map();
+    for (const entry of conflictEntries) {
+      const key = `${entry.repName}||${entry.typeName}||${entry.segmentName}||${entry.territoryType}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          repName: entry.repName,
+          typeName: entry.typeName,
+          segmentName: entry.segmentName,
+          territoryType: entry.territoryType,
+          locations: new Set()
+        });
+      }
+      grouped.get(key).locations.add(entry.where);
+    }
+    const conflictDetails = Array.from(grouped.values()).map((group) => {
+      const loc = Array.from(group.locations).join(', ');
+      return `${group.repName} • ${group.typeName} • ${group.segmentName} • ${group.territoryType}:${loc}`;
+    });
     return {
       conflictStateSet,
-      conflictDetails: Array.from(new Set(conflictDetails))
+      conflictDetails
     };
   };
 
@@ -2134,7 +2164,7 @@ function bindRepsEvents() {
       conflictPreviewEl.classList.remove('territory-exclude');
       return;
     }
-    conflictPreviewEl.textContent = `Conflicts: ${conflictDetails.slice(0, 4).join(' • ')}${conflictDetails.length > 4 ? ` • +${conflictDetails.length - 4} more` : ''}`;
+    conflictPreviewEl.textContent = `Conflicts: ${conflictDetails.slice(0, 4).join(' | ')}${conflictDetails.length > 4 ? ` | +${conflictDetails.length - 4} more` : ''}`;
     conflictPreviewEl.classList.add('territory-exclude');
   };
 
