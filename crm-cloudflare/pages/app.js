@@ -24,7 +24,9 @@ const state = {
   showInactiveUsers: false,
   repSearch: '',
   repFilterSegment: '',
-  repFilterType: ''
+  repFilterType: '',
+  territoryRepSearch: '',
+  selectedTerritoryRepId: 0
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -1804,7 +1806,6 @@ async function renderRepsView() {
         <td>${escapeHtml(companies.join(', ') || '-')}</td>
         <td class="territory-cell">
           ${territoryCount ? `${territoryPreview}${territoryMore}` : '<span class="tiny">No territories assigned</span>'}
-          <div><button class="ghost" data-show-territories="${repId}">View Rules (${territoryCount})</button></div>
         </td>
       </tr>`;
       })
@@ -1814,21 +1815,10 @@ async function renderRepsView() {
 
   document.getElementById('territoryForm').innerHTML = `
     <div class="full territory-editor">
-      <div class="row wrap">
-        <label>
-          <span class="sr-only">Rep</span>
-          <select name="repId" required>
-            <option value="">Rep</option>
-            ${state.reps
-              .map((rep) => {
-                const repId = toPositiveInt(rep.id);
-                if (!repId) return '';
-                return `<option value="${repId}">${escapeHtml(rep.full_name)}</option>`;
-              })
-              .join('')}
-          </select>
-        </label>
-        <button type="button" class="ghost" id="loadTerritoryScopeBtn">Load Current</button>
+      <div class="rep-picker">
+        <input id="territoryRepSearch" placeholder="Find rep" />
+        <input type="hidden" name="repId" />
+        <div id="territoryRepList" class="rep-picker-list"></div>
       </div>
       <div class="field-group">
         <strong>Type</strong>
@@ -2041,76 +2031,23 @@ function bindRepsEvents() {
     };
   }
 
-  document.querySelectorAll('[data-show-territories]').forEach((btn) => {
-    btn.onclick = (event) => {
-      event.stopPropagation();
-      const repId = toPositiveInt(btn.dataset.showTerritories);
-      if (!repId) return;
-      const items = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
-      document.getElementById('territoryList').innerHTML = items
-        .map(
-          (item) => `<li>
-            ${territoryRuleHtml(item)}
-            <button class="danger" data-delete-territory="${item.id}">Delete</button>
-          </li>`
-        )
-        .join('');
-
-      document.querySelectorAll('[data-delete-territory]').forEach((delBtn) => {
-        delBtn.onclick = async () => {
-          try {
-            await api(`/api/rep-territories/${Number(delBtn.dataset.deleteTerritory)}`, { method: 'DELETE' });
-            await renderRepsView();
-            showToast('Territory removed');
-          } catch (error) {
-            showToast(error.message, true);
-          }
-        };
-      });
-    };
-  });
-
   const territoryForm = document.getElementById('territoryForm');
   if (!territoryForm) return;
   const repSelectEl = territoryForm.querySelector('[name="repId"]');
   const zipCodesEl = territoryForm.querySelector('[name="zipCodes"]');
-  if (!repSelectEl || !zipCodesEl) return;
-  const renderTerritoryList = (repId, segments, customerTypes) => {
-    if (!repId) {
-      document.getElementById('territoryList').innerHTML = '<li class="tiny">Select a rep to view rules.</li>';
-      return;
-    }
-    const items = state.repTerritories.filter((t) => {
-      if (toPositiveInt(t.rep_id) !== repId) return false;
-      if (segments.length > 0 && !segments.includes(t.segment || '')) return false;
-      if (customerTypes.length > 0 && !customerTypes.includes(t.customer_type || '')) return false;
-      return true;
-    });
-    document.getElementById('territoryList').innerHTML = items.length
-      ? items
-          .map(
-            (item) => `<li>
-              ${territoryRuleHtml(item)}
-              <button class="danger" data-delete-territory="${item.id}">Delete</button>
-            </li>`
-          )
-          .join('')
-      : '<li class="tiny">No matching territory rules for current selection.</li>';
-    document.querySelectorAll('[data-delete-territory]').forEach((delBtn) => {
-      delBtn.onclick = async () => {
-        try {
-          await api(`/api/rep-territories/${Number(delBtn.dataset.deleteTerritory)}`, { method: 'DELETE' });
-          await renderRepsView();
-          showToast('Territory removed');
-        } catch (error) {
-          showToast(error.message, true);
-        }
-      };
-    });
-  };
+  const repSearchPickerEl = territoryForm.querySelector('#territoryRepSearch');
+  const repPickerListEl = territoryForm.querySelector('#territoryRepList');
+  if (!repSelectEl || !zipCodesEl || !repSearchPickerEl || !repPickerListEl) return;
 
   const getCheckedValues = (fieldName) =>
     Array.from(territoryForm.querySelectorAll(`input[name="${fieldName}"]:checked`)).map((el) => el.value);
+
+  const clearTerritorySelections = () => {
+    territoryForm.querySelectorAll('input[name="states"], input[name="segments"], input[name="customerTypes"]').forEach((el) => {
+      el.checked = false;
+    });
+    zipCodesEl.value = '';
+  };
 
   const computeCurrentConflicts = () => {
     const repId = toPositiveInt(repSelectEl.value);
@@ -2196,27 +2133,18 @@ function bindRepsEvents() {
     conflictPreviewEl.classList.add('territory-exclude');
   };
 
-  const loadTerritoryScope = () => {
-    const repId = toPositiveInt(repSelectEl.value);
+  const loadTerritoryScope = (repId) => {
     if (!repId) return;
-    let segments = getCheckedValues('segments');
-    let customerTypes = getCheckedValues('customerTypes');
-    let scoped = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
-    if (segments.length > 0) scoped = scoped.filter((t) => segments.includes(t.segment || ''));
-    if (customerTypes.length > 0) scoped = scoped.filter((t) => customerTypes.includes(t.customer_type || ''));
-
-    if (segments.length === 0) {
-      segments = Array.from(new Set(scoped.map((t) => t.segment).filter(Boolean)));
-      territoryForm.querySelectorAll('input[name="segments"]').forEach((el) => {
-        el.checked = segments.includes(el.value);
-      });
-    }
-    if (customerTypes.length === 0) {
-      customerTypes = Array.from(new Set(scoped.map((t) => t.customer_type).filter(Boolean)));
-      territoryForm.querySelectorAll('input[name="customerTypes"]').forEach((el) => {
-        el.checked = customerTypes.includes(el.value);
-      });
-    }
+    clearTerritorySelections();
+    const scoped = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === repId);
+    const segments = Array.from(new Set(scoped.map((t) => t.segment).filter(Boolean)));
+    territoryForm.querySelectorAll('input[name="segments"]').forEach((el) => {
+      el.checked = segments.includes(el.value);
+    });
+    const customerTypes = Array.from(new Set(scoped.map((t) => t.customer_type).filter(Boolean)));
+    territoryForm.querySelectorAll('input[name="customerTypes"]').forEach((el) => {
+      el.checked = customerTypes.includes(el.value);
+    });
 
     const stateIncludes = Array.from(
       new Set(scoped.filter((t) => t.territory_type === 'state' && !t.is_exclusion).map((t) => (t.state || '').toUpperCase()).filter(Boolean))
@@ -2234,26 +2162,50 @@ function bindRepsEvents() {
       )
     );
     territoryForm.querySelector('[name="zipCodes"]').value = zipTokens.join(', ');
-    renderTerritoryList(repId, segments, customerTypes);
     updateTerritoryConflictHighlights();
   };
 
-  const loadBtn = territoryForm.querySelector('#loadTerritoryScopeBtn');
-  if (loadBtn) loadBtn.onclick = loadTerritoryScope;
-
-  repSelectEl.onchange = () => {
-    territoryForm.querySelectorAll('input[name="states"], input[name="segments"], input[name="customerTypes"]').forEach((el) => {
-      el.checked = false;
+  const renderRepPickerList = () => {
+    const q = String(state.territoryRepSearch || '').trim().toLowerCase();
+    const candidates = state.reps
+      .filter((rep) => toPositiveInt(rep.id))
+      .filter((rep) => !q || String(rep.full_name || '').toLowerCase().includes(q))
+      .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')))
+      .slice(0, 4);
+    repPickerListEl.innerHTML = candidates.length
+      ? candidates
+          .map((rep) => {
+            const repId = toPositiveInt(rep.id);
+            return `<button type="button" class="${state.selectedTerritoryRepId === repId ? 'active' : ''}" data-territory-pick-rep="${repId}">${escapeHtml(
+              rep.full_name || ''
+            )}</button>`;
+          })
+          .join('')
+      : '<div class="tiny" style="padding:0.5rem;">No reps found</div>';
+    repPickerListEl.querySelectorAll('[data-territory-pick-rep]').forEach((btn) => {
+      btn.onclick = () => {
+        const repId = toPositiveInt(btn.dataset.territoryPickRep);
+        if (!repId) return;
+        state.selectedTerritoryRepId = repId;
+        repSelectEl.value = String(repId);
+        const rep = state.reps.find((r) => toPositiveInt(r.id) === repId);
+        state.territoryRepSearch = String(rep?.full_name || '');
+        repSearchPickerEl.value = state.territoryRepSearch;
+        renderRepPickerList();
+        loadTerritoryScope(repId);
+      };
     });
-    zipCodesEl.value = '';
-    const repId = toPositiveInt(repSelectEl.value);
-    if (repId) {
-      renderTerritoryList(repId, [], []);
-    } else {
-      document.getElementById('territoryList').innerHTML = '';
-    }
-    updateTerritoryConflictHighlights();
   };
+  repSearchPickerEl.value = state.territoryRepSearch || '';
+  repSearchPickerEl.oninput = () => {
+    state.territoryRepSearch = repSearchPickerEl.value || '';
+    renderRepPickerList();
+  };
+  renderRepPickerList();
+  if (state.selectedTerritoryRepId) {
+    repSelectEl.value = String(state.selectedTerritoryRepId);
+    loadTerritoryScope(state.selectedTerritoryRepId);
+  }
 
   territoryForm.querySelectorAll('input[name="states"], input[name="segments"], input[name="customerTypes"]').forEach((el) => {
     el.onchange = () => updateTerritoryConflictHighlights();
@@ -2271,7 +2223,10 @@ function bindRepsEvents() {
       showToast('Select a rep first', true);
       return;
     }
-    if (segments.length === 0 || customerTypes.length === 0) {
+    const clearAll = segments.length === 0 && customerTypes.length === 0 && states.length === 0 && !zipCodes.trim();
+    if (clearAll) {
+      if (!confirm('Remove all territory assignments for this rep?')) return;
+    } else if (segments.length === 0 || customerTypes.length === 0) {
       showToast('Select at least one segment and one type', true);
       return;
     }
@@ -2284,6 +2239,7 @@ function bindRepsEvents() {
           customerTypes,
           states,
           zipCodes,
+          clearAll,
           replaceScope: true
         })
       });

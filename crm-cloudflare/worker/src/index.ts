@@ -1763,10 +1763,20 @@ addRoute(
       customerTypes: string[];
       states?: string[];
       zipCodes?: string[] | string;
+      clearAll?: boolean;
       replaceScope?: boolean;
       allowConflicts?: boolean;
     }>(request);
     if (!body?.repId) return err('repId is required');
+    if (body.clearAll) {
+      const deleteResult = await env.CRM_DB.prepare(`DELETE FROM rep_territories WHERE rep_id = ?1`).bind(body.repId).run();
+      const removed = Number(deleteResult.meta.changes || 0);
+      await audit(env, user, 'sync', 'rep_territory', String(body.repId), {
+        clearAll: true,
+        removedRows: removed
+      });
+      return json({ created: 0, removed, combos: 0, cleared: true });
+    }
     const segments = uniqueTrimmed(Array.isArray(body.segments) ? body.segments : []);
     const customerTypes = uniqueTrimmed(Array.isArray(body.customerTypes) ? body.customerTypes : []);
     if (segments.length === 0 || customerTypes.length === 0) {
