@@ -21,7 +21,10 @@ const state = {
   companySectionState: {},
   adminOpenSection: '',
   currentContactId: null,
-  showInactiveUsers: false
+  showInactiveUsers: false,
+  repSearch: '',
+  repFilterSegment: '',
+  repFilterType: ''
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -1693,27 +1696,29 @@ async function renderRepsView() {
     )
     .join('');
 
-  document.getElementById('repCreateForm').innerHTML = `
-    <input name="fullName" placeholder="Full name" required />
-    <input name="email" placeholder="Email" />
-    <input name="phone" placeholder="Phone" />
-    <input name="companyName" placeholder="Company" />
-    <button type="submit">Add Rep</button>
-  `;
+  const repSearchEl = document.getElementById('repSearch');
+  const repFilterSegmentEl = document.getElementById('repFilterSegment');
+  const repFilterTypeEl = document.getElementById('repFilterType');
+  repFilterSegmentEl.innerHTML = `<option value="">All segments</option>${state.segments
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join('')}`;
+  repFilterTypeEl.innerHTML = `<option value="">All types</option>${state.customerTypes
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join('')}`;
+  repSearchEl.value = state.repSearch || '';
+  repFilterSegmentEl.value = state.repFilterSegment || '';
+  repFilterTypeEl.value = state.repFilterType || '';
 
-  document.getElementById('repAssignmentForm').innerHTML = `
-    <select name="companyId" required>
-      <option value="">Select company</option>
-      ${state.companies.map((c) => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
-    </select>
-    <select name="repIds" multiple required>
-      ${state.reps.map((rep) => `<option value="${rep.id}">${escapeHtml(rep.full_name)}</option>`).join('')}
-    </select>
-    <button type="submit">Save Company Rep Assignment</button>
-  `;
-
-  document.getElementById('repsBody').innerHTML = state.reps
-    .map((rep) => {
+  const renderRepsTable = () => {
+    const filteredReps = state.reps.filter((rep) => {
+      const bySearch = !state.repSearch || String(rep.full_name || '').toLowerCase().includes(state.repSearch.toLowerCase());
+      if (!bySearch) return false;
+      if (state.repFilterSegment && rep.segment !== state.repFilterSegment) return false;
+      if (state.repFilterType && rep.customer_type !== state.repFilterType) return false;
+      return true;
+    });
+    document.getElementById('repsBody').innerHTML = filteredReps
+      .map((rep) => {
       const repId = toPositiveInt(rep.id);
       if (!repId) return '';
       const companies = state.repAssignments.filter((a) => toPositiveInt(a.rep_id) === repId).map((a) => a.company_name);
@@ -1732,8 +1737,10 @@ async function renderRepsView() {
           <div><button class="ghost" data-show-territories="${repId}">View Rules (${territoryCount})</button></div>
         </td>
       </tr>`;
-    })
-    .join('');
+      })
+      .join('');
+  };
+  renderRepsTable();
 
   document.getElementById('territoryForm').innerHTML = `
     <div class="full territory-editor">
@@ -1781,6 +1788,7 @@ async function renderRepsView() {
       </div>
       <div class="field-group">
         <strong>USA States</strong>
+        <p class="tiny">Green selected, red conflict with another rep in same segment/type.</p>
         ${stateCheckboxGridHtml('states', US_STATES)}
       </div>
       <div class="field-group">
@@ -1791,6 +1799,7 @@ async function renderRepsView() {
         <strong>Zip Rules</strong>
         <textarea name="zipCodes" rows="2" placeholder="901, 90210, -905, -98"></textarea>
         <p class="tiny">Use commas/new lines. Prefix with '-' to exclude. Allowed: 1-3 digit prefix or 5-digit zip.</p>
+        <div id="territoryConflictPreview" class="tiny"></div>
       </div>
       <div class="row wrap">
         <button type="submit">Save Territory Scope</button>
@@ -1940,41 +1949,27 @@ function bindRepsEvents() {
     };
   });
 
-  const repCreateForm = document.getElementById('repCreateForm');
-  repCreateForm.onsubmit = async (event) => {
-    event.preventDefault();
-    const fd = new FormData(repCreateForm);
-    try {
-      await api('/api/reps', {
-        method: 'POST',
-        body: JSON.stringify({
-          fullName: fd.get('fullName'),
-          email: fd.get('email'),
-          phone: fd.get('phone'),
-          companyName: fd.get('companyName')
-        })
-      });
-      await renderRepsView();
-      showToast('Rep created');
-    } catch (error) {
-      showToast(error.message, true);
-    }
-  };
-
-  const repAssignmentForm = document.getElementById('repAssignmentForm');
-  repAssignmentForm.onsubmit = async (event) => {
-    event.preventDefault();
-    const fd = new FormData(repAssignmentForm);
-    const companyId = Number(fd.get('companyId'));
-    const repIds = Array.from(repAssignmentForm.querySelector('[name="repIds"]').selectedOptions).map((o) => Number(o.value));
-    try {
-      await api(`/api/companies/${companyId}/reps`, { method: 'POST', body: JSON.stringify({ repIds }) });
-      await Promise.all([renderRepsView(), loadCompanies()]);
-      showToast('Company rep assignment saved');
-    } catch (error) {
-      showToast(error.message, true);
-    }
-  };
+  const repSearchEl = document.getElementById('repSearch');
+  const repFilterSegmentEl = document.getElementById('repFilterSegment');
+  const repFilterTypeEl = document.getElementById('repFilterType');
+  if (repSearchEl) {
+    repSearchEl.oninput = () => {
+      state.repSearch = repSearchEl.value || '';
+      renderRepsView();
+    };
+  }
+  if (repFilterSegmentEl) {
+    repFilterSegmentEl.onchange = () => {
+      state.repFilterSegment = repFilterSegmentEl.value || '';
+      renderRepsView();
+    };
+  }
+  if (repFilterTypeEl) {
+    repFilterTypeEl.onchange = () => {
+      state.repFilterType = repFilterTypeEl.value || '';
+      renderRepsView();
+    };
+  }
 
   document.querySelectorAll('[data-show-territories]').forEach((btn) => {
     btn.onclick = (event) => {
@@ -2047,6 +2042,90 @@ function bindRepsEvents() {
   const getCheckedValues = (fieldName) =>
     Array.from(territoryForm.querySelectorAll(`input[name="${fieldName}"]:checked`)).map((el) => el.value);
 
+  const computeCurrentConflicts = () => {
+    const repId = toPositiveInt(repSelectEl.value);
+    const segments = getCheckedValues('segments');
+    const customerTypes = getCheckedValues('customerTypes');
+    const states = getCheckedValues('states').map((s) => String(s || '').toUpperCase());
+    const zipTokens = String(zipCodesEl.value || '')
+      .split(/[\n,]/g)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((token) => {
+        const isExclusion = token.startsWith('-');
+        const raw = isExclusion ? token.slice(1) : token;
+        const digits = raw.replace(/\D/g, '');
+        return { isExclusion, digits };
+      })
+      .filter((token) => token.digits.length > 0);
+
+    const conflictStateSet = new Set();
+    const conflictDetails = [];
+    const eligibleRules = state.repTerritories.filter((rule) => {
+      if (toPositiveInt(rule.rep_id) === repId) return false;
+      if (rule.is_exclusion) return false;
+      if (segments.length > 0 && !segments.includes(rule.segment || '')) return false;
+      if (customerTypes.length > 0 && !customerTypes.includes(rule.customer_type || '')) return false;
+      return true;
+    });
+    const repNameById = new Map(state.reps.map((r) => [toPositiveInt(r.id), r.full_name || `Rep #${r.id}`]));
+
+    for (const stateCode of states) {
+      for (const rule of eligibleRules) {
+        if (rule.territory_type === 'state' && String(rule.state || '').toUpperCase() === stateCode) {
+          conflictStateSet.add(stateCode);
+          conflictDetails.push(`${repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep'} has state ${stateCode}`);
+        }
+      }
+    }
+
+    const includeZips = zipTokens.filter((t) => !t.isExclusion);
+    for (const token of includeZips) {
+      const digits = token.digits;
+      for (const rule of eligibleRules) {
+        const ruleZipExact = String(rule.zip_exact || '').replace(/\D/g, '');
+        const ruleZipPrefix = String(rule.zip_prefix || '').replace(/\D/g, '');
+        let matches = false;
+        if (digits.length === 5) {
+          if (rule.territory_type === 'zip_exact' && ruleZipExact === digits) matches = true;
+          if (rule.territory_type === 'zip_prefix' && ruleZipPrefix && digits.startsWith(ruleZipPrefix)) matches = true;
+        } else {
+          if (rule.territory_type === 'zip_exact' && ruleZipExact.startsWith(digits)) matches = true;
+          if (rule.territory_type === 'zip_prefix' && ruleZipPrefix && (digits.startsWith(ruleZipPrefix) || ruleZipPrefix.startsWith(digits))) {
+            matches = true;
+          }
+        }
+        if (!matches) continue;
+        const repName = repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep';
+        const where = rule.territory_type === 'zip_exact' ? ruleZipExact : ruleZipPrefix;
+        conflictDetails.push(`${repName} has ${rule.territory_type} ${where || '-'}`);
+      }
+    }
+    return {
+      conflictStateSet,
+      conflictDetails: Array.from(new Set(conflictDetails))
+    };
+  };
+
+  const updateTerritoryConflictHighlights = () => {
+    const conflictPreviewEl = document.getElementById('territoryConflictPreview');
+    if (!conflictPreviewEl) return;
+    const { conflictStateSet, conflictDetails } = computeCurrentConflicts();
+    territoryForm.querySelectorAll('input[name="states"]').forEach((cb) => {
+      const label = cb.closest('.state-chip');
+      if (!label) return;
+      const isConflict = cb.checked && conflictStateSet.has(String(cb.value || '').toUpperCase());
+      label.classList.toggle('conflict', isConflict);
+    });
+    if (conflictDetails.length === 0) {
+      conflictPreviewEl.textContent = 'No conflicts detected in current draft.';
+      conflictPreviewEl.classList.remove('territory-exclude');
+      return;
+    }
+    conflictPreviewEl.textContent = `Conflicts: ${conflictDetails.slice(0, 4).join(' • ')}${conflictDetails.length > 4 ? ` • +${conflictDetails.length - 4} more` : ''}`;
+    conflictPreviewEl.classList.add('territory-exclude');
+  };
+
   const loadTerritoryScope = () => {
     const repId = toPositiveInt(repSelectEl.value);
     if (!repId) return;
@@ -2086,6 +2165,7 @@ function bindRepsEvents() {
     );
     territoryForm.querySelector('[name="zipCodes"]').value = zipTokens.join(', ');
     renderTerritoryList(repId, segments, customerTypes);
+    updateTerritoryConflictHighlights();
   };
 
   const loadBtn = territoryForm.querySelector('#loadTerritoryScopeBtn');
@@ -2102,7 +2182,13 @@ function bindRepsEvents() {
     } else {
       document.getElementById('territoryList').innerHTML = '';
     }
+    updateTerritoryConflictHighlights();
   };
+
+  territoryForm.querySelectorAll('input[name="states"], input[name="segments"], input[name="customerTypes"]').forEach((el) => {
+    el.onchange = () => updateTerritoryConflictHighlights();
+  });
+  zipCodesEl.oninput = () => updateTerritoryConflictHighlights();
 
   territoryForm.onsubmit = async (event) => {
     event.preventDefault();
@@ -2135,6 +2221,7 @@ function bindRepsEvents() {
       const created = Number.isFinite(Number(result?.created)) ? Number(result.created) : 0;
       const removed = Number.isFinite(Number(result?.removed)) ? Number(result.removed) : 0;
       showToast(`Territory scope saved (added ${created}, removed ${removed})`);
+      updateTerritoryConflictHighlights();
     } catch (error) {
       if (error?.status === 409) {
         const conflicts = Array.isArray(error?.data?.conflicts) ? error.data.conflicts : [];
@@ -2164,6 +2251,7 @@ function bindRepsEvents() {
           const created = Number.isFinite(Number(forced?.created)) ? Number(forced.created) : 0;
           const removed = Number.isFinite(Number(forced?.removed)) ? Number(forced.removed) : 0;
           showToast(`Saved with conflicts (added ${created}, removed ${removed})`);
+          updateTerritoryConflictHighlights();
           return;
         } catch (forceError) {
           showToast(forceError.message, true);
@@ -2173,6 +2261,7 @@ function bindRepsEvents() {
       showToast(error.message, true);
     }
   };
+  updateTerritoryConflictHighlights();
 
   const segmentValueForm = document.getElementById('segmentValueForm');
   segmentValueForm.onsubmit = async (event) => {

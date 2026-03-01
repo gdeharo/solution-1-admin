@@ -215,8 +215,15 @@
         <details class="admin-section">
           <summary>Reps</summary>
           <div class="card">
-            <form id="repCreateForm" class="row wrap"></form>
-            <form id="repAssignmentForm" class="row wrap"></form>
+            <div class="row wrap">
+              <input id="repSearch" placeholder="Search rep name" />
+              <select id="repFilterSegment">
+                <option value="">All segments</option>
+              </select>
+              <select id="repFilterType">
+                <option value="">All types</option>
+              </select>
+            </div>
             <table>
               <thead>
                 <tr>

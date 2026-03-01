@@ -283,6 +283,11 @@ tr.clickable:hover {
   border-color: var(--accent);
 }
 
+.state-chip.conflict {
+  background: #ffe7e7;
+  border-color: var(--danger);
+}
+
 .hidden {
   display: none !important;
 }
