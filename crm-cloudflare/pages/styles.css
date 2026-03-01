@@ -276,6 +276,7 @@ tr.clickable:hover {
 
 .state-chip input {
   margin: 0;
+  accent-color: var(--accent);
 }
 
 .state-chip:has(input:checked) {
@@ -286,6 +287,10 @@ tr.clickable:hover {
 .state-chip.conflict {
   background: #ffe7e7;
   border-color: var(--danger);
+}
+
+.state-chip.conflict input {
+  accent-color: var(--danger);
 }
 
 .rep-picker {
