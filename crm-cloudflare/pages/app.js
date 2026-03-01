@@ -94,6 +94,59 @@ const US_STATES = [
 ];
 
 const CA_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
+const US_ZIP3_RANGES_BY_STATE = {
+  AL: [[350, 369]],
+  AK: [[995, 999]],
+  AZ: [[850, 865]],
+  AR: [[716, 729], [755, 755]],
+  CA: [[900, 966]],
+  CO: [[800, 816]],
+  CT: [[60, 69]],
+  DC: [[200, 205]],
+  DE: [[197, 199]],
+  FL: [[320, 349]],
+  GA: [[300, 319], [398, 399]],
+  HI: [[967, 968]],
+  IA: [[500, 528]],
+  ID: [[832, 838]],
+  IL: [[600, 629]],
+  IN: [[460, 479]],
+  KS: [[660, 679]],
+  KY: [[400, 427]],
+  LA: [[700, 714]],
+  MA: [[10, 27], [55, 55]],
+  MD: [[206, 219]],
+  ME: [[39, 49]],
+  MI: [[480, 499]],
+  MN: [[550, 567]],
+  MO: [[630, 658]],
+  MS: [[386, 397]],
+  MT: [[590, 599]],
+  NC: [[269, 289]],
+  ND: [[580, 588]],
+  NE: [[680, 693]],
+  NH: [[30, 39]],
+  NJ: [[70, 89]],
+  NM: [[870, 884]],
+  NV: [[889, 898]],
+  NY: [[5, 5], [63, 63], [90, 149]],
+  OH: [[430, 459]],
+  OK: [[730, 749]],
+  OR: [[970, 979]],
+  PA: [[150, 196]],
+  RI: [[28, 29]],
+  SC: [[290, 299]],
+  SD: [[570, 577]],
+  TN: [[370, 385]],
+  TX: [[750, 799], [885, 885]],
+  UT: [[840, 847]],
+  VA: [[201, 201], [220, 246]],
+  VT: [[50, 59]],
+  WA: [[980, 994]],
+  WI: [[530, 549]],
+  WV: [[247, 268]],
+  WY: [[820, 831]]
+};
 const TERRITORY_STATE_OPTIONS = [
   ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'], ['CO', 'Colorado'],
   ['CT', 'Connecticut'], ['DE', 'Delaware'], ['FL', 'Florida'], ['GA', 'Georgia'], ['HI', 'Hawaii'], ['ID', 'Idaho'],
@@ -174,6 +227,37 @@ function toPositiveInt(value) {
 
 function normalizeZipForMatch(value) {
   return String(value || '').replace(/\D/g, '').trim();
+}
+
+function zipTokenToZip3Range(value) {
+  const digits = normalizeZipForMatch(value);
+  if (!digits) return null;
+  if (digits.length === 5) {
+    const zip3 = Number(digits.slice(0, 3));
+    return Number.isFinite(zip3) ? [zip3, zip3] : null;
+  }
+  if (digits.length === 3) {
+    const zip3 = Number(digits);
+    return Number.isFinite(zip3) ? [zip3, zip3] : null;
+  }
+  if (digits.length === 2) {
+    const p = Number(digits);
+    return Number.isFinite(p) ? [p * 10, p * 10 + 9] : null;
+  }
+  if (digits.length === 1) {
+    const p = Number(digits);
+    return Number.isFinite(p) ? [p * 100, p * 100 + 99] : null;
+  }
+  return null;
+}
+
+function zipTokenMayOverlapState(value, stateCode) {
+  const code = String(stateCode || '').trim().toUpperCase();
+  const ranges = US_ZIP3_RANGES_BY_STATE[code];
+  const zip3Range = zipTokenToZip3Range(value);
+  if (!ranges || !zip3Range) return false;
+  const [minZip3, maxZip3] = zip3Range;
+  return ranges.some(([start, end]) => start <= maxZip3 && end >= minZip3);
 }
 
 function territoryRuleMatchesCompany(rule, company) {
@@ -2091,6 +2175,22 @@ function bindRepsEvents() {
             territoryType: 'state',
             where: stateCode
           });
+          continue;
+        }
+        if (rule.territory_type === 'zip_exact' || rule.territory_type === 'zip_prefix') {
+          const zipToken = rule.territory_type === 'zip_exact' ? rule.zip_exact : rule.zip_prefix;
+          if (!zipTokenMayOverlapState(zipToken, stateCode)) continue;
+          conflictStateSet.add(stateCode);
+          const repName = repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep';
+          const typeName = String(rule.customer_type || 'All Types');
+          const segmentName = String(rule.segment || 'All Segments');
+          conflictEntries.push({
+            repName,
+            typeName,
+            segmentName,
+            territoryType: rule.territory_type,
+            where: normalizeZipForMatch(zipToken) || '-'
+          });
         }
       }
     }
@@ -2122,6 +2222,20 @@ function bindRepsEvents() {
           segmentName,
           territoryType: rule.territory_type,
           where: where || '-'
+        });
+      }
+      for (const rule of eligibleRules) {
+        if (rule.territory_type !== 'state') continue;
+        if (!zipTokenMayOverlapState(digits, rule.state)) continue;
+        const repName = repNameById.get(toPositiveInt(rule.rep_id)) || 'Rep';
+        const typeName = String(rule.customer_type || 'All Types');
+        const segmentName = String(rule.segment || 'All Segments');
+        conflictEntries.push({
+          repName,
+          typeName,
+          segmentName,
+          territoryType: 'state',
+          where: String(rule.state || '').toUpperCase() || '-'
         });
       }
     }

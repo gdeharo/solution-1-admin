@@ -239,6 +239,96 @@ function uniqueTrimmed(values: unknown[]): string[] {
   return Array.from(new Set(values.map((value) => normalizedText(String(value))).filter(Boolean)));
 }
 
+const US_ZIP3_RANGES_BY_STATE: Record<string, Array<[number, number]>> = {
+  AL: [[350, 369]],
+  AK: [[995, 999]],
+  AZ: [[850, 865]],
+  AR: [[716, 729], [755, 755]],
+  CA: [[900, 966]],
+  CO: [[800, 816]],
+  CT: [[60, 69]],
+  DC: [[200, 205]],
+  DE: [[197, 199]],
+  FL: [[320, 349]],
+  GA: [[300, 319], [398, 399]],
+  HI: [[967, 968]],
+  IA: [[500, 528]],
+  ID: [[832, 838]],
+  IL: [[600, 629]],
+  IN: [[460, 479]],
+  KS: [[660, 679]],
+  KY: [[400, 427]],
+  LA: [[700, 714]],
+  MA: [[10, 27], [55, 55]],
+  MD: [[206, 219]],
+  ME: [[39, 49]],
+  MI: [[480, 499]],
+  MN: [[550, 567]],
+  MO: [[630, 658]],
+  MS: [[386, 397]],
+  MT: [[590, 599]],
+  NC: [[269, 289]],
+  ND: [[580, 588]],
+  NE: [[680, 693]],
+  NH: [[30, 39]],
+  NJ: [[70, 89]],
+  NM: [[870, 884]],
+  NV: [[889, 898]],
+  NY: [[5, 5], [63, 63], [90, 149]],
+  OH: [[430, 459]],
+  OK: [[730, 749]],
+  OR: [[970, 979]],
+  PA: [[150, 196]],
+  RI: [[28, 29]],
+  SC: [[290, 299]],
+  SD: [[570, 577]],
+  TN: [[370, 385]],
+  TX: [[750, 799], [885, 885]],
+  UT: [[840, 847]],
+  VA: [[201, 201], [220, 246]],
+  VT: [[50, 59]],
+  WA: [[980, 994]],
+  WI: [[530, 549]],
+  WV: [[247, 268]],
+  WY: [[820, 831]]
+};
+
+function zipTokenToZip3Range(value: string | null | undefined): [number, number] | null {
+  const digits = normalizeZip(value);
+  if (!digits) return null;
+  if (digits.length === 5) {
+    const zip3 = Number(digits.slice(0, 3));
+    if (!Number.isFinite(zip3)) return null;
+    return [zip3, zip3];
+  }
+  if (digits.length === 3) {
+    const zip3 = Number(digits);
+    if (!Number.isFinite(zip3)) return null;
+    return [zip3, zip3];
+  }
+  if (digits.length === 2) {
+    const prefix = Number(digits);
+    if (!Number.isFinite(prefix)) return null;
+    return [prefix * 10, prefix * 10 + 9];
+  }
+  if (digits.length === 1) {
+    const prefix = Number(digits);
+    if (!Number.isFinite(prefix)) return null;
+    return [prefix * 100, prefix * 100 + 99];
+  }
+  return null;
+}
+
+function zipTokenMayOverlapState(value: string | null | undefined, stateCode: string | null | undefined): boolean {
+  const code = normalizedText(stateCode).toUpperCase();
+  const stateRanges = US_ZIP3_RANGES_BY_STATE[code];
+  if (!stateRanges || stateRanges.length === 0) return false;
+  const zip3Range = zipTokenToZip3Range(value);
+  if (!zip3Range) return false;
+  const [minZip3, maxZip3] = zip3Range;
+  return stateRanges.some(([start, end]) => start <= maxZip3 && end >= minZip3);
+}
+
 function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: number): string {
   const includeClause = `EXISTS (
     SELECT 1
@@ -1858,9 +1948,35 @@ addRoute(
         customerType: string;
       }
     >();
+    const addConflictRows = (
+      rows: Array<{
+        rep_id: number;
+        rep_name: string;
+        territory_type: string;
+        state: string | null;
+        zip_prefix: string | null;
+        zip_exact: string | null;
+        segment: string;
+        customer_type: string;
+      }>
+    ) => {
+      for (const row of rows || []) {
+        const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
+        conflictMap.set(key, {
+          repId: row.rep_id,
+          repName: row.rep_name,
+          territoryType: row.territory_type,
+          state: row.state,
+          zipPrefix: row.zip_prefix,
+          zipExact: row.zip_exact,
+          segment: row.segment,
+          customerType: row.customer_type
+        });
+      }
+    };
     for (const rule of includeRules) {
       if (rule.territoryType === 'state') {
-        const rows = await env.CRM_DB.prepare(
+        const stateRows = await env.CRM_DB.prepare(
           `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
                   t.segment, t.customer_type
            FROM rep_territories t
@@ -1883,22 +1999,37 @@ addRoute(
             segment: string;
             customer_type: string;
           }>();
-        for (const row of rows.results || []) {
-          const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
-          conflictMap.set(key, {
-            repId: row.rep_id,
-            repName: row.rep_name,
-            territoryType: row.territory_type,
-            state: row.state,
-            zipPrefix: row.zip_prefix,
-            zipExact: row.zip_exact,
-            segment: row.segment,
-            customerType: row.customer_type
-          });
-        }
+        addConflictRows(stateRows.results || []);
+
+        const zipRows = await env.CRM_DB.prepare(
+          `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
+                  t.segment, t.customer_type
+           FROM rep_territories t
+           LEFT JOIN reps r ON r.id = t.rep_id
+           WHERE t.rep_id <> ?1
+             AND t.is_exclusion = 0
+             AND t.segment = ?2
+             AND t.customer_type = ?3
+             AND t.territory_type IN ('zip_exact', 'zip_prefix')`
+        )
+          .bind(body.repId, rule.segment, rule.customerType)
+          .all<{
+            rep_id: number;
+            rep_name: string;
+            territory_type: string;
+            state: string | null;
+            zip_prefix: string | null;
+            zip_exact: string | null;
+            segment: string;
+            customer_type: string;
+          }>();
+        const overlaps = (zipRows.results || []).filter((row) =>
+          zipTokenMayOverlapState(row.territory_type === 'zip_exact' ? row.zip_exact : row.zip_prefix, rule.state)
+        );
+        addConflictRows(overlaps);
       }
       if (rule.territoryType === 'zip_exact') {
-        const rows = await env.CRM_DB.prepare(
+        const zipRows = await env.CRM_DB.prepare(
           `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
                   t.segment, t.customer_type
            FROM rep_territories t
@@ -1929,22 +2060,35 @@ addRoute(
             segment: string;
             customer_type: string;
           }>();
-        for (const row of rows.results || []) {
-          const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
-          conflictMap.set(key, {
-            repId: row.rep_id,
-            repName: row.rep_name,
-            territoryType: row.territory_type,
-            state: row.state,
-            zipPrefix: row.zip_prefix,
-            zipExact: row.zip_exact,
-            segment: row.segment,
-            customerType: row.customer_type
-          });
-        }
+        addConflictRows(zipRows.results || []);
+
+        const stateRows = await env.CRM_DB.prepare(
+          `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
+                  t.segment, t.customer_type
+           FROM rep_territories t
+           LEFT JOIN reps r ON r.id = t.rep_id
+           WHERE t.rep_id <> ?1
+             AND t.is_exclusion = 0
+             AND t.territory_type = 'state'
+             AND t.segment = ?2
+             AND t.customer_type = ?3`
+        )
+          .bind(body.repId, rule.segment, rule.customerType)
+          .all<{
+            rep_id: number;
+            rep_name: string;
+            territory_type: string;
+            state: string | null;
+            zip_prefix: string | null;
+            zip_exact: string | null;
+            segment: string;
+            customer_type: string;
+          }>();
+        const overlaps = (stateRows.results || []).filter((row) => zipTokenMayOverlapState(rule.zipExact, row.state));
+        addConflictRows(overlaps);
       }
       if (rule.territoryType === 'zip_prefix') {
-        const rows = await env.CRM_DB.prepare(
+        const zipRows = await env.CRM_DB.prepare(
           `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
                   t.segment, t.customer_type
            FROM rep_territories t
@@ -1979,19 +2123,32 @@ addRoute(
             segment: string;
             customer_type: string;
           }>();
-        for (const row of rows.results || []) {
-          const key = `${row.rep_id}|${row.territory_type}|${row.state || ''}|${row.zip_prefix || ''}|${row.zip_exact || ''}|${row.segment}|${row.customer_type}`;
-          conflictMap.set(key, {
-            repId: row.rep_id,
-            repName: row.rep_name,
-            territoryType: row.territory_type,
-            state: row.state,
-            zipPrefix: row.zip_prefix,
-            zipExact: row.zip_exact,
-            segment: row.segment,
-            customerType: row.customer_type
-          });
-        }
+        addConflictRows(zipRows.results || []);
+
+        const stateRows = await env.CRM_DB.prepare(
+          `SELECT t.rep_id, COALESCE(r.full_name, 'Rep #' || t.rep_id) AS rep_name, t.territory_type, t.state, t.zip_prefix, t.zip_exact,
+                  t.segment, t.customer_type
+           FROM rep_territories t
+           LEFT JOIN reps r ON r.id = t.rep_id
+           WHERE t.rep_id <> ?1
+             AND t.is_exclusion = 0
+             AND t.territory_type = 'state'
+             AND t.segment = ?2
+             AND t.customer_type = ?3`
+        )
+          .bind(body.repId, rule.segment, rule.customerType)
+          .all<{
+            rep_id: number;
+            rep_name: string;
+            territory_type: string;
+            state: string | null;
+            zip_prefix: string | null;
+            zip_exact: string | null;
+            segment: string;
+            customer_type: string;
+          }>();
+        const overlaps = (stateRows.results || []).filter((row) => zipTokenMayOverlapState(rule.zipPrefix, row.state));
+        addConflictRows(overlaps);
       }
     }
 
