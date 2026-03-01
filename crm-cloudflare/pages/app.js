@@ -2469,7 +2469,7 @@ function openRepAccounts(repId) {
   const safeRepId = toPositiveInt(repId);
   if (!safeRepId) {
     document.getElementById('repAccountsTitle').textContent = 'Accounts';
-    document.getElementById('repTerritorySummary').innerHTML = '<li class="tiny">Invalid rep selection.</li>';
+    document.getElementById('repTerritorySummaryBody').innerHTML = '<tr><td colspan="3" class="tiny">Invalid rep selection.</td></tr>';
     document.getElementById('repAccountsBody').innerHTML = '<tr><td colspan="4">No assigned companies.</td></tr>';
     setView('repAccountsView', 'Accounts');
     return;
@@ -2478,9 +2478,67 @@ function openRepAccounts(repId) {
   const companies = state.repAssignments.filter((a) => toPositiveInt(a.rep_id) === safeRepId);
   const territories = state.repTerritories.filter((t) => toPositiveInt(t.rep_id) === safeRepId);
   document.getElementById('repAccountsTitle').textContent = `Accounts • ${rep?.full_name || ''}`;
-  document.getElementById('repTerritorySummary').innerHTML = territories.length
-    ? territories.map((item) => `<li>${territoryRuleHtml(item)}</li>`).join('')
-    : '<li class="tiny">No territories assigned</li>';
+  if (!territories.length) {
+    document.getElementById('repTerritorySummaryBody').innerHTML = '<tr><td colspan="3" class="tiny">No territories assigned</td></tr>';
+  } else {
+    const groupMap = new Map();
+    for (const rule of territories) {
+      const type = String(rule.customer_type || 'All Types');
+      const segment = String(rule.segment || 'All Segments');
+      const key = `${type}||${segment}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          type,
+          segment,
+          states: new Set(),
+          cityStates: new Set(),
+          zips: new Set()
+        });
+      }
+      const group = groupMap.get(key);
+      if (rule.territory_type === 'state' && rule.state) {
+        group.states.add(String(rule.state).toUpperCase());
+      }
+      if (rule.territory_type === 'city_state' && (rule.city || rule.state)) {
+        group.cityStates.add(`${String(rule.city || '').trim()}, ${String(rule.state || '').trim()}`.replace(/^,\s*/, '').trim());
+      }
+      if (rule.territory_type === 'zip_prefix' || rule.territory_type === 'zip_exact') {
+        const zip = String(rule.zip_prefix || rule.zip_exact || '').replace(/\D/g, '');
+        if (zip) group.zips.add(`${rule.is_exclusion ? '-' : ''}${zip}`);
+      }
+    }
+
+    const rows = Array.from(groupMap.values())
+      .map((group) => {
+        const territoryParts = [
+          ...Array.from(group.states).sort(),
+          ...Array.from(group.cityStates).sort(),
+          ...Array.from(group.zips).sort()
+        ];
+        return {
+          type: group.type,
+          segment: group.segment,
+          territories: territoryParts.join(', ') || '-'
+        };
+      })
+      .sort((a, b) => {
+        if (a.type === b.type) return a.segment.localeCompare(b.segment);
+        return a.type.localeCompare(b.type);
+      });
+
+    let lastType = null;
+    document.getElementById('repTerritorySummaryBody').innerHTML = rows
+      .map((row) => {
+        const showType = row.type !== lastType;
+        lastType = row.type;
+        return `<tr>
+          <td>${showType ? escapeHtml(row.type) : ''}</td>
+          <td>${escapeHtml(row.segment)}</td>
+          <td>${escapeHtml(row.territories)}</td>
+        </tr>`;
+      })
+      .join('');
+  }
   document.getElementById('repAccountsBody').innerHTML = companies.length
     ? companies
         .map(
