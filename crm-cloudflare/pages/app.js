@@ -1699,15 +1699,19 @@ async function renderRepsView() {
   const repSearchEl = document.getElementById('repSearch');
   const repFilterSegmentEl = document.getElementById('repFilterSegment');
   const repFilterTypeEl = document.getElementById('repFilterType');
-  repFilterSegmentEl.innerHTML = `<option value="">All segments</option>${state.segments
-    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
-    .join('')}`;
-  repFilterTypeEl.innerHTML = `<option value="">All types</option>${state.customerTypes
-    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
-    .join('')}`;
-  repSearchEl.value = state.repSearch || '';
-  repFilterSegmentEl.value = state.repFilterSegment || '';
-  repFilterTypeEl.value = state.repFilterType || '';
+  if (repFilterSegmentEl) {
+    repFilterSegmentEl.innerHTML = `<option value="">All segments</option>${state.segments
+      .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+      .join('')}`;
+    repFilterSegmentEl.value = state.repFilterSegment || '';
+  }
+  if (repFilterTypeEl) {
+    repFilterTypeEl.innerHTML = `<option value="">All types</option>${state.customerTypes
+      .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+      .join('')}`;
+    repFilterTypeEl.value = state.repFilterType || '';
+  }
+  if (repSearchEl) repSearchEl.value = state.repSearch || '';
 
   const renderRepsTable = () => {
     const filteredReps = state.reps.filter((rep) => {
