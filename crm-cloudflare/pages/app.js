@@ -1818,7 +1818,7 @@ async function renderRepsView() {
       <div class="rep-picker">
         <input id="territoryRepSearch" placeholder="Find rep" />
         <input type="hidden" name="repId" />
-        <div id="territoryRepList" class="rep-picker-list"></div>
+        <select id="territoryRepSelect" size="4" aria-label="Territory rep list"></select>
       </div>
       <div class="field-group">
         <strong>Type</strong>
@@ -2036,8 +2036,8 @@ function bindRepsEvents() {
   const repSelectEl = territoryForm.querySelector('[name="repId"]');
   const zipCodesEl = territoryForm.querySelector('[name="zipCodes"]');
   const repSearchPickerEl = territoryForm.querySelector('#territoryRepSearch');
-  const repPickerListEl = territoryForm.querySelector('#territoryRepList');
-  if (!repSelectEl || !zipCodesEl || !repSearchPickerEl || !repPickerListEl) return;
+  const repPickerSelectEl = territoryForm.querySelector('#territoryRepSelect');
+  if (!repSelectEl || !zipCodesEl || !repSearchPickerEl || !repPickerSelectEl) return;
 
   const getCheckedValues = (fieldName) =>
     Array.from(territoryForm.querySelectorAll(`input[name="${fieldName}"]:checked`)).map((el) => el.value);
@@ -2167,43 +2167,42 @@ function bindRepsEvents() {
 
   const renderRepPickerList = () => {
     const q = String(state.territoryRepSearch || '').trim().toLowerCase();
-    const candidates = state.reps
+    let candidates = state.reps
       .filter((rep) => toPositiveInt(rep.id))
       .filter((rep) => !q || String(rep.full_name || '').toLowerCase().includes(q))
-      .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')))
-      .slice(0, 4);
-    repPickerListEl.innerHTML = candidates.length
+      .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || '')));
+
+    if (state.selectedTerritoryRepId && !candidates.some((rep) => toPositiveInt(rep.id) === state.selectedTerritoryRepId)) {
+      const selectedRep = state.reps.find((rep) => toPositiveInt(rep.id) === state.selectedTerritoryRepId);
+      if (selectedRep) candidates = [selectedRep, ...candidates];
+    }
+    candidates = candidates.slice(0, 4);
+
+    repPickerSelectEl.innerHTML = candidates.length
       ? candidates
           .map((rep) => {
             const repId = toPositiveInt(rep.id);
-            return `<button type="button" class="${state.selectedTerritoryRepId === repId ? 'active' : ''}" data-territory-pick-rep="${repId}">${escapeHtml(
-              rep.full_name || ''
-            )}</button>`;
+            return `<option value="${repId}" ${state.selectedTerritoryRepId === repId ? 'selected' : ''}>${escapeHtml(rep.full_name || '')}</option>`;
           })
           .join('')
-      : '<div class="tiny" style="padding:0.5rem;">No reps found</div>';
-    repPickerListEl.querySelectorAll('[data-territory-pick-rep]').forEach((btn) => {
-      btn.onclick = () => {
-        const repId = toPositiveInt(btn.dataset.territoryPickRep);
-        if (!repId) return;
-        state.selectedTerritoryRepId = repId;
-        repSelectEl.value = String(repId);
-        const rep = state.reps.find((r) => toPositiveInt(r.id) === repId);
-        state.territoryRepSearch = String(rep?.full_name || '');
-        repSearchPickerEl.value = state.territoryRepSearch;
-        renderRepPickerList();
-        loadTerritoryScope(repId);
-      };
-    });
+      : '<option value="">No reps found</option>';
   };
   repSearchPickerEl.value = state.territoryRepSearch || '';
   repSearchPickerEl.oninput = () => {
     state.territoryRepSearch = repSearchPickerEl.value || '';
     renderRepPickerList();
   };
+  repPickerSelectEl.onchange = () => {
+    const repId = toPositiveInt(repPickerSelectEl.value);
+    if (!repId) return;
+    state.selectedTerritoryRepId = repId;
+    repSelectEl.value = String(repId);
+    loadTerritoryScope(repId);
+  };
   renderRepPickerList();
   if (state.selectedTerritoryRepId) {
     repSelectEl.value = String(state.selectedTerritoryRepId);
+    repPickerSelectEl.value = String(state.selectedTerritoryRepId);
     loadTerritoryScope(state.selectedTerritoryRepId);
   }
 

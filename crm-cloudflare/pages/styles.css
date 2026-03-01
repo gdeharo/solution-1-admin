@@ -284,9 +284,11 @@ tr.clickable:hover {
   border-color: var(--accent);
 }
 
-.state-chip.conflict {
+.state-chip.conflict,
+.state-chip.conflict:has(input:checked) {
   background: #ffe7e7;
   border-color: var(--danger);
+  color: #5e142f;
 }
 
 .state-chip.conflict input {
@@ -299,33 +301,16 @@ tr.clickable:hover {
   min-width: 260px;
 }
 
-.rep-picker-list {
+#territoryRepSelect {
   border: 1px solid var(--line);
   border-radius: 8px;
-  max-height: 150px;
+  min-height: 150px;
   overflow: auto;
   background: #fff;
 }
 
-.rep-picker-list button {
-  width: 100%;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: #fff;
-  color: var(--ink);
-  text-align: left;
-  padding: 0.45rem 0.6rem;
-}
-
-.rep-picker-list button:last-child {
-  border-bottom: 0;
-}
-
-.rep-picker-list button.active {
-  background: var(--accent-soft);
-  color: var(--ink);
-  font-weight: 700;
+#territoryRepSelect option {
+  padding: 0.35rem 0.5rem;
 }
 
 .hidden {
