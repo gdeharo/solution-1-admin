@@ -370,6 +370,54 @@ function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: n
   return `(${includeClause} AND ${excludeClause})`;
 }
 
+function repTerritoryCompanyScopeClauseForRepId(companyAlias: string, repIdExpr: string): string {
+  const includeClause = `EXISTS (
+    SELECT 1
+    FROM rep_territories t
+    WHERE t.rep_id = ${repIdExpr}
+      AND t.is_exclusion = 0
+      AND (
+        (t.territory_type = 'state'
+          AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(${companyAlias}.state, ''))))
+        OR
+        (t.territory_type = 'city_state'
+          AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(${companyAlias}.state, '')))
+          AND upper(trim(coalesce(t.city, ''))) = upper(trim(coalesce(${companyAlias}.city, ''))))
+        OR
+        (t.territory_type = 'zip_exact'
+          AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') =
+              replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', ''))
+        OR
+        (t.territory_type = 'zip_prefix'
+          AND trim(coalesce(t.zip_prefix, '')) <> ''
+          AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
+              (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+      )
+      AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ${companyAlias}.segment)
+      AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ${companyAlias}.customer_type)
+  )`;
+  const excludeClause = `NOT EXISTS (
+    SELECT 1
+    FROM rep_territories tx
+    WHERE tx.rep_id = ${repIdExpr}
+      AND tx.is_exclusion = 1
+      AND tx.territory_type IN ('zip_prefix', 'zip_exact')
+      AND (
+        (tx.territory_type = 'zip_exact'
+          AND replace(replace(upper(trim(coalesce(tx.zip_exact, ''))), '-', ''), ' ', '') =
+              replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', ''))
+        OR
+        (tx.territory_type = 'zip_prefix'
+          AND trim(coalesce(tx.zip_prefix, '')) <> ''
+          AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
+              (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+      )
+      AND (tx.segment IS NULL OR trim(tx.segment) = '' OR tx.segment = ${companyAlias}.segment)
+      AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR tx.customer_type = ${companyAlias}.customer_type)
+  )`;
+  return `(${includeClause} AND ${excludeClause})`;
+}
+
 async function suggestedRepIdsForCompany(
   env: Env,
   data: { city?: string | null; state?: string | null; zip?: string | null; segment?: string | null; customerType?: string | null }
@@ -956,22 +1004,107 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/companies$/,
-  withAuth(async (_request, env, user) => {
+  withAuth(async (_request, env, user, url) => {
+    const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize') || 25)));
+    const q = normalizedText(url.searchParams.get('q'));
+    const dueDays = Math.max(0, Number(url.searchParams.get('dueDays') || 0));
+    const pendingOnly = normalizedText(url.searchParams.get('pendingOnly')) === '1';
+    const offset = (page - 1) * pageSize;
+
+    const whereParts: string[] = ['c.deleted_at IS NULL'];
     const binds: unknown[] = [];
-    let sql =
-      `SELECT
-         c.*, 
-         (SELECT COUNT(*) FROM customers cu WHERE cu.company_id = c.id AND cu.deleted_at IS NULL) AS customer_count,
-         (SELECT COUNT(*) FROM company_reps cr WHERE cr.company_id = c.id) AS rep_count
-       FROM companies c
-       WHERE c.deleted_at IS NULL`;
     if (user.role === 'rep') {
-      sql += ` AND ${repTerritoryCompanyScopeClause('c', 1)}`;
+      whereParts.push(repTerritoryCompanyScopeClause('c', binds.length + 1));
       binds.push(user.email);
     }
-    sql += ` ORDER BY c.name ASC`;
-    const companies = binds.length ? await env.CRM_DB.prepare(sql).bind(...binds).all() : await env.CRM_DB.prepare(sql).all();
-    return json({ companies: companies.results });
+    if (q) {
+      const likeValue = `%${q.toLowerCase()}%`;
+      whereParts.push(
+        `(
+          lower(coalesce(c.name, '')) LIKE ?${binds.length + 1}
+          OR lower(coalesce(c.city, '')) LIKE ?${binds.length + 1}
+          OR lower(coalesce(c.state, '')) LIKE ?${binds.length + 1}
+          OR EXISTS (
+            SELECT 1
+            FROM reps rr
+            WHERE rr.deleted_at IS NULL
+              AND lower(coalesce(rr.full_name, '')) LIKE ?${binds.length + 1}
+              AND (
+                EXISTS (SELECT 1 FROM company_reps cr WHERE cr.company_id = c.id AND cr.rep_id = rr.id)
+                OR ${repTerritoryCompanyScopeClauseForRepId('c', 'rr.id')}
+              )
+          )
+        )`
+      );
+      binds.push(likeValue);
+    }
+    if (dueDays > 0) {
+      whereParts.push(
+        `EXISTS (
+          SELECT 1
+          FROM interactions i
+          WHERE i.company_id = c.id
+            AND i.deleted_at IS NULL
+            AND i.next_action_at IS NOT NULL
+            AND datetime(i.next_action_at) <= datetime('now', '+${dueDays} days')
+        )`
+      );
+    }
+    if (pendingOnly) {
+      whereParts.push(
+        `NOT EXISTS (
+          SELECT 1
+          FROM interactions i
+          WHERE i.company_id = c.id AND i.deleted_at IS NULL
+        )`
+      );
+    }
+    const whereClause = whereParts.join(' AND ');
+
+    const totalRow = await env.CRM_DB.prepare(`SELECT COUNT(*) AS c FROM companies c WHERE ${whereClause}`)
+      .bind(...binds)
+      .first<{ c: number }>();
+    const total = Number(totalRow?.c || 0);
+
+    const companies = await env.CRM_DB.prepare(
+      `SELECT
+         c.*,
+         (SELECT COUNT(*) FROM customers cu WHERE cu.company_id = c.id AND cu.deleted_at IS NULL) AS customer_count,
+         (SELECT COUNT(*) FROM company_reps cr WHERE cr.company_id = c.id) AS rep_count,
+         (
+           SELECT MIN(i.next_action_at)
+           FROM interactions i
+           WHERE i.company_id = c.id
+             AND i.deleted_at IS NULL
+             AND i.next_action_at IS NOT NULL
+         ) AS next_action_at,
+         (
+           SELECT GROUP_CONCAT(name, ', ')
+           FROM (
+             SELECT DISTINCT rr.full_name AS name
+             FROM reps rr
+             WHERE rr.deleted_at IS NULL
+               AND (
+                 EXISTS (SELECT 1 FROM company_reps cr WHERE cr.company_id = c.id AND cr.rep_id = rr.id)
+                 OR ${repTerritoryCompanyScopeClauseForRepId('c', 'rr.id')}
+               )
+             ORDER BY rr.full_name
+           )
+         ) AS rep_names
+       FROM companies c
+       WHERE ${whereClause}
+       ORDER BY
+         CASE WHEN ?${binds.length + 1} = 1 THEN
+           COALESCE((SELECT MIN(datetime(i.next_action_at)) FROM interactions i WHERE i.company_id = c.id AND i.deleted_at IS NULL AND i.next_action_at IS NOT NULL), '9999-12-31')
+         ELSE c.name END ASC,
+         c.name ASC
+       LIMIT ?${binds.length + 2} OFFSET ?${binds.length + 3}`
+    )
+      .bind(...binds, dueDays > 0 ? 1 : 0, pageSize, offset)
+      .all();
+
+    return json({ companies: companies.results, total, page, pageSize });
   }) as any
 );
 
@@ -2898,6 +3031,177 @@ addRoute(
     sql += ` GROUP BY rep_name ORDER BY interaction_count DESC, rep_name ASC`;
     const rows = await env.CRM_DB.prepare(sql).bind(...binds).all();
     return json({ days, repActivity: rows.results });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/reports\/weekly-activity$/,
+  withAuth(async (_request, env, user, url) => {
+    if (!canWrite(user.role)) return err('Forbidden', 403);
+    const referenceFridayRaw = normalizedText(url.searchParams.get('referenceFriday'));
+    const segment = normalizedText(url.searchParams.get('segment'));
+    const customerType = normalizedText(url.searchParams.get('customerType'));
+    const repIdFilter = Number(url.searchParams.get('repId') || 0);
+
+    const referenceFridayDate = referenceFridayRaw ? new Date(`${referenceFridayRaw}T12:00:00.000Z`) : new Date();
+    if (Number.isNaN(referenceFridayDate.getTime())) return err('Invalid referenceFriday');
+    const friday = new Date(Date.UTC(referenceFridayDate.getUTCFullYear(), referenceFridayDate.getUTCMonth(), referenceFridayDate.getUTCDate()));
+    const currentWeekStart = new Date(friday);
+    currentWeekStart.setUTCDate(friday.getUTCDate() - 4);
+    const prevWeekStart = new Date(currentWeekStart);
+    prevWeekStart.setUTCDate(currentWeekStart.getUTCDate() - 7);
+    const prevWeekEnd = new Date(friday);
+    prevWeekEnd.setUTCDate(friday.getUTCDate() - 7);
+    const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
+    const currentWeekStartIso = isoDate(currentWeekStart);
+    const currentWeekEndIso = isoDate(friday);
+    const prevWeekStartIso = isoDate(prevWeekStart);
+    const prevWeekEndIso = isoDate(prevWeekEnd);
+
+    let reps: Array<{ id: number; full_name: string; email: string | null }> = [];
+    if (user.role === 'rep') {
+      reps = (
+        await env.CRM_DB.prepare(
+          `SELECT id, full_name, email
+           FROM reps
+           WHERE deleted_at IS NULL
+             AND email IS NOT NULL
+             AND lower(email) = lower(?1)
+           ORDER BY full_name ASC`
+        )
+          .bind(user.email)
+          .all<{ id: number; full_name: string; email: string | null }>()
+      ).results || [];
+    } else {
+      const binds: unknown[] = [];
+      let sql = `SELECT id, full_name, email FROM reps WHERE deleted_at IS NULL`;
+      if (repIdFilter > 0) {
+        sql += ` AND id = ?${binds.length + 1}`;
+        binds.push(repIdFilter);
+      }
+      sql += ` ORDER BY full_name ASC`;
+      reps = (await env.CRM_DB.prepare(sql).bind(...binds).all<{ id: number; full_name: string; email: string | null }>()).results || [];
+    }
+
+    const reportReps: Array<{
+      repId: number;
+      repName: string;
+      lastWeekInteractions: Array<{ date: string; companyName: string; contacts: string; notes: string }>;
+      upcomingFollowUps: Array<{ date: string; companyName: string; contacts: string; nextAction: string }>;
+    }> = [];
+
+    for (const rep of reps) {
+      if (!rep.email) continue;
+      const baseFilters = `AND (?4 = '' OR c.segment = ?4) AND (?5 = '' OR c.customer_type = ?5)`;
+      const territoryScope = repTerritoryCompanyScopeClauseForRepId('c', '?6');
+
+      const lastWeek = await env.CRM_DB.prepare(
+        `SELECT
+           date(i.created_at) AS interaction_date,
+           c.name AS company_name,
+           COALESCE((
+             SELECT GROUP_CONCAT(name, ', ')
+             FROM (
+               SELECT DISTINCT trim(coalesce(cu.first_name, '') || ' ' || coalesce(cu.last_name, '')) AS name
+               FROM customers cu
+               WHERE cu.company_id = c.id
+                 AND cu.deleted_at IS NULL
+                 AND trim(coalesce(cu.first_name, '') || ' ' || coalesce(cu.last_name, '')) <> ''
+               ORDER BY name
+             )
+           ), '-') AS contacts,
+           i.meeting_notes
+         FROM interactions i
+         JOIN companies c ON c.id = i.company_id
+         JOIN users u ON u.id = i.created_by_user_id
+         WHERE i.deleted_at IS NULL
+           AND c.deleted_at IS NULL
+           AND lower(u.email) = lower(?1)
+           AND date(i.created_at) >= date(?2)
+           AND date(i.created_at) <= date(?3)
+           ${baseFilters}
+           AND ${territoryScope}
+         ORDER BY date(i.created_at) ASC, c.name ASC`
+      )
+        .bind(rep.email, prevWeekStartIso, prevWeekEndIso, segment, customerType, rep.id)
+        .all<{
+          interaction_date: string;
+          company_name: string;
+          contacts: string;
+          meeting_notes: string | null;
+        }>();
+
+      const upcoming = await env.CRM_DB.prepare(
+        `SELECT
+           date(i.next_action_at) AS next_date,
+           c.name AS company_name,
+           COALESCE((
+             SELECT GROUP_CONCAT(name, ', ')
+             FROM (
+               SELECT DISTINCT trim(coalesce(cu.first_name, '') || ' ' || coalesce(cu.last_name, '')) AS name
+               FROM customers cu
+               WHERE cu.company_id = c.id
+                 AND cu.deleted_at IS NULL
+                 AND trim(coalesce(cu.first_name, '') || ' ' || coalesce(cu.last_name, '')) <> ''
+               ORDER BY name
+             )
+           ), '-') AS contacts,
+           i.next_action
+         FROM interactions i
+         JOIN companies c ON c.id = i.company_id
+         WHERE i.deleted_at IS NULL
+           AND c.deleted_at IS NULL
+           AND i.next_action_at IS NOT NULL
+           AND date(i.next_action_at) >= date(?1)
+           AND date(i.next_action_at) <= date(?2)
+           AND (?3 = '' OR c.segment = ?3)
+           AND (?4 = '' OR c.customer_type = ?4)
+           AND ${repTerritoryCompanyScopeClauseForRepId('c', '?5')}
+           AND date(i.next_action_at) = (
+             SELECT MIN(date(ix.next_action_at))
+             FROM interactions ix
+             WHERE ix.company_id = c.id
+               AND ix.deleted_at IS NULL
+               AND ix.next_action_at IS NOT NULL
+               AND date(ix.next_action_at) >= date(?1)
+               AND date(ix.next_action_at) <= date(?2)
+           )
+         GROUP BY c.id, next_date
+         ORDER BY next_date ASC, c.name ASC`
+      )
+        .bind(currentWeekStartIso, currentWeekEndIso, segment, customerType, rep.id)
+        .all<{
+          next_date: string;
+          company_name: string;
+          contacts: string;
+          next_action: string | null;
+        }>();
+
+      reportReps.push({
+        repId: rep.id,
+        repName: rep.full_name,
+        lastWeekInteractions: (lastWeek.results || []).map((row) => ({
+          date: row.interaction_date,
+          companyName: row.company_name,
+          contacts: row.contacts,
+          notes: row.meeting_notes || ''
+        })),
+        upcomingFollowUps: (upcoming.results || []).map((row) => ({
+          date: row.next_date,
+          companyName: row.company_name,
+          contacts: row.contacts,
+          nextAction: row.next_action || ''
+        }))
+      });
+    }
+
+    return json({
+      referenceFriday: isoDate(friday),
+      previousWeek: { start: prevWeekStartIso, end: prevWeekEndIso },
+      currentWeek: { start: currentWeekStartIso, end: currentWeekEndIso },
+      reps: reportReps
+    });
   }) as any
 );
 

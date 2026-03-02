@@ -6,6 +6,11 @@ const state = {
   currentCompany: null,
   companyContacts: [],
   companyInteractions: [],
+  companyRowsTotal: 0,
+  companyPage: 1,
+  companyPageSize: 25,
+  companyDue14Only: false,
+  companyPendingOnly: false,
   repAssignments: [],
   repTerritories: [],
   segments: [],
@@ -28,7 +33,8 @@ const state = {
   territoryRepSearch: '',
   selectedTerritoryRepId: 0,
   auditDays: 14,
-  auditLimit: 50
+  auditLimit: 50,
+  weeklyReport: null
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -37,6 +43,7 @@ const THEME_STORAGE_KEY = 'crm_theme_v1';
 const VIEW_IDS = [
   'authView',
   'companyListView',
+  'weeklyReportView',
   'companyDetailView',
   'contactDetailView',
   'contactCreateView',
@@ -50,6 +57,7 @@ const els = {
   pageTitle: document.getElementById('pageTitle'),
   pageHint: document.getElementById('pageHint'),
   backBtn: document.getElementById('backBtn'),
+  weeklyReportBtn: document.getElementById('weeklyReportBtn'),
   manageRepsBtn: document.getElementById('manageRepsBtn'),
   whoami: document.getElementById('whoami'),
   logoutBtn: document.getElementById('logoutBtn'),
@@ -636,8 +644,17 @@ async function api(path, options = {}) {
 }
 
 async function loadCompanies() {
-  const result = await api('/api/companies');
-  state.companies = result.companies;
+  const params = new URLSearchParams();
+  params.set('page', String(state.companyPage));
+  params.set('pageSize', String(state.companyPageSize));
+  if (state.companyFilter.trim()) params.set('q', state.companyFilter.trim());
+  if (state.companyDue14Only) params.set('dueDays', '14');
+  if (state.companyPendingOnly) params.set('pendingOnly', '1');
+  const result = await api(`/api/companies?${params.toString()}`);
+  state.companies = result.companies || [];
+  state.companyRowsTotal = Number(result.total || 0);
+  state.companyPage = Number(result.page || state.companyPage);
+  state.companyPageSize = Number(result.pageSize || state.companyPageSize);
   renderCompanies();
 }
 
@@ -690,14 +707,8 @@ function renderCreateCompanySelects() {
   }
 }
 
-function filteredCompanies() {
-  const q = state.companyFilter.trim().toLowerCase();
-  if (!q) return state.companies;
-  return state.companies.filter((c) => `${c.name || ''} ${c.city || ''} ${c.state || ''}`.toLowerCase().includes(q));
-}
-
 function renderCompanies() {
-  const rows = filteredCompanies();
+  const rows = state.companies;
   const body = document.getElementById('companiesBody');
   body.innerHTML = rows
     .map(
@@ -705,12 +716,26 @@ function renderCompanies() {
       <td>${escapeHtml(c.name)}</td>
       <td>${escapeHtml(c.city || '')}</td>
       <td>${escapeHtml(c.state || '')}</td>
+      <td>${c.next_action_at ? escapeHtml(new Date(c.next_action_at).toLocaleDateString()) : '-'}</td>
+      <td>${escapeHtml(c.rep_names || '-')}</td>
     </tr>`
     )
     .join('');
 
-  document.getElementById('noCompanyMatch').classList.toggle('hidden', rows.length > 0);
+  document.getElementById('noCompanyMatch').classList.toggle('hidden', rows.length > 0 || state.companyRowsTotal > 0);
   document.getElementById('quickAddCompanyBtn').classList.toggle('hidden', !canWrite());
+  const dueBtn = document.getElementById('due14FilterBtn');
+  const pendingBtn = document.getElementById('pendingInteractionFilterBtn');
+  if (dueBtn) dueBtn.classList.toggle('ghost', !state.companyDue14Only);
+  if (pendingBtn) pendingBtn.classList.toggle('ghost', !state.companyPendingOnly);
+
+  const pageInfo = document.getElementById('companyPageInfo');
+  const totalPages = Math.max(1, Math.ceil((state.companyRowsTotal || 0) / state.companyPageSize));
+  if (pageInfo) pageInfo.textContent = `Page ${state.companyPage} of ${totalPages} (${state.companyRowsTotal} total)`;
+  const prevBtn = document.getElementById('companyPrevPageBtn');
+  const nextBtn = document.getElementById('companyNextPageBtn');
+  if (prevBtn) prevBtn.disabled = state.companyPage <= 1;
+  if (nextBtn) nextBtn.disabled = state.companyPage >= totalPages;
 
   body.querySelectorAll('tr[data-company-id]').forEach((row) => {
     row.onclick = () => openCompany(Number(row.dataset.companyId));
@@ -2894,6 +2919,101 @@ function openRepAccounts(repId) {
   setView('repAccountsView', `Accounts • ${rep?.full_name || ''}`);
 }
 
+function currentWeekFridayIso() {
+  const today = new Date();
+  const day = today.getDay(); // 0=Sun ... 5=Fri
+  const daysUntilFriday = (5 - day + 7) % 7;
+  const friday = new Date(today);
+  friday.setDate(today.getDate() + daysUntilFriday);
+  return friday.toISOString().slice(0, 10);
+}
+
+async function openWeeklyReportView() {
+  const form = document.getElementById('weeklyReportForm');
+  const reportBody = document.getElementById('weeklyReportBody');
+  const reportMeta = document.getElementById('weeklyReportMeta');
+  if (!form || !reportBody || !reportMeta) return;
+
+  form.innerHTML = `
+    <label><span class="sr-only">Reference Friday</span><input name="referenceFriday" type="date" value="${escapeHtml(
+      state.weeklyReport?.referenceFriday || currentWeekFridayIso()
+    )}" /></label>
+    <label><span class="sr-only">Segment</span><select name="segment"><option value="">All segments</option>${state.segments
+      .map((x) => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`)
+      .join('')}</select></label>
+    <label><span class="sr-only">Type</span><select name="customerType"><option value="">All types</option>${state.customerTypes
+      .map((x) => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`)
+      .join('')}</select></label>
+    <label><span class="sr-only">Rep</span><select name="repId"><option value="">All reps</option>${state.reps
+      .map((r) => `<option value="${toPositiveInt(r.id)}">${escapeHtml(r.full_name || '')}</option>`)
+      .join('')}</select></label>
+    <button type="submit">Run</button>
+  `;
+
+  const renderReport = async () => {
+    const fd = new FormData(form);
+    const params = new URLSearchParams();
+    params.set('referenceFriday', String(fd.get('referenceFriday') || currentWeekFridayIso()));
+    if (String(fd.get('segment') || '')) params.set('segment', String(fd.get('segment')));
+    if (String(fd.get('customerType') || '')) params.set('customerType', String(fd.get('customerType')));
+    if (String(fd.get('repId') || '')) params.set('repId', String(fd.get('repId')));
+    const data = await api(`/api/reports/weekly-activity?${params.toString()}`);
+    state.weeklyReport = data;
+    reportMeta.textContent = `Week ending ${data.referenceFriday} | Last week: ${data.previousWeek.start} to ${data.previousWeek.end} | Current week: ${data.currentWeek.start} to ${data.currentWeek.end}`;
+    const reps = Array.isArray(data.reps) ? data.reps : [];
+    reportBody.innerHTML = reps.length
+      ? reps
+          .map(
+            (rep) => `<section class="report-rep-page">
+          <h3>${escapeHtml(rep.repName || '')}</h3>
+          <h4>Last Week Interactions</h4>
+          <table>
+            <thead><tr><th>Date</th><th>Company</th><th>Contact(s)</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${
+                (rep.lastWeekInteractions || []).length
+                  ? rep.lastWeekInteractions
+                      .map(
+                        (row) => `<tr><td>${escapeHtml(row.date || '')}</td><td>${escapeHtml(row.companyName || '')}</td><td>${escapeHtml(
+                          row.contacts || '-'
+                        )}</td><td>${escapeHtml(row.notes || '')}</td></tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="4" class="tiny">No interactions</td></tr>'
+              }
+            </tbody>
+          </table>
+          <h4>Upcoming Follow-ups (Current Week)</h4>
+          <table>
+            <thead><tr><th>Date</th><th>Company</th><th>Contact(s)</th><th>Next Action</th></tr></thead>
+            <tbody>
+              ${
+                (rep.upcomingFollowUps || []).length
+                  ? rep.upcomingFollowUps
+                      .map(
+                        (row) => `<tr><td>${escapeHtml(row.date || '')}</td><td>${escapeHtml(row.companyName || '')}</td><td>${escapeHtml(
+                          row.contacts || '-'
+                        )}</td><td>${escapeHtml(row.nextAction || '')}</td></tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="4" class="tiny">No follow-ups</td></tr>'
+              }
+            </tbody>
+          </table>
+        </section>`
+          )
+          .join('')
+      : '<div class="tiny">No reps in scope for this report.</div>';
+  };
+
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    await renderReport();
+  };
+  await renderReport();
+  setView('weeklyReportView', 'Weekly Activity Report');
+}
+
 async function loadSession() {
   if (!state.token) {
     setView('authView', 'Sign in', false);
@@ -2906,6 +3026,7 @@ async function loadSession() {
     els.whoami.textContent = `${state.user.fullName} (${state.user.role})`;
     els.whoami.classList.remove('hidden');
     els.logoutBtn.classList.remove('hidden');
+    els.weeklyReportBtn.classList.toggle('hidden', !canWrite());
     els.manageRepsBtn.classList.toggle('hidden', !canManageReps());
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
@@ -3015,6 +3136,7 @@ els.logoutBtn.onclick = async () => {
   localStorage.removeItem('crm_token');
   els.whoami.classList.add('hidden');
   els.logoutBtn.classList.add('hidden');
+  els.weeklyReportBtn.classList.add('hidden');
   els.manageRepsBtn.classList.add('hidden');
   setView('authView', 'Sign in', false);
 };
@@ -3052,6 +3174,16 @@ els.manageRepsBtn.onclick = async () => {
   }
 };
 
+els.weeklyReportBtn.onclick = async () => {
+  try {
+    await openWeeklyReportView();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+};
+
+document.getElementById('printWeeklyReportBtn').onclick = () => window.print();
+
 document.addEventListener('keydown', async (event) => {
   if (event.key !== 'Escape') return;
   const overlay = document.querySelector('.action-modal-overlay');
@@ -3077,7 +3209,33 @@ document.addEventListener('keydown', async (event) => {
 
 document.getElementById('companySearch').oninput = (event) => {
   state.companyFilter = event.target.value;
-  renderCompanies();
+  state.companyPage = 1;
+  loadCompanies();
+};
+
+document.getElementById('due14FilterBtn').onclick = async () => {
+  state.companyDue14Only = !state.companyDue14Only;
+  state.companyPage = 1;
+  await loadCompanies();
+};
+
+document.getElementById('pendingInteractionFilterBtn').onclick = async () => {
+  state.companyPendingOnly = !state.companyPendingOnly;
+  state.companyPage = 1;
+  await loadCompanies();
+};
+
+document.getElementById('companyPrevPageBtn').onclick = async () => {
+  if (state.companyPage <= 1) return;
+  state.companyPage -= 1;
+  await loadCompanies();
+};
+
+document.getElementById('companyNextPageBtn').onclick = async () => {
+  const totalPages = Math.max(1, Math.ceil((state.companyRowsTotal || 0) / state.companyPageSize));
+  if (state.companyPage >= totalPages) return;
+  state.companyPage += 1;
+  await loadCompanies();
 };
 
 function toggleCreateCompany(show) {

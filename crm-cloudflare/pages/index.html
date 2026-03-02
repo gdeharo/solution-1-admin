@@ -46,6 +46,7 @@
       </div>
       <div class="top-actions">
         <button id="backBtn" class="ghost hidden" type="button">Back</button>
+        <button id="weeklyReportBtn" class="hidden" type="button">Weekly Activity</button>
         <button id="manageRepsBtn" class="hidden" type="button">Admin Panel</button>
         <span id="whoami" class="whoami hidden"></span>
         <button id="logoutBtn" class="hidden" type="button">Log out</button>
@@ -84,10 +85,14 @@
       <section id="companyListView" class="panel hidden">
         <div class="row between">
           <h2>Companies</h2>
-          <button id="showCreateCompanyBtn" type="button">Add Company</button>
+          <div class="row wrap">
+            <button id="showCreateCompanyBtn" type="button">Add Company</button>
+            <button id="due14FilterBtn" class="ghost" type="button">Due/Overdue +14d</button>
+            <button id="pendingInteractionFilterBtn" class="ghost" type="button">Pending Interaction</button>
+          </div>
         </div>
         <div class="row">
-          <input id="companySearch" class="search" placeholder="Search by company, city, or state" />
+          <input id="companySearch" class="search" placeholder="Search by company, city, state, or rep" />
         </div>
         <div id="noCompanyMatch" class="empty hidden">
           <p>No matching companies found.</p>
@@ -121,10 +126,27 @@
               <th>Company</th>
               <th>City</th>
               <th>State</th>
+              <th>Next Action</th>
+              <th>Rep(s)</th>
             </tr>
           </thead>
           <tbody id="companiesBody"></tbody>
         </table>
+        <div class="row between">
+          <button id="companyPrevPageBtn" type="button" class="ghost">Prev</button>
+          <span id="companyPageInfo" class="tiny"></span>
+          <button id="companyNextPageBtn" type="button" class="ghost">Next</button>
+        </div>
+      </section>
+
+      <section id="weeklyReportView" class="panel hidden">
+        <div class="row between wrap">
+          <h2>Weekly Activity Report</h2>
+          <button id="printWeeklyReportBtn" type="button">Download PDF</button>
+        </div>
+        <form id="weeklyReportForm" class="row wrap"></form>
+        <div id="weeklyReportMeta" class="tiny"></div>
+        <div id="weeklyReportBody"></div>
       </section>
 
       <section id="companyDetailView" class="hidden">

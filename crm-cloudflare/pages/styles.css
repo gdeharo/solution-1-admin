@@ -356,6 +356,23 @@ tr.clickable:hover {
   margin: 0;
 }
 
+#weeklyReportBody {
+  margin-top: 0.8rem;
+}
+
+.report-rep-page {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.7rem;
+  margin-bottom: 0.8rem;
+  background: var(--panel);
+}
+
+.report-rep-page h3,
+.report-rep-page h4 {
+  margin: 0.35rem 0 0.45rem;
+}
+
 .company-top-row {
   display: grid;
   gap: 0.6rem;
@@ -747,5 +764,44 @@ tr.clickable:hover {
   }
   .value-columns {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.5in;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #weeklyReportView,
+  #weeklyReportView * {
+    visibility: visible;
+  }
+  #weeklyReportView {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .topbar,
+  #weeklyReportForm,
+  #printWeeklyReportBtn {
+    display: none !important;
+  }
+  .report-rep-page {
+    page-break-after: always;
+    break-after: page;
+    border: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .report-rep-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
   }
 }
