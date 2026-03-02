@@ -1661,7 +1661,7 @@ addRoute(
   withAuth(async (request, env, user) => {
     if (!canManageUsers(user.role)) return err('Forbidden', 403);
 
-    const body = await parseJson<{ email: string; fullName: string; role: UserRole; password?: string }>(request);
+    const body = await parseJson<{ email: string; fullName: string; role: UserRole; phone?: string; password?: string }>(request);
     if (!body?.email || !body?.fullName || !body?.role) {
       return err('email, fullName, and role are required');
     }
@@ -1685,13 +1685,50 @@ addRoute(
       .bind(inviteToken, result.meta.last_row_id, inviteExpiresAt, user.id)
       .run();
 
-    await audit(env, user, 'create', 'user', String(result.meta.last_row_id), { email: body.email, role: body.role });
+    let repId: number | null = null;
+    if (body.role === 'rep') {
+      const existingRep = await env.CRM_DB.prepare(
+        `SELECT id
+         FROM reps
+         WHERE email IS NOT NULL AND lower(email) = lower(?1)
+         ORDER BY id DESC
+         LIMIT 1`
+      )
+        .bind(body.email.toLowerCase().trim())
+        .first<{ id: number }>();
+      if (existingRep?.id) {
+        repId = existingRep.id;
+        await env.CRM_DB.prepare(
+          `UPDATE reps
+           SET full_name = ?1, phone = ?2, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?3`
+        )
+          .bind(body.fullName.trim(), normalizedText(body.phone) || null, repId)
+          .run();
+      } else {
+        const repInsert = await env.CRM_DB.prepare(
+          `INSERT INTO reps (full_name, company_name, is_independent, email, phone, segment, customer_type)
+           VALUES (?1, NULL, 0, ?2, ?3, NULL, NULL)`
+        )
+          .bind(body.fullName.trim(), body.email.toLowerCase().trim(), normalizedText(body.phone) || null)
+          .run();
+        repId = Number(repInsert.meta.last_row_id);
+      }
+    }
+
+    await audit(env, user, 'create', 'user', String(result.meta.last_row_id), {
+      email: body.email,
+      role: body.role,
+      phone: normalizedText(body.phone) || null,
+      repId
+    });
     return json(
       {
         id: result.meta.last_row_id,
         temporaryPassword,
         inviteToken,
-        inviteExpiresAt
+        inviteExpiresAt,
+        repId
       },
       201
     );

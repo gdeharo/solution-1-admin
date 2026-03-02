@@ -784,6 +784,7 @@ function renderCompanyDetail() {
             ? `<a class="phone-link" href="${companyPhoneHref}">${escapeHtml(c.main_phone)}</a>`
             : `<div class="readonly-value">${escapeHtml(c.main_phone || '-')}</div>`
       }</label>
+      <label><span class="sr-only">Assigned reps</span><div class="readonly-value">${escapeHtml(assignedRepNames)}</div></label>
     </div>
     <div class="company-box-grid full">
       <div id="companyAddressBox" class="card company-box ${isEditing ? '' : 'address-clickable'}" ${isEditing ? '' : `title="Open in Google Maps"`}>
@@ -833,11 +834,6 @@ function renderCompanyDetail() {
             isEditing
               ? `<select name="customerType" aria-label="Type" ${readOnly}>${typeOptions}</select>`
               : `<div class="readonly-value">${escapeHtml(c.customer_type || '-')}</div>`
-          }</label>
-          <label><span class="sr-only">Assigned reps</span>${
-            isEditing
-              ? `<input value="${escapeHtml(assignedRepNames)}" placeholder="Assigned reps" aria-label="Assigned reps" disabled />`
-              : `<div class="readonly-value">${escapeHtml(assignedRepNames)}</div>`
           }</label>
         </div>
       </div>
@@ -2015,6 +2011,7 @@ async function renderRepsView() {
     document.getElementById('userCreateForm').innerHTML = `
       <input name="fullName" placeholder="Full name" required />
       <input name="email" placeholder="Email" type="email" required />
+      <input name="phone" placeholder="Phone (optional)" />
       <select name="role" required>
         <option value="viewer">Viewer</option>
         <option value="rep">Rep</option>
@@ -2655,7 +2652,8 @@ function bindRepsEvents() {
           body: JSON.stringify({
             fullName: fd.get('fullName'),
             email: fd.get('email'),
-            role: fd.get('role')
+            role: fd.get('role'),
+            phone: fd.get('phone')
           })
         });
         const payload = buildInviteEmailPayload(
