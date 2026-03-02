@@ -45,6 +45,10 @@ summary {
   font-size: 1.2rem;
 }
 
+.topbar h1 .title-rep {
+  font-weight: 400;
+}
+
 .topbar p {
   margin: 0.2rem 0 0;
   color: var(--muted);
@@ -355,7 +359,7 @@ tr.clickable:hover {
 .company-top-row {
   display: grid;
   gap: 0.6rem;
-  grid-template-columns: 2fr 1fr 1.2fr;
+  grid-template-columns: 2fr 1fr;
 }
 
 .company-box-grid {

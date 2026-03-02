@@ -744,7 +744,10 @@ async function openCompany(companyId, pushHistory = true) {
   }
 
   renderCompanyDetail();
+  const assignedRepNames = (state.currentCompany.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
   setView('companyDetailView', state.currentCompany.name, pushHistory);
+  els.pageTitle.innerHTML = `${escapeHtml(state.currentCompany.name)} <span class="title-rep">(Rep: ${escapeHtml(assignedRepNames)})</span>`;
+  els.pageHint.textContent = `${state.currentCompany.name} (Rep: ${assignedRepNames})`;
 }
 
 function renderCompanyDetail() {
@@ -784,7 +787,6 @@ function renderCompanyDetail() {
             ? `<a class="phone-link" href="${companyPhoneHref}">${escapeHtml(c.main_phone)}</a>`
             : `<div class="readonly-value">${escapeHtml(c.main_phone || '-')}</div>`
       }</label>
-      <label><span class="sr-only">Assigned reps</span><div class="readonly-value">${escapeHtml(assignedRepNames)}</div></label>
     </div>
     <div class="company-box-grid full">
       <div id="companyAddressBox" class="card company-box ${isEditing ? '' : 'address-clickable'}" ${isEditing ? '' : `title="Open in Google Maps"`}>
