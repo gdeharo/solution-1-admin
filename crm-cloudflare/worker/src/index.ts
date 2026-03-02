@@ -433,6 +433,18 @@ async function suggestedRepIdsForCompany(
   return (rows.results || []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0);
 }
 
+async function deleteAttachmentsForEntity(env: Env, entityType: 'company' | 'customer' | 'interaction', entityId: number): Promise<number> {
+  const rows = await env.CRM_DB.prepare(`SELECT id, file_key FROM attachments WHERE entity_type = ?1 AND entity_id = ?2`)
+    .bind(entityType, entityId)
+    .all<{ id: number; file_key: string }>();
+  const attachments = rows.results || [];
+  for (const attachment of attachments) {
+    await env.CRM_FILES.delete(attachment.file_key);
+  }
+  await env.CRM_DB.prepare(`DELETE FROM attachments WHERE entity_type = ?1 AND entity_id = ?2`).bind(entityType, entityId).run();
+  return attachments.length;
+}
+
 async function repCanAccessCompany(env: Env, user: AuthedUser, companyId: number): Promise<boolean> {
   const row = await env.CRM_DB.prepare(
     `SELECT c.id
@@ -2453,8 +2465,9 @@ addRoute(
     if (!companyId) return err('company id is required');
     const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
     if (repAccessError) return repAccessError;
+    const deletedAttachmentCount = await deleteAttachmentsForEntity(env, 'company', companyId);
     await env.CRM_DB.prepare(`UPDATE companies SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(companyId).run();
-    await audit(env, user, 'delete', 'company', String(companyId));
+    await audit(env, user, 'delete', 'company', String(companyId), { deletedAttachmentCount });
     return json({ success: true });
   }) as any
 );
@@ -2515,8 +2528,9 @@ addRoute(
     if (!customerId) return err('customer id is required');
     const repAccessError = await ensureRepCanAccessCustomer(env, user, customerId);
     if (repAccessError) return repAccessError;
+    const deletedAttachmentCount = await deleteAttachmentsForEntity(env, 'customer', customerId);
     await env.CRM_DB.prepare(`UPDATE customers SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(customerId).run();
-    await audit(env, user, 'delete', 'customer', String(customerId));
+    await audit(env, user, 'delete', 'customer', String(customerId), { deletedAttachmentCount });
     return json({ success: true });
   }) as any
 );
@@ -2629,8 +2643,9 @@ addRoute(
     if (!interactionId) return err('interaction id is required');
     const repAccessError = await ensureRepCanAccessInteraction(env, user, interactionId);
     if (repAccessError) return repAccessError;
+    const deletedAttachmentCount = await deleteAttachmentsForEntity(env, 'interaction', interactionId);
     await env.CRM_DB.prepare(`UPDATE interactions SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(interactionId).run();
-    await audit(env, user, 'delete', 'interaction', String(interactionId));
+    await audit(env, user, 'delete', 'interaction', String(interactionId), { deletedAttachmentCount });
     return json({ success: true });
   }) as any
 );
@@ -2762,22 +2777,27 @@ addRoute(
   'GET',
   /^\/api\/reports\/rep-activity$/,
   withAuth(async (_request, env, user, url) => {
-    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    if (!canWrite(user.role)) return err('Forbidden', 403);
     const days = Number(url.searchParams.get('days') || 30);
     const sinceIso = new Date(Date.now() - Math.max(days, 1) * 86400000).toISOString();
-    const rows = await env.CRM_DB.prepare(
+    const binds: unknown[] = [sinceIso];
+    let sql =
       `SELECT
          COALESCE(r.full_name, 'Unassigned') AS rep_name,
          COUNT(i.id) AS interaction_count,
          MAX(i.created_at) AS last_interaction_at
        FROM interactions i
+       JOIN companies c ON c.id = i.company_id
        LEFT JOIN reps r ON r.id = i.rep_id
-       WHERE i.deleted_at IS NULL AND i.created_at >= ?1
-       GROUP BY rep_name
-       ORDER BY interaction_count DESC, rep_name ASC`
-    )
-      .bind(sinceIso)
-      .all();
+       WHERE i.deleted_at IS NULL
+         AND c.deleted_at IS NULL
+         AND i.created_at >= ?1`;
+    if (user.role === 'rep') {
+      sql += ` AND i.created_by_user_id = ?2 AND ${repTerritoryCompanyScopeClause('c', 3)}`;
+      binds.push(user.id, user.email);
+    }
+    sql += ` GROUP BY rep_name ORDER BY interaction_count DESC, rep_name ASC`;
+    const rows = await env.CRM_DB.prepare(sql).bind(...binds).all();
     return json({ days, repActivity: rows.results });
   }) as any
 );
@@ -2786,11 +2806,12 @@ addRoute(
   'GET',
   /^\/api\/reports\/follow-ups$/,
   withAuth(async (_request, env, user, url) => {
-    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    if (!canWrite(user.role)) return err('Forbidden', 403);
     const days = Number(url.searchParams.get('days') || 14);
     const now = new Date();
     const until = new Date(now.getTime() + Math.max(days, 1) * 86400000).toISOString();
-    const rows = await env.CRM_DB.prepare(
+    const binds: unknown[] = [now.toISOString(), until];
+    let sql =
       `SELECT
          i.id,
          c.name AS company_name,
@@ -2803,13 +2824,16 @@ addRoute(
        LEFT JOIN customers cu ON cu.id = i.customer_id
        LEFT JOIN reps r ON r.id = i.rep_id
        WHERE i.deleted_at IS NULL
+         AND c.deleted_at IS NULL
          AND i.next_action_at IS NOT NULL
          AND i.next_action_at >= ?1
-         AND i.next_action_at <= ?2
-       ORDER BY i.next_action_at ASC`
-    )
-      .bind(now.toISOString(), until)
-      .all();
+         AND i.next_action_at <= ?2`;
+    if (user.role === 'rep') {
+      sql += ` AND i.created_by_user_id = ?3 AND ${repTerritoryCompanyScopeClause('c', 4)}`;
+      binds.push(user.id, user.email);
+    }
+    sql += ` ORDER BY i.next_action_at ASC`;
+    const rows = await env.CRM_DB.prepare(sql).bind(...binds).all();
     return json({ days, followUps: rows.results });
   }) as any
 );
@@ -2818,10 +2842,11 @@ addRoute(
   'GET',
   /^\/api\/reports\/company-engagement$/,
   withAuth(async (_request, env, user, url) => {
-    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    if (!canWrite(user.role)) return err('Forbidden', 403);
     const days = Number(url.searchParams.get('days') || 90);
     const sinceIso = new Date(Date.now() - Math.max(days, 1) * 86400000).toISOString();
-    const rows = await env.CRM_DB.prepare(
+    const binds: unknown[] = [sinceIso];
+    let sql =
       `SELECT
          c.id,
          c.name AS company_name,
@@ -2829,12 +2854,13 @@ addRoute(
          MAX(i.created_at) AS last_interaction_at
        FROM companies c
        LEFT JOIN interactions i ON i.company_id = c.id AND i.deleted_at IS NULL AND i.created_at >= ?1
-       WHERE c.deleted_at IS NULL
-       GROUP BY c.id, c.name
-       ORDER BY interactions DESC, c.name ASC`
-    )
-      .bind(sinceIso)
-      .all();
+       WHERE c.deleted_at IS NULL`;
+    if (user.role === 'rep') {
+      sql += ` AND ${repTerritoryCompanyScopeClause('c', 2)}`;
+      binds.push(user.email);
+    }
+    sql += ` GROUP BY c.id, c.name ORDER BY interactions DESC, c.name ASC`;
+    const rows = await env.CRM_DB.prepare(sql).bind(...binds).all();
     return json({ days, companyEngagement: rows.results });
   }) as any
 );
