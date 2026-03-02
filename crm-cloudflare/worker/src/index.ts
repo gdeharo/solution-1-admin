@@ -2775,6 +2775,36 @@ addRoute(
 
 addRoute(
   'GET',
+  /^\/api\/audit-log$/,
+  withAuth(async (_request, env, user, url) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const days = Math.max(1, Number(url.searchParams.get('days') || 14));
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 50)));
+    const sinceIso = new Date(Date.now() - days * 86400000).toISOString();
+    const rows = await env.CRM_DB.prepare(
+      `SELECT
+         a.id,
+         a.created_at,
+         a.action,
+         a.entity_type,
+         a.entity_id,
+         a.details_json,
+         u.full_name AS actor_name,
+         u.email AS actor_email
+       FROM audit_log a
+       LEFT JOIN users u ON u.id = a.actor_user_id
+       WHERE a.created_at >= ?1
+       ORDER BY a.created_at DESC
+       LIMIT ?2`
+    )
+      .bind(sinceIso, limit)
+      .all();
+    return json({ days, limit, entries: rows.results });
+  }) as any
+);
+
+addRoute(
+  'GET',
   /^\/api\/reports\/rep-activity$/,
   withAuth(async (_request, env, user, url) => {
     if (!canWrite(user.role)) return err('Forbidden', 403);

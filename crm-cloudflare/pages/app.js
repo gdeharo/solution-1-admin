@@ -26,7 +26,9 @@ const state = {
   repFilterSegment: '',
   repFilterType: '',
   territoryRepSearch: '',
-  selectedTerritoryRepId: 0
+  selectedTerritoryRepId: 0,
+  auditDays: 14,
+  auditLimit: 50
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -223,6 +225,18 @@ function territoryRuleHtml(item, includeClass = true) {
 function toPositiveInt(value) {
   const n = Number.parseInt(String(value ?? '').trim(), 10);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function shortDetails(valueJson) {
+  if (!valueJson) return '';
+  try {
+    const parsed = typeof valueJson === 'string' ? JSON.parse(valueJson) : valueJson;
+    const text = JSON.stringify(parsed);
+    return text.length > 180 ? `${text.slice(0, 177)}...` : text;
+  } catch {
+    const raw = String(valueJson);
+    return raw.length > 180 ? `${raw.slice(0, 177)}...` : raw;
+  }
 }
 
 function normalizeZipForMatch(value) {
@@ -1942,6 +1956,7 @@ async function renderRepsView() {
         <div id="territoryZipPreview" class="tiny"></div>
         <div id="territoryConflictPreview" class="tiny"></div>
       </div>
+      <div id="territoryDraftSummary" class="tiny"></div>
       <div class="row wrap">
         <button type="submit">Save Territory Scope</button>
       </div>
@@ -1977,6 +1992,22 @@ async function renderRepsView() {
       </li>`
     )
     .join('');
+
+  document.getElementById('auditFilterForm').innerHTML = `
+    <select name="days" aria-label="Days">
+      <option value="7" ${String(state.auditDays) === '7' ? 'selected' : ''}>Last 7 days</option>
+      <option value="14" ${String(state.auditDays) === '14' ? 'selected' : ''}>Last 14 days</option>
+      <option value="30" ${String(state.auditDays) === '30' ? 'selected' : ''}>Last 30 days</option>
+      <option value="90" ${String(state.auditDays) === '90' ? 'selected' : ''}>Last 90 days</option>
+    </select>
+    <select name="limit" aria-label="Rows">
+      <option value="25" ${String(state.auditLimit) === '25' ? 'selected' : ''}>25 rows</option>
+      <option value="50" ${String(state.auditLimit) === '50' ? 'selected' : ''}>50 rows</option>
+      <option value="100" ${String(state.auditLimit) === '100' ? 'selected' : ''}>100 rows</option>
+    </select>
+    <button type="submit">Refresh</button>
+  `;
+  document.getElementById('auditBody').innerHTML = '<tr><td colspan="5" class="tiny">Loading...</td></tr>';
 
   const userCard = document.getElementById('userAdminCard');
   userCard.classList.toggle('hidden', !isAdmin);
@@ -2110,6 +2141,41 @@ function bindRepsEvents() {
       state.repFilterType = repFilterTypeEl.value || '';
       renderRepsView();
     };
+  }
+
+  const auditForm = document.getElementById('auditFilterForm');
+  const loadAuditLog = async () => {
+    const auditBody = document.getElementById('auditBody');
+    if (!auditBody) return;
+    try {
+      const data = await api(`/api/audit-log?days=${encodeURIComponent(state.auditDays)}&limit=${encodeURIComponent(state.auditLimit)}`);
+      const rows = Array.isArray(data?.entries) ? data.entries : [];
+      auditBody.innerHTML = rows.length
+        ? rows
+            .map(
+              (row) => `<tr>
+          <td>${row.created_at ? new Date(row.created_at).toLocaleString() : '-'}</td>
+          <td>${escapeHtml(row.actor_name || row.actor_email || 'System')}</td>
+          <td>${escapeHtml(row.action || '')}</td>
+          <td>${escapeHtml(`${row.entity_type || ''} #${row.entity_id || ''}`)}</td>
+          <td class="tiny">${escapeHtml(shortDetails(row.details_json) || '-')}</td>
+        </tr>`
+            )
+            .join('')
+        : '<tr><td colspan="5" class="tiny">No changes in this period.</td></tr>';
+    } catch (error) {
+      auditBody.innerHTML = `<tr><td colspan="5" class="tiny">${escapeHtml(error.message || 'Could not load')}</td></tr>`;
+    }
+  };
+  if (auditForm) {
+    auditForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const fd = new FormData(auditForm);
+      state.auditDays = Number(fd.get('days')) || 14;
+      state.auditLimit = Number(fd.get('limit')) || 50;
+      await loadAuditLog();
+    };
+    loadAuditLog();
   }
 
   const territoryForm = document.getElementById('territoryForm');
@@ -2270,10 +2336,15 @@ function bindRepsEvents() {
   const updateTerritoryConflictHighlights = () => {
     const conflictPreviewEl = document.getElementById('territoryConflictPreview');
     const zipPreviewEl = document.getElementById('territoryZipPreview');
-    if (!conflictPreviewEl || !zipPreviewEl) return;
+    const draftSummaryEl = document.getElementById('territoryDraftSummary');
+    if (!conflictPreviewEl || !zipPreviewEl || !draftSummaryEl) return;
     const { conflictStateSet, conflictDetails } = computeCurrentConflicts();
     const selectedStates = new Set(getCheckedValues('states').map((s) => String(s || '').toUpperCase()));
+    const selectedSegments = getCheckedValues('segments');
+    const selectedTypes = getCheckedValues('customerTypes');
     const { tokens: zipTokens, invalidTokens } = parseDraftZipTokens();
+    const includeCount = zipTokens.filter((token) => !token.isExclusion).length;
+    const excludeCount = zipTokens.filter((token) => token.isExclusion).length;
     const impliedStateSet = new Set();
     const tokenHints = [];
     for (const token of zipTokens) {
@@ -2307,6 +2378,7 @@ function bindRepsEvents() {
       zipPreviewEl.textContent = `${hintText}${mismatchText}`;
       zipPreviewEl.classList.toggle('territory-exclude', mismatchStates.size > 0);
     }
+    draftSummaryEl.textContent = `Draft: ${selectedSegments.length} segment(s), ${selectedTypes.length} type(s), ${selectedStates.size} state/province, ${includeCount} zip include, ${excludeCount} zip exclude, ${conflictDetails.length} conflict group(s).`;
     if (conflictDetails.length === 0) {
       conflictPreviewEl.textContent = 'No conflicts detected in current draft.';
       conflictPreviewEl.classList.remove('territory-exclude');
