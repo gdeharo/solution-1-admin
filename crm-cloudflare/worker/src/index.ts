@@ -3036,28 +3036,31 @@ addRoute(
 
 addRoute(
   'GET',
-  /^\/api\/reports\/weekly-activity$/,
+  /^\/api\/reports\/(weekly-activity|activity)$/,
   withAuth(async (_request, env, user, url) => {
     if (!canWrite(user.role)) return err('Forbidden', 403);
-    const referenceFridayRaw = normalizedText(url.searchParams.get('referenceFriday'));
+    const startDateRaw = normalizedText(url.searchParams.get('startDate'));
+    const endDateRaw = normalizedText(url.searchParams.get('endDate'));
     const segment = normalizedText(url.searchParams.get('segment'));
     const customerType = normalizedText(url.searchParams.get('customerType'));
     const repIdFilter = Number(url.searchParams.get('repId') || 0);
-
-    const referenceFridayDate = referenceFridayRaw ? new Date(`${referenceFridayRaw}T12:00:00.000Z`) : new Date();
-    if (Number.isNaN(referenceFridayDate.getTime())) return err('Invalid referenceFriday');
-    const friday = new Date(Date.UTC(referenceFridayDate.getUTCFullYear(), referenceFridayDate.getUTCMonth(), referenceFridayDate.getUTCDate()));
-    const currentWeekStart = new Date(friday);
-    currentWeekStart.setUTCDate(friday.getUTCDate() - 4);
-    const prevWeekStart = new Date(currentWeekStart);
-    prevWeekStart.setUTCDate(currentWeekStart.getUTCDate() - 7);
-    const prevWeekEnd = new Date(friday);
-    prevWeekEnd.setUTCDate(friday.getUTCDate() - 7);
     const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
-    const currentWeekStartIso = isoDate(currentWeekStart);
-    const currentWeekEndIso = isoDate(friday);
-    const prevWeekStartIso = isoDate(prevWeekStart);
-    const prevWeekEndIso = isoDate(prevWeekEnd);
+    const parseYmd = (value: string): Date | null => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+      const parsed = new Date(`${value}T12:00:00.000Z`);
+      if (Number.isNaN(parsed.getTime())) return null;
+      return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+    };
+    const fallbackEnd = new Date();
+    const fallbackStart = new Date(fallbackEnd);
+    fallbackStart.setUTCDate(fallbackEnd.getUTCDate() - 7);
+    const startDate = startDateRaw ? parseYmd(startDateRaw) : fallbackStart;
+    const endDate = endDateRaw ? parseYmd(endDateRaw) : fallbackEnd;
+    if (!startDate) return err('Invalid startDate');
+    if (!endDate) return err('Invalid endDate');
+    const startIso = isoDate(startDate);
+    const endIso = isoDate(endDate);
+    if (startIso > endIso) return err('startDate must be on or before endDate');
 
     let reps: Array<{ id: number; full_name: string; email: string | null }> = [];
     if (user.role === 'rep') {
@@ -3124,7 +3127,7 @@ addRoute(
            AND ${territoryScope}
          ORDER BY date(i.created_at) ASC, c.name ASC`
       )
-        .bind(rep.email, prevWeekStartIso, prevWeekEndIso, segment, customerType, rep.id)
+        .bind(rep.email, startIso, endIso, segment, customerType, rep.id)
         .all<{
           interaction_date: string;
           company_name: string;
@@ -3170,7 +3173,7 @@ addRoute(
          GROUP BY c.id, next_date
          ORDER BY next_date ASC, c.name ASC`
       )
-        .bind(currentWeekStartIso, currentWeekEndIso, segment, customerType, rep.id)
+        .bind(startIso, endIso, segment, customerType, rep.id)
         .all<{
           next_date: string;
           company_name: string;
@@ -3197,9 +3200,8 @@ addRoute(
     }
 
     return json({
-      referenceFriday: isoDate(friday),
-      previousWeek: { start: prevWeekStartIso, end: prevWeekEndIso },
-      currentWeek: { start: currentWeekStartIso, end: currentWeekEndIso },
+      startDate: startIso,
+      endDate: endIso,
       reps: reportReps
     });
   }) as any

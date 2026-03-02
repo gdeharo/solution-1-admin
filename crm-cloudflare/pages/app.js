@@ -2919,13 +2919,14 @@ function openRepAccounts(repId) {
   setView('repAccountsView', `Accounts • ${rep?.full_name || ''}`);
 }
 
-function currentWeekFridayIso() {
-  const today = new Date();
-  const day = today.getDay(); // 0=Sun ... 5=Fri
-  const daysUntilFriday = (5 - day + 7) % 7;
-  const friday = new Date(today);
-  friday.setDate(today.getDate() + daysUntilFriday);
-  return friday.toISOString().slice(0, 10);
+function defaultActivityReportStartIso() {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return d.toISOString().slice(0, 10);
+}
+
+function defaultActivityReportEndIso() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 async function openWeeklyReportView() {
@@ -2935,8 +2936,11 @@ async function openWeeklyReportView() {
   if (!form || !reportBody || !reportMeta) return;
 
   form.innerHTML = `
-    <label><span class="sr-only">Reference Friday</span><input name="referenceFriday" type="date" value="${escapeHtml(
-      state.weeklyReport?.referenceFriday || currentWeekFridayIso()
+    <label><span class="sr-only">Start Date</span><input name="startDate" type="date" value="${escapeHtml(
+      state.weeklyReport?.startDate || defaultActivityReportStartIso()
+    )}" /></label>
+    <label><span class="sr-only">End Date</span><input name="endDate" type="date" value="${escapeHtml(
+      state.weeklyReport?.endDate || defaultActivityReportEndIso()
     )}" /></label>
     <label><span class="sr-only">Segment</span><select name="segment"><option value="">All segments</option>${state.segments
       .map((x) => `<option value="${escapeHtml(x)}">${escapeHtml(x)}</option>`)
@@ -2953,20 +2957,21 @@ async function openWeeklyReportView() {
   const renderReport = async () => {
     const fd = new FormData(form);
     const params = new URLSearchParams();
-    params.set('referenceFriday', String(fd.get('referenceFriday') || currentWeekFridayIso()));
+    params.set('startDate', String(fd.get('startDate') || defaultActivityReportStartIso()));
+    params.set('endDate', String(fd.get('endDate') || defaultActivityReportEndIso()));
     if (String(fd.get('segment') || '')) params.set('segment', String(fd.get('segment')));
     if (String(fd.get('customerType') || '')) params.set('customerType', String(fd.get('customerType')));
     if (String(fd.get('repId') || '')) params.set('repId', String(fd.get('repId')));
-    const data = await api(`/api/reports/weekly-activity?${params.toString()}`);
+    const data = await api(`/api/reports/activity?${params.toString()}`);
     state.weeklyReport = data;
-    reportMeta.textContent = `Week ending ${data.referenceFriday} | Last week: ${data.previousWeek.start} to ${data.previousWeek.end} | Current week: ${data.currentWeek.start} to ${data.currentWeek.end}`;
+    reportMeta.textContent = `Range: ${data.startDate} to ${data.endDate}`;
     const reps = Array.isArray(data.reps) ? data.reps : [];
     reportBody.innerHTML = reps.length
       ? reps
           .map(
             (rep) => `<section class="report-rep-page">
           <h3>${escapeHtml(rep.repName || '')}</h3>
-          <h4>Last Week Interactions</h4>
+          <h4>Interactions</h4>
           <table>
             <thead><tr><th>Date</th><th>Company</th><th>Contact(s)</th><th>Notes</th></tr></thead>
             <tbody>
@@ -2983,7 +2988,7 @@ async function openWeeklyReportView() {
               }
             </tbody>
           </table>
-          <h4>Upcoming Follow-ups (Current Week)</h4>
+          <h4>Follow-ups</h4>
           <table>
             <thead><tr><th>Date</th><th>Company</th><th>Contact(s)</th><th>Next Action</th></tr></thead>
             <tbody>
@@ -3011,7 +3016,7 @@ async function openWeeklyReportView() {
     await renderReport();
   };
   await renderReport();
-  setView('weeklyReportView', 'Weekly Activity Report');
+  setView('weeklyReportView', 'Activity Report');
 }
 
 async function loadSession() {
