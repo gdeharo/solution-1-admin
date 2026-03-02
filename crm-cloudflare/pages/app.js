@@ -95,57 +95,57 @@ const US_STATES = [
 
 const CA_PROVINCES = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
 const US_ZIP3_RANGES_BY_STATE = {
-  AL: [[350, 369]],
-  AK: [[995, 999]],
-  AZ: [[850, 865]],
-  AR: [[716, 729], [755, 755]],
-  CA: [[900, 966]],
-  CO: [[800, 816]],
-  CT: [[60, 69]],
-  DC: [[200, 205]],
-  DE: [[197, 199]],
-  FL: [[320, 349]],
-  GA: [[300, 319], [398, 399]],
-  HI: [[967, 968]],
-  IA: [[500, 528]],
-  ID: [[832, 838]],
-  IL: [[600, 629]],
-  IN: [[460, 479]],
-  KS: [[660, 679]],
-  KY: [[400, 427]],
-  LA: [[700, 714]],
-  MA: [[10, 27], [55, 55]],
-  MD: [[206, 219]],
-  ME: [[39, 49]],
-  MI: [[480, 499]],
-  MN: [[550, 567]],
-  MO: [[630, 658]],
-  MS: [[386, 397]],
-  MT: [[590, 599]],
-  NC: [[269, 289]],
-  ND: [[580, 588]],
-  NE: [[680, 693]],
-  NH: [[30, 39]],
-  NJ: [[70, 89]],
-  NM: [[870, 884]],
-  NV: [[889, 898]],
-  NY: [[5, 5], [63, 63], [90, 149]],
-  OH: [[430, 459]],
-  OK: [[730, 749]],
-  OR: [[970, 979]],
-  PA: [[150, 196]],
-  RI: [[28, 29]],
-  SC: [[290, 299]],
-  SD: [[570, 577]],
-  TN: [[370, 385]],
-  TX: [[750, 799], [885, 885]],
-  UT: [[840, 847]],
-  VA: [[201, 201], [220, 246]],
-  VT: [[50, 59]],
-  WA: [[980, 994]],
-  WI: [[530, 549]],
-  WV: [[247, 268]],
-  WY: [[820, 831]]
+  AL: [['350', '369']],
+  AK: [['995', '999']],
+  AZ: [['850', '865']],
+  AR: [['716', '729'], ['755', '755']],
+  CA: [['900', '966']],
+  CO: [['800', '816']],
+  CT: [['060', '069']],
+  DC: [['200', '205']],
+  DE: [['197', '199']],
+  FL: [['320', '349']],
+  GA: [['300', '319'], ['398', '399']],
+  HI: [['967', '968']],
+  IA: [['500', '528']],
+  ID: [['832', '838']],
+  IL: [['600', '629']],
+  IN: [['460', '479']],
+  KS: [['660', '679']],
+  KY: [['400', '427']],
+  LA: [['700', '714']],
+  MA: [['010', '027'], ['055', '055']],
+  MD: [['206', '219']],
+  ME: [['039', '049']],
+  MI: [['480', '499']],
+  MN: [['550', '567']],
+  MO: [['630', '658']],
+  MS: [['386', '397']],
+  MT: [['590', '599']],
+  NC: [['269', '289']],
+  ND: [['580', '588']],
+  NE: [['680', '693']],
+  NH: [['030', '039']],
+  NJ: [['070', '089']],
+  NM: [['870', '884']],
+  NV: [['889', '898']],
+  NY: [['005', '005'], ['063', '063'], ['090', '149']],
+  OH: [['430', '459']],
+  OK: [['730', '749']],
+  OR: [['970', '979']],
+  PA: [['150', '196']],
+  RI: [['028', '029']],
+  SC: [['290', '299']],
+  SD: [['570', '577']],
+  TN: [['370', '385']],
+  TX: [['750', '799'], ['885', '885']],
+  UT: [['840', '847']],
+  VA: [['201', '201'], ['220', '246']],
+  VT: [['050', '059']],
+  WA: [['980', '994']],
+  WI: [['530', '549']],
+  WV: [['247', '268']],
+  WY: [['820', '831']]
 };
 const TERRITORY_STATE_OPTIONS = [
   ['AL', 'Alabama'], ['AK', 'Alaska'], ['AZ', 'Arizona'], ['AR', 'Arkansas'], ['CA', 'California'], ['CO', 'Colorado'],
@@ -233,20 +233,11 @@ function zipTokenToZip3Range(value) {
   const digits = normalizeZipForMatch(value);
   if (!digits) return null;
   if (digits.length === 5) {
-    const zip3 = Number(digits.slice(0, 3));
-    return Number.isFinite(zip3) ? [zip3, zip3] : null;
+    const zip3 = digits.slice(0, 3);
+    return /^\d{3}$/.test(zip3) ? [zip3, zip3] : null;
   }
   if (digits.length === 3) {
-    const zip3 = Number(digits);
-    return Number.isFinite(zip3) ? [zip3, zip3] : null;
-  }
-  if (digits.length === 2) {
-    const p = Number(digits);
-    return Number.isFinite(p) ? [p * 10, p * 10 + 9] : null;
-  }
-  if (digits.length === 1) {
-    const p = Number(digits);
-    return Number.isFinite(p) ? [p * 100, p * 100 + 99] : null;
+    return /^\d{3}$/.test(digits) ? [digits, digits] : null;
   }
   return null;
 }
@@ -258,6 +249,11 @@ function zipTokenMayOverlapState(value, stateCode) {
   if (!ranges || !zip3Range) return false;
   const [minZip3, maxZip3] = zip3Range;
   return ranges.some(([start, end]) => start <= maxZip3 && end >= minZip3);
+}
+
+function statesForZipToken(value) {
+  if (!zipTokenToZip3Range(value)) return [];
+  return US_STATES.filter((stateCode) => zipTokenMayOverlapState(value, stateCode));
 }
 
 function territoryRuleMatchesCompany(rule, company) {
@@ -1941,8 +1937,9 @@ async function renderRepsView() {
       </div>
       <div class="field-group">
         <strong>Zip Rules</strong>
-        <textarea name="zipCodes" rows="2" placeholder="901, 90210, -905, -98"></textarea>
-        <p class="tiny">Use commas/new lines. Prefix with '-' to exclude. Allowed: 1-3 digit prefix or 5-digit zip.</p>
+        <textarea name="zipCodes" rows="2" placeholder="901, 90210, -905"></textarea>
+        <p class="tiny">Use commas/new lines. Prefix with '-' to exclude. Allowed: 3-digit ZIP3 or 5-digit ZIP.</p>
+        <div id="territoryZipPreview" class="tiny"></div>
         <div id="territoryConflictPreview" class="tiny"></div>
       </div>
       <div class="row wrap">
@@ -2133,12 +2130,9 @@ function bindRepsEvents() {
     zipCodesEl.value = '';
   };
 
-  const computeCurrentConflicts = () => {
-    const repId = toPositiveInt(repSelectEl.value);
-    const segments = getCheckedValues('segments');
-    const customerTypes = getCheckedValues('customerTypes');
-    const states = getCheckedValues('states').map((s) => String(s || '').toUpperCase());
-    const zipTokens = String(zipCodesEl.value || '')
+  const parseDraftZipTokens = () => {
+    const invalidTokens = [];
+    const tokens = String(zipCodesEl.value || '')
       .split(/[\n,]/g)
       .map((part) => part.trim())
       .filter(Boolean)
@@ -2146,9 +2140,19 @@ function bindRepsEvents() {
         const isExclusion = token.startsWith('-');
         const raw = isExclusion ? token.slice(1) : token;
         const digits = raw.replace(/\D/g, '');
-        return { isExclusion, digits };
+        if (digits && digits.length !== 3 && digits.length !== 5) invalidTokens.push(token);
+        return { isExclusion, digits, raw: token };
       })
-      .filter((token) => token.digits.length > 0);
+      .filter((token) => token.digits.length > 0 && (token.digits.length === 3 || token.digits.length === 5));
+    return { tokens, invalidTokens };
+  };
+
+  const computeCurrentConflicts = () => {
+    const repId = toPositiveInt(repSelectEl.value);
+    const segments = getCheckedValues('segments');
+    const customerTypes = getCheckedValues('customerTypes');
+    const states = getCheckedValues('states').map((s) => String(s || '').toUpperCase());
+    const { tokens: zipTokens } = parseDraftZipTokens();
 
     const conflictStateSet = new Set();
     const conflictEntries = [];
@@ -2265,14 +2269,44 @@ function bindRepsEvents() {
 
   const updateTerritoryConflictHighlights = () => {
     const conflictPreviewEl = document.getElementById('territoryConflictPreview');
-    if (!conflictPreviewEl) return;
+    const zipPreviewEl = document.getElementById('territoryZipPreview');
+    if (!conflictPreviewEl || !zipPreviewEl) return;
     const { conflictStateSet, conflictDetails } = computeCurrentConflicts();
+    const selectedStates = new Set(getCheckedValues('states').map((s) => String(s || '').toUpperCase()));
+    const { tokens: zipTokens, invalidTokens } = parseDraftZipTokens();
+    const includeZipTokens = zipTokens.filter((token) => !token.isExclusion);
+    const impliedStateSet = new Set();
+    const tokenHints = [];
+    for (const token of includeZipTokens) {
+      const matchingStates = statesForZipToken(token.digits);
+      if (matchingStates.length === 0) tokenHints.push(`${token.digits} -> ?`);
+      else tokenHints.push(`${token.digits} -> ${matchingStates.join(', ')}`);
+      for (const stateCode of matchingStates) impliedStateSet.add(stateCode);
+    }
+    const mismatchStates = new Set(
+      selectedStates.size > 0 ? Array.from(impliedStateSet).filter((code) => !selectedStates.has(code)) : []
+    );
     territoryForm.querySelectorAll('input[name="states"]').forEach((cb) => {
       const label = cb.closest('.state-chip');
       if (!label) return;
+      const stateCode = String(cb.value || '').toUpperCase();
+      const isImplied = impliedStateSet.has(stateCode);
       const isConflict = cb.checked && conflictStateSet.has(String(cb.value || '').toUpperCase());
+      const isMismatch = mismatchStates.has(stateCode);
+      label.classList.toggle('zip-implied', isImplied);
+      label.classList.toggle('zip-mismatch', isMismatch);
       label.classList.toggle('conflict', isConflict);
     });
+    if (invalidTokens.length > 0) {
+      zipPreviewEl.textContent = `Invalid ZIP token(s): ${invalidTokens.join(', ')}. Use only 3 or 5 digits.`;
+      zipPreviewEl.classList.add('territory-exclude');
+    } else {
+      const hintText = tokenHints.length > 0 ? `ZIP coverage: ${tokenHints.join(' | ')}` : 'ZIP coverage: none';
+      const mismatchText =
+        mismatchStates.size > 0 ? ` | Outside selected states: ${Array.from(mismatchStates).join(', ')}` : '';
+      zipPreviewEl.textContent = `${hintText}${mismatchText}`;
+      zipPreviewEl.classList.toggle('territory-exclude', mismatchStates.size > 0);
+    }
     if (conflictDetails.length === 0) {
       conflictPreviewEl.textContent = 'No conflicts detected in current draft.';
       conflictPreviewEl.classList.remove('territory-exclude');
@@ -2367,6 +2401,11 @@ function bindRepsEvents() {
     const customerTypes = getCheckedValues('customerTypes');
     const states = getCheckedValues('states');
     const zipCodes = String(zipCodesEl.value || '');
+    const { invalidTokens } = parseDraftZipTokens();
+    if (invalidTokens.length > 0) {
+      showToast('Zip codes must be 3 or 5 digits only', true);
+      return;
+    }
     if (!repId) {
       showToast('Select a rep first', true);
       return;

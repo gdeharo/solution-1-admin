@@ -239,82 +239,69 @@ function uniqueTrimmed(values: unknown[]): string[] {
   return Array.from(new Set(values.map((value) => normalizedText(String(value))).filter(Boolean)));
 }
 
-const US_ZIP3_RANGES_BY_STATE: Record<string, Array<[number, number]>> = {
-  AL: [[350, 369]],
-  AK: [[995, 999]],
-  AZ: [[850, 865]],
-  AR: [[716, 729], [755, 755]],
-  CA: [[900, 966]],
-  CO: [[800, 816]],
-  CT: [[60, 69]],
-  DC: [[200, 205]],
-  DE: [[197, 199]],
-  FL: [[320, 349]],
-  GA: [[300, 319], [398, 399]],
-  HI: [[967, 968]],
-  IA: [[500, 528]],
-  ID: [[832, 838]],
-  IL: [[600, 629]],
-  IN: [[460, 479]],
-  KS: [[660, 679]],
-  KY: [[400, 427]],
-  LA: [[700, 714]],
-  MA: [[10, 27], [55, 55]],
-  MD: [[206, 219]],
-  ME: [[39, 49]],
-  MI: [[480, 499]],
-  MN: [[550, 567]],
-  MO: [[630, 658]],
-  MS: [[386, 397]],
-  MT: [[590, 599]],
-  NC: [[269, 289]],
-  ND: [[580, 588]],
-  NE: [[680, 693]],
-  NH: [[30, 39]],
-  NJ: [[70, 89]],
-  NM: [[870, 884]],
-  NV: [[889, 898]],
-  NY: [[5, 5], [63, 63], [90, 149]],
-  OH: [[430, 459]],
-  OK: [[730, 749]],
-  OR: [[970, 979]],
-  PA: [[150, 196]],
-  RI: [[28, 29]],
-  SC: [[290, 299]],
-  SD: [[570, 577]],
-  TN: [[370, 385]],
-  TX: [[750, 799], [885, 885]],
-  UT: [[840, 847]],
-  VA: [[201, 201], [220, 246]],
-  VT: [[50, 59]],
-  WA: [[980, 994]],
-  WI: [[530, 549]],
-  WV: [[247, 268]],
-  WY: [[820, 831]]
+const US_ZIP3_RANGES_BY_STATE: Record<string, Array<[string, string]>> = {
+  AL: [['350', '369']],
+  AK: [['995', '999']],
+  AZ: [['850', '865']],
+  AR: [['716', '729'], ['755', '755']],
+  CA: [['900', '966']],
+  CO: [['800', '816']],
+  CT: [['060', '069']],
+  DC: [['200', '205']],
+  DE: [['197', '199']],
+  FL: [['320', '349']],
+  GA: [['300', '319'], ['398', '399']],
+  HI: [['967', '968']],
+  IA: [['500', '528']],
+  ID: [['832', '838']],
+  IL: [['600', '629']],
+  IN: [['460', '479']],
+  KS: [['660', '679']],
+  KY: [['400', '427']],
+  LA: [['700', '714']],
+  MA: [['010', '027'], ['055', '055']],
+  MD: [['206', '219']],
+  ME: [['039', '049']],
+  MI: [['480', '499']],
+  MN: [['550', '567']],
+  MO: [['630', '658']],
+  MS: [['386', '397']],
+  MT: [['590', '599']],
+  NC: [['269', '289']],
+  ND: [['580', '588']],
+  NE: [['680', '693']],
+  NH: [['030', '039']],
+  NJ: [['070', '089']],
+  NM: [['870', '884']],
+  NV: [['889', '898']],
+  NY: [['005', '005'], ['063', '063'], ['090', '149']],
+  OH: [['430', '459']],
+  OK: [['730', '749']],
+  OR: [['970', '979']],
+  PA: [['150', '196']],
+  RI: [['028', '029']],
+  SC: [['290', '299']],
+  SD: [['570', '577']],
+  TN: [['370', '385']],
+  TX: [['750', '799'], ['885', '885']],
+  UT: [['840', '847']],
+  VA: [['201', '201'], ['220', '246']],
+  VT: [['050', '059']],
+  WA: [['980', '994']],
+  WI: [['530', '549']],
+  WV: [['247', '268']],
+  WY: [['820', '831']]
 };
 
-function zipTokenToZip3Range(value: string | null | undefined): [number, number] | null {
+function zipTokenToZip3Range(value: string | null | undefined): [string, string] | null {
   const digits = normalizeZip(value);
   if (!digits) return null;
   if (digits.length === 5) {
-    const zip3 = Number(digits.slice(0, 3));
-    if (!Number.isFinite(zip3)) return null;
-    return [zip3, zip3];
+    const zip3 = digits.slice(0, 3);
+    return /^\d{3}$/.test(zip3) ? [zip3, zip3] : null;
   }
   if (digits.length === 3) {
-    const zip3 = Number(digits);
-    if (!Number.isFinite(zip3)) return null;
-    return [zip3, zip3];
-  }
-  if (digits.length === 2) {
-    const prefix = Number(digits);
-    if (!Number.isFinite(prefix)) return null;
-    return [prefix * 10, prefix * 10 + 9];
-  }
-  if (digits.length === 1) {
-    const prefix = Number(digits);
-    if (!Number.isFinite(prefix)) return null;
-    return [prefix * 100, prefix * 100 + 99];
+    return /^\d{3}$/.test(digits) ? [digits, digits] : null;
   }
   return null;
 }
@@ -1712,8 +1699,8 @@ addRoute(
       if (deduped.length === 0) return err('Provide at least one zip prefix');
       for (const item of deduped) {
         const digits = item.value.replace(/\D/g, '');
-        if (![1, 2, 3].includes(digits.length)) {
-          return err(`Invalid zip prefix: ${item.isExclusion ? '-' : ''}${item.value}. Use 1-3 digits.`);
+        if (digits.length !== 3) {
+          return err(`Invalid zip prefix: ${item.isExclusion ? '-' : ''}${item.value}. Use exactly 3 digits.`);
         }
         rows.push({ zipPrefix: digits, isExclusion: item.isExclusion || defaultExclusion });
       }
@@ -1886,8 +1873,8 @@ addRoute(
     const zipRows: Array<{ territoryType: 'zip_prefix' | 'zip_exact'; zipPrefix: string | null; zipExact: string | null; isExclusion: boolean }> = [];
     for (const token of zipTokens) {
       const digits = token.value.replace(/\D/g, '');
-      if (![1, 2, 3, 5].includes(digits.length)) {
-        return err(`Invalid zip token: ${token.isExclusion ? '-' : ''}${token.value}. Use 1-3 digits prefix or 5 digits exact.`);
+      if (![3, 5].includes(digits.length)) {
+        return err(`Invalid zip token: ${token.isExclusion ? '-' : ''}${token.value}. Use 3 digits (ZIP3) or 5 digits (ZIP).`);
       }
       zipRows.push({
         territoryType: digits.length === 5 ? 'zip_exact' : 'zip_prefix',

@@ -284,6 +284,18 @@ tr.clickable:hover {
   border-color: var(--accent);
 }
 
+.state-chip.zip-implied,
+.state-chip.zip-implied:has(input:checked) {
+  background: #e4f0ff;
+  border-color: #4d88d8;
+}
+
+.state-chip.zip-mismatch,
+.state-chip.zip-mismatch:has(input:checked) {
+  background: #fff6d8;
+  border-color: #c9a227;
+}
+
 .state-chip.conflict,
 .state-chip.conflict:has(input:checked) {
   background: #ffe7e7;
