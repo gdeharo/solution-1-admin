@@ -1112,7 +1112,7 @@ addRoute(
 
     if (!company) return err('Company not found', 404);
 
-    const reps = await env.CRM_DB.prepare(
+    const explicitReps = await env.CRM_DB.prepare(
       `SELECT r.id, r.full_name
        FROM company_reps cr
        JOIN reps r ON r.id = cr.rep_id
@@ -1120,9 +1120,41 @@ addRoute(
        ORDER BY r.full_name ASC`
     )
       .bind(companyId)
-      .all();
+      .all<{ id: number; full_name: string }>();
 
-    return json({ company, assignedReps: reps.results });
+    const suggestedRepIds = await suggestedRepIdsForCompany(env, {
+      city: (company as any).city ?? null,
+      state: (company as any).state ?? null,
+      zip: (company as any).zip ?? null,
+      segment: (company as any).segment ?? null,
+      customerType: (company as any).customer_type ?? null
+    });
+
+    const assignedRepsMap = new Map<number, { id: number; full_name: string }>();
+    for (const rep of explicitReps.results || []) {
+      const repId = Number(rep.id);
+      if (Number.isFinite(repId) && repId > 0) assignedRepsMap.set(repId, { id: repId, full_name: rep.full_name });
+    }
+    if (suggestedRepIds.length > 0) {
+      const placeholders = suggestedRepIds.map((_id, idx) => `?${idx + 1}`).join(', ');
+      const suggestedReps = await env.CRM_DB.prepare(
+        `SELECT id, full_name
+         FROM reps
+         WHERE deleted_at IS NULL AND id IN (${placeholders})
+         ORDER BY full_name ASC`
+      )
+        .bind(...suggestedRepIds)
+        .all<{ id: number; full_name: string }>();
+      for (const rep of suggestedReps.results || []) {
+        const repId = Number(rep.id);
+        if (Number.isFinite(repId) && repId > 0 && !assignedRepsMap.has(repId)) {
+          assignedRepsMap.set(repId, { id: repId, full_name: rep.full_name });
+        }
+      }
+    }
+    const assignedReps = Array.from(assignedRepsMap.values()).sort((a, b) => a.full_name.localeCompare(b.full_name));
+
+    return json({ company, assignedReps });
   }) as any
 );
 
