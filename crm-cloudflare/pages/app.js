@@ -2274,13 +2274,13 @@ function bindRepsEvents() {
     const { conflictStateSet, conflictDetails } = computeCurrentConflicts();
     const selectedStates = new Set(getCheckedValues('states').map((s) => String(s || '').toUpperCase()));
     const { tokens: zipTokens, invalidTokens } = parseDraftZipTokens();
-    const includeZipTokens = zipTokens.filter((token) => !token.isExclusion);
     const impliedStateSet = new Set();
     const tokenHints = [];
-    for (const token of includeZipTokens) {
+    for (const token of zipTokens) {
       const matchingStates = statesForZipToken(token.digits);
-      if (matchingStates.length === 0) tokenHints.push(`${token.digits} -> ?`);
-      else tokenHints.push(`${token.digits} -> ${matchingStates.join(', ')}`);
+      const tokenLabel = `${token.isExclusion ? '-' : ''}${token.digits}`;
+      if (matchingStates.length === 0) tokenHints.push(`${tokenLabel} -> ?`);
+      else tokenHints.push(`${tokenLabel} -> ${matchingStates.join(', ')}`);
       for (const stateCode of matchingStates) impliedStateSet.add(stateCode);
     }
     const mismatchStates = new Set(
