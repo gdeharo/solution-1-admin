@@ -370,6 +370,69 @@ function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: n
   return `(${includeClause} AND ${excludeClause})`;
 }
 
+async function suggestedRepIdsForCompany(
+  env: Env,
+  data: { city?: string | null; state?: string | null; zip?: string | null; segment?: string | null; customerType?: string | null }
+): Promise<number[]> {
+  const city = normalizedText(data.city);
+  const state = normalizedText(data.state).toUpperCase();
+  const zip = normalizeZip(data.zip);
+  const segment = normalizedText(data.segment);
+  const customerType = normalizedText(data.customerType);
+  if (!city && !state && !zip) return [];
+
+  const rows = await env.CRM_DB.prepare(
+    `SELECT DISTINCT r.id
+     FROM rep_territories t
+     JOIN reps r ON r.id = t.rep_id
+     WHERE r.deleted_at IS NULL
+       AND t.is_exclusion = 0
+       AND (
+         (t.territory_type = 'state'
+           AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?1, ''))))
+         OR
+         (t.territory_type = 'city_state'
+           AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?1, '')))
+           AND upper(trim(coalesce(t.city, ''))) = upper(trim(coalesce(?2, ''))))
+         OR
+         (t.territory_type = 'zip_exact'
+           AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') =
+               replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', ''))
+         OR
+         (t.territory_type = 'zip_prefix'
+           AND trim(coalesce(t.zip_prefix, '')) <> ''
+           AND replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', '') LIKE
+               (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+       )
+       AND (t.segment IS NULL OR t.segment = ?4)
+       AND (t.customer_type IS NULL OR t.customer_type = ?5)
+       AND NOT EXISTS (
+         SELECT 1
+         FROM rep_territories tx
+         WHERE tx.rep_id = t.rep_id
+           AND tx.is_exclusion = 1
+           AND tx.territory_type IN ('zip_prefix', 'zip_exact')
+           AND (
+             (tx.territory_type = 'zip_exact'
+               AND replace(replace(upper(trim(coalesce(tx.zip_exact, ''))), '-', ''), ' ', '') =
+                   replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', ''))
+             OR
+             (tx.territory_type = 'zip_prefix'
+               AND trim(coalesce(tx.zip_prefix, '')) <> ''
+               AND replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', '') LIKE
+                   (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
+           )
+           AND (tx.segment IS NULL OR tx.segment = ?4)
+           AND (tx.customer_type IS NULL OR tx.customer_type = ?5)
+       )
+     ORDER BY r.id ASC`
+  )
+    .bind(state || null, city || null, zip || null, segment || null, customerType || null)
+    .all<{ id: number }>();
+
+  return (rows.results || []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0);
+}
+
 async function repCanAccessCompany(env: Env, user: AuthedUser, companyId: number): Promise<boolean> {
   const row = await env.CRM_DB.prepare(
     `SELECT c.id
@@ -955,8 +1018,17 @@ addRoute(
       .run();
 
     const companyId = Number(result.meta.last_row_id);
-    if (Array.isArray(body.repIds) && body.repIds.length > 0) {
-      for (const repId of body.repIds) {
+    const autoRepIds = await suggestedRepIdsForCompany(env, {
+      city: body.city ?? null,
+      state: body.state ?? null,
+      zip: body.zip ?? null,
+      segment: body.segment ?? null,
+      customerType: body.customerType ?? null
+    });
+    const explicitRepIds = Array.isArray(body.repIds) ? body.repIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
+    const repIdsToAssign = Array.from(new Set([...autoRepIds, ...explicitRepIds]));
+    if (repIdsToAssign.length > 0) {
+      for (const repId of repIdsToAssign) {
         await env.CRM_DB.prepare(`INSERT OR IGNORE INTO company_reps (company_id, rep_id) VALUES (?1, ?2)`).bind(companyId, repId).run();
       }
     }
@@ -969,7 +1041,8 @@ addRoute(
 addRoute(
   'POST',
   /^\/api\/companies\/(\d+)\/reps$/,
-  withWriteAccess(async (request, env, user, _url) => {
+  withAuth(async (request, env, user, _url) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const match = request.url.match(/\/api\/companies\/(\d+)\/reps$/);
     const companyId = Number(match?.[1]);
     const body = await parseJson<{ repIds: number[] }>(request);
@@ -1128,7 +1201,8 @@ addRoute(
 addRoute(
   'POST',
   /^\/api\/customers\/(\d+)\/reps$/,
-  withWriteAccess(async (request, env, user) => {
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const match = request.url.match(/\/api\/customers\/(\d+)\/reps$/);
     const customerId = Number(match?.[1]);
     const body = await parseJson<{ repIds: number[] }>(request);
@@ -1220,7 +1294,8 @@ addRoute(
 addRoute(
   'POST',
   /^\/api\/reps$/,
-  withWriteAccess(async (request, env, user) => {
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const body = await parseJson<{
       fullName: string;
       companyName?: string;
@@ -1614,7 +1689,8 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/company-reps$/,
-  withAuth(async (_request, env) => {
+  withAuth(async (_request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const rows = await env.CRM_DB.prepare(
       `SELECT cr.company_id, cr.rep_id, r.full_name AS rep_name
        FROM company_reps cr
@@ -1629,7 +1705,8 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/customer-reps$/,
-  withAuth(async (_request, env) => {
+  withAuth(async (_request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const rows = await env.CRM_DB.prepare(
       `SELECT cr.customer_id, cr.rep_id, r.full_name AS rep_name
        FROM customer_reps cr
@@ -2295,47 +2372,23 @@ addRoute(
   'GET',
   /^\/api\/reps\/suggest$/,
   withAuth(async (_request, env, _user, url) => {
-    const city = (url.searchParams.get('city') || '').trim();
-    const state = (url.searchParams.get('state') || '').trim();
+    const city = normalizedText(url.searchParams.get('city'));
+    const state = normalizedText(url.searchParams.get('state')).toUpperCase();
     const zip = normalizeZip(url.searchParams.get('zip') || '');
-    const segment = (url.searchParams.get('segment') || '').trim();
-    const customerType = (url.searchParams.get('customerType') || '').trim();
-
-    if (!city && !state && !zip) return err('Provide city, state, or zip');
-
-    const rows = await env.CRM_DB.prepare(
-      `SELECT DISTINCT r.id, r.full_name
-       FROM rep_territories t
-       JOIN reps r ON r.id = t.rep_id
-       WHERE r.deleted_at IS NULL
-         AND t.is_exclusion = 0
-         AND (
-           (t.territory_type = 'state' AND t.state = ?1)
-           OR (t.territory_type = 'city_state' AND t.state = ?1 AND t.city = ?2)
-           OR (t.territory_type = 'zip_exact' AND t.zip_exact = ?3)
-           OR (t.territory_type = 'zip_prefix' AND ?3 LIKE (t.zip_prefix || '%'))
-         )
-         AND (t.segment IS NULL OR t.segment = ?4)
-         AND (t.customer_type IS NULL OR t.customer_type = ?5)
-         AND NOT EXISTS (
-           SELECT 1
-           FROM rep_territories tx
-           WHERE tx.rep_id = t.rep_id
-             AND tx.is_exclusion = 1
-             AND tx.territory_type IN ('zip_prefix', 'zip_exact')
-             AND (
-               (tx.territory_type = 'zip_exact' AND tx.zip_exact = ?3)
-               OR (tx.territory_type = 'zip_prefix' AND ?3 LIKE (tx.zip_prefix || '%'))
-             )
-             AND (tx.segment IS NULL OR tx.segment = ?4)
-             AND (tx.customer_type IS NULL OR tx.customer_type = ?5)
-         )
-       ORDER BY r.full_name ASC`
+    const segment = normalizedText(url.searchParams.get('segment'));
+    const customerType = normalizedText(url.searchParams.get('customerType'));
+    const repIds = await suggestedRepIdsForCompany(env, { city, state, zip, segment, customerType });
+    if (repIds.length === 0) return json({ suggestedReps: [] });
+    const placeholders = repIds.map((_id, index) => `?${index + 1}`).join(', ');
+    const reps = await env.CRM_DB.prepare(
+      `SELECT id, full_name
+       FROM reps
+       WHERE deleted_at IS NULL AND id IN (${placeholders})
+       ORDER BY full_name ASC`
     )
-      .bind(state || null, city || null, zip || null, segment || null, customerType || null)
+      .bind(...repIds)
       .all();
-
-    return json({ suggestedReps: rows.results });
+    return json({ suggestedReps: reps.results });
   }) as any
 );
 
@@ -2471,7 +2524,8 @@ addRoute(
 addRoute(
   'PUT',
   /^\/api\/reps\/(\d+)$/,
-  withWriteAccess(async (request, env, user) => {
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const match = request.url.match(/\/api\/reps\/(\d+)$/);
     const repId = Number(match?.[1]);
     const body = await parseJson<{
@@ -2510,7 +2564,8 @@ addRoute(
 addRoute(
   'DELETE',
   /^\/api\/reps\/(\d+)$/,
-  withWriteAccess(async (request, env, user) => {
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const match = request.url.match(/\/api\/reps\/(\d+)$/);
     const repId = Number(match?.[1]);
     if (!repId) return err('rep id is required');
@@ -2706,7 +2761,8 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/reports\/rep-activity$/,
-  withAuth(async (_request, env, _user, url) => {
+  withAuth(async (_request, env, user, url) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const days = Number(url.searchParams.get('days') || 30);
     const sinceIso = new Date(Date.now() - Math.max(days, 1) * 86400000).toISOString();
     const rows = await env.CRM_DB.prepare(
@@ -2729,7 +2785,8 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/reports\/follow-ups$/,
-  withAuth(async (_request, env, _user, url) => {
+  withAuth(async (_request, env, user, url) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const days = Number(url.searchParams.get('days') || 14);
     const now = new Date();
     const until = new Date(now.getTime() + Math.max(days, 1) * 86400000).toISOString();
@@ -2760,7 +2817,8 @@ addRoute(
 addRoute(
   'GET',
   /^\/api\/reports\/company-engagement$/,
-  withAuth(async (_request, env, _user, url) => {
+  withAuth(async (_request, env, user, url) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const days = Number(url.searchParams.get('days') || 90);
     const sinceIso = new Date(Date.now() - Math.max(days, 1) * 86400000).toISOString();
     const rows = await env.CRM_DB.prepare(
