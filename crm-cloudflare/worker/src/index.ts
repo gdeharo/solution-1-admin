@@ -3200,8 +3200,13 @@ addRoute(
     }
 
     return json({
+      // New shape
       startDate: startIso,
       endDate: endIso,
+      // Backward compatibility for older Pages bundles still expecting weekly fields
+      referenceFriday: endIso,
+      previousWeek: { start: startIso, end: endIso },
+      currentWeek: { start: startIso, end: endIso },
       reps: reportReps
     });
   }) as any
