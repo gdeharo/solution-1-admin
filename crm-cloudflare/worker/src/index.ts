@@ -2152,18 +2152,14 @@ addRoute(
     const replaceScope = body.replaceScope !== false;
     let removed = 0;
     if (replaceScope) {
-      for (const combo of combos) {
-        const result = await env.CRM_DB.prepare(
-          `DELETE FROM rep_territories
-           WHERE rep_id = ?1
-             AND segment = ?2
-             AND customer_type = ?3
-             AND territory_type IN ('state', 'zip_prefix', 'zip_exact')`
-        )
-          .bind(body.repId, combo.segment, combo.customerType)
-          .run();
-        removed += Number(result.meta.changes || 0);
-      }
+      const result = await env.CRM_DB.prepare(
+        `DELETE FROM rep_territories
+         WHERE rep_id = ?1
+           AND territory_type IN ('state', 'zip_prefix', 'zip_exact')`
+      )
+        .bind(body.repId)
+        .run();
+      removed = Number(result.meta.changes || 0);
     }
 
     const existingRows = await env.CRM_DB.prepare(
