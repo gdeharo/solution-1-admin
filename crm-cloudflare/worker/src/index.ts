@@ -1008,6 +1008,9 @@ addRoute(
     const page = Math.max(1, Number(url.searchParams.get('page') || 1));
     const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize') || 25)));
     const q = normalizedText(url.searchParams.get('q'));
+    const stateFilter = normalizedText(url.searchParams.get('state')).toUpperCase();
+    const cityFilter = normalizedText(url.searchParams.get('city'));
+    const repFilter = normalizedText(url.searchParams.get('rep'));
     const dueDays = Math.max(0, Number(url.searchParams.get('dueDays') || 0));
     const pendingOnly = normalizedText(url.searchParams.get('pendingOnly')) === '1';
     const offset = (page - 1) * pageSize;
@@ -1019,25 +1022,53 @@ addRoute(
       binds.push(user.email);
     }
     if (q) {
-      const likeValue = `%${q.toLowerCase()}%`;
+      if (/^[A-Za-z]{2}$/.test(q)) {
+        whereParts.push(`upper(coalesce(c.state, '')) = ?${binds.length + 1}`);
+        binds.push(q.toUpperCase());
+      } else {
+        const likeValue = `%${q.toLowerCase()}%`;
+        whereParts.push(
+          `(
+            lower(coalesce(c.name, '')) LIKE ?${binds.length + 1}
+            OR lower(coalesce(c.city, '')) LIKE ?${binds.length + 1}
+            OR lower(coalesce(c.state, '')) LIKE ?${binds.length + 1}
+            OR EXISTS (
+              SELECT 1
+              FROM reps rr
+              WHERE rr.deleted_at IS NULL
+                AND lower(coalesce(rr.full_name, '')) LIKE ?${binds.length + 1}
+                AND (
+                  EXISTS (SELECT 1 FROM company_reps cr WHERE cr.company_id = c.id AND cr.rep_id = rr.id)
+                  OR ${repTerritoryCompanyScopeClauseForRepId('c', 'rr.id')}
+                )
+            )
+          )`
+        );
+        binds.push(likeValue);
+      }
+    }
+    if (stateFilter) {
+      whereParts.push(`upper(coalesce(c.state, '')) = ?${binds.length + 1}`);
+      binds.push(stateFilter);
+    }
+    if (cityFilter) {
+      whereParts.push(`lower(coalesce(c.city, '')) = ?${binds.length + 1}`);
+      binds.push(cityFilter.toLowerCase());
+    }
+    if (repFilter) {
       whereParts.push(
-        `(
-          lower(coalesce(c.name, '')) LIKE ?${binds.length + 1}
-          OR lower(coalesce(c.city, '')) LIKE ?${binds.length + 1}
-          OR lower(coalesce(c.state, '')) LIKE ?${binds.length + 1}
-          OR EXISTS (
-            SELECT 1
-            FROM reps rr
-            WHERE rr.deleted_at IS NULL
-              AND lower(coalesce(rr.full_name, '')) LIKE ?${binds.length + 1}
-              AND (
-                EXISTS (SELECT 1 FROM company_reps cr WHERE cr.company_id = c.id AND cr.rep_id = rr.id)
-                OR ${repTerritoryCompanyScopeClauseForRepId('c', 'rr.id')}
-              )
-          )
+        `EXISTS (
+          SELECT 1
+          FROM reps rr
+          WHERE rr.deleted_at IS NULL
+            AND lower(coalesce(rr.full_name, '')) LIKE ?${binds.length + 1}
+            AND (
+              EXISTS (SELECT 1 FROM company_reps cr WHERE cr.company_id = c.id AND cr.rep_id = rr.id)
+              OR ${repTerritoryCompanyScopeClauseForRepId('c', 'rr.id')}
+            )
         )`
       );
-      binds.push(likeValue);
+      binds.push(`%${repFilter.toLowerCase()}%`);
     }
     if (dueDays > 0) {
       whereParts.push(
@@ -2661,7 +2692,8 @@ addRoute(
 addRoute(
   'DELETE',
   /^\/api\/companies\/(\d+)$/,
-  withWriteAccess(async (request, env, user) => {
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
     const match = request.url.match(/\/api\/companies\/(\d+)$/);
     const companyId = Number(match?.[1]);
     if (!companyId) return err('company id is required');

@@ -192,6 +192,29 @@ function canManageReps() {
   return ['admin', 'manager', 'owner'].includes(state.user?.role);
 }
 
+function parseCompanySearchFilters(rawInput) {
+  let rest = String(rawInput || '');
+  const out = { q: '', state: '', city: '', rep: '' };
+  const extract = (key) => {
+    const re = new RegExp(`(?:^|\\s)${key}:(\"[^\"]+\"|[^\\s]+)`, 'ig');
+    let match;
+    while ((match = re.exec(rest))) {
+      const token = String(match[1] || '').trim();
+      if (!token) continue;
+      const value = token.startsWith('"') && token.endsWith('"') ? token.slice(1, -1).trim() : token;
+      if (!value) continue;
+      out[key] = value;
+      rest = `${rest.slice(0, match.index)} ${rest.slice(re.lastIndex)}`;
+      re.lastIndex = 0;
+    }
+  };
+  extract('state');
+  extract('city');
+  extract('rep');
+  out.q = rest.replace(/\s+/g, ' ').trim();
+  return out;
+}
+
 function showToast(message, isError = false) {
   els.toast.textContent = message;
   els.toast.classList.remove('hidden', 'error');
@@ -644,10 +667,14 @@ async function api(path, options = {}) {
 }
 
 async function loadCompanies() {
+  const parsed = parseCompanySearchFilters(state.companyFilter);
   const params = new URLSearchParams();
   params.set('page', String(state.companyPage));
   params.set('pageSize', String(state.companyPageSize));
-  if (state.companyFilter.trim()) params.set('q', state.companyFilter.trim());
+  if (parsed.q) params.set('q', parsed.q);
+  if (parsed.state) params.set('state', parsed.state);
+  if (parsed.city) params.set('city', parsed.city);
+  if (parsed.rep) params.set('rep', parsed.rep);
   if (state.companyDue14Only) params.set('dueDays', '14');
   if (state.companyPendingOnly) params.set('pendingOnly', '1');
   const result = await api(`/api/companies?${params.toString()}`);
@@ -891,7 +918,7 @@ function renderCompanyDetail() {
           ? isEditing
             ? `<button type="submit">Save Company</button>
                <button type="button" id="cancelCompanyEditBtn" class="ghost">Cancel</button>
-               <button type="button" id="deleteCompanyBtn" class="danger">Delete Company</button>`
+               ${canManageReps() ? `<button type="button" id="deleteCompanyBtn" class="danger">Delete Company</button>` : ''}`
             : `<button type="button" id="startCompanyEditBtn">Edit</button>`
           : ''
       }
@@ -1081,7 +1108,8 @@ function bindCompanyDetailEvents() {
   const deleteCompanyBtn = document.getElementById('deleteCompanyBtn');
   if (deleteCompanyBtn) {
     deleteCompanyBtn.onclick = async () => {
-      if (!confirm('Delete this company?')) return;
+      const companyName = state.currentCompany?.name || 'this company';
+      if (!confirm(`Delete "${companyName}"?\n\nThis hides the company and related records from normal views.`)) return;
       try {
         await api(`/api/companies/${state.currentCompany.id}`, { method: 'DELETE' });
         await loadCompanies();
