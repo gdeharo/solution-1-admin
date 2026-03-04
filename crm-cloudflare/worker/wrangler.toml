@@ -2,6 +2,10 @@ name = "crm-api"
 main = "src/index.ts"
 compatibility_date = "2026-02-20"
 
+routes = [
+  { pattern = "api.rtf-cloud.com", custom_domain = true }
+]
+
 [[d1_databases]]
 binding = "CRM_DB"
 database_name = "crm-db"

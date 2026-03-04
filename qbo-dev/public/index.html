@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QBO Invoice Import/Export</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <h1>QuickBooks Invoice Console</h1>
+        <p>Connect one company, import invoices from CSV, and export invoice data.</p>
+      </header>
+
+      <section class="panel" id="connection-panel">
+        <h2>Connection</h2>
+        <div id="status" class="status">Checking connection...</div>
+        <div class="actions">
+          <button id="connect-btn" class="btn primary" type="button">Connect QuickBooks</button>
+          <button id="refresh-token-btn" class="btn" type="button">Refresh Token</button>
+          <button id="reload-status-btn" class="btn" type="button">Reload Status</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Import Transactions</h2>
+        <p id="import-hint" class="hint">Required headers: <code>Invoice Number,Customer,Email,Terms,Invoice Date,Due Date,Shipping To,Shipping Via,Shipping Date,Tracking No.,P.O. Number,Sales Rep,Sec,Product/Service,Service Date,SKU,Description,Quantity,Rate,Amount,Class,Tax,Memo,Message On Invoice,Send later,Subtotal,Taxable Subtotal,Tax Rate,Tax Rate %,Sales Tax Amount,Shipping Amt,Total,Attachments</code></p>
+        <label class="field">
+          <span>CSV file</span>
+          <input id="csv-file" type="file" accept=".csv,text/csv" />
+        </label>
+        <label class="field">
+          <span>CSV text</span>
+          <textarea id="csv-text" rows="8" placeholder="Paste CSV content here"></textarea>
+        </label>
+        <div class="actions">
+          <label class="field inline-field">
+            <span>Import type</span>
+            <select id="import-type">
+              <option value="invoices" selected>Invoices</option>
+              <option value="estimates">Estimates</option>
+              <option value="purchase-orders">Purchase Orders</option>
+            </select>
+          </label>
+          <label class="field inline-field">
+            <span>Preview mode</span>
+            <select id="preview-mode">
+              <option value="split" selected>Split view (base + diffs)</option>
+              <option value="grouped-full">Grouped full rows</option>
+            </select>
+          </label>
+          <button id="preview-btn" class="btn" type="button">Preview Grid</button>
+          <button id="dry-run-btn" class="btn" type="button">Validate (Dry Run)</button>
+          <button id="import-btn" class="btn primary" type="button">Import Invoices</button>
+        </div>
+        <div id="preview-wrap" class="table-wrap"></div>
+        <div id="result-summary" class="summary" aria-live="polite"></div>
+        <div id="result-table-wrap" class="table-wrap"></div>
+        <pre id="import-output" class="output" aria-live="polite"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Export Invoices</h2>
+        <div class="grid">
+          <label class="field">
+            <span>From date</span>
+            <input id="from-date" type="date" />
+          </label>
+          <label class="field">
+            <span>To date</span>
+            <input id="to-date" type="date" />
+          </label>
+          <label class="field">
+            <span>Max rows</span>
+            <input id="max-rows" type="number" min="1" max="2000" value="500" />
+          </label>
+        </div>
+        <div class="actions">
+          <button id="export-btn" class="btn primary" type="button">Download CSV</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/ui/app.js"></script>
+  </body>
+</html>

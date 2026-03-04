@@ -19,14 +19,60 @@ type Session = {
   expires_at: string;
 };
 
-const json = (data: unknown, status = 200): Response =>
-  new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store'
+const SECURITY_HEADERS: Record<string, string> = {
+  'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+};
+
+function withSecurityHeaders(response: Response): Response {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) {
+    if (!response.headers.has(key)) response.headers.set(key, value);
+  }
+  return response;
+}
+
+type RateBucket = { count: number; resetAt: number };
+const AUTH_RATE_BUCKETS = new Map<string, RateBucket>();
+
+function checkAuthRateLimit(request: Request, windowMs = 60_000, maxRequests = 20): boolean {
+  const ip =
+    request.headers.get('cf-connecting-ip') ||
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown';
+  const ua = request.headers.get('user-agent') || 'unknown';
+  const path = new URL(request.url).pathname;
+  const key = `${ip}|${ua.slice(0, 48)}|${path}`;
+  const now = Date.now();
+  const current = AUTH_RATE_BUCKETS.get(key);
+  if (!current || now >= current.resetAt) {
+    AUTH_RATE_BUCKETS.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  current.count += 1;
+  if (current.count > maxRequests) return false;
+  AUTH_RATE_BUCKETS.set(key, current);
+  if (AUTH_RATE_BUCKETS.size > 10000) {
+    for (const [k, v] of AUTH_RATE_BUCKETS.entries()) {
+      if (now >= v.resetAt) AUTH_RATE_BUCKETS.delete(k);
     }
-  });
+  }
+  return true;
+}
+
+const json = (data: unknown, status = 200): Response =>
+  withSecurityHeaders(
+    new Response(JSON.stringify(data), {
+      status,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store'
+      }
+    })
+  );
 
 const err = (message: string, status = 400): Response => json({ error: message }, status);
 
@@ -3312,16 +3358,25 @@ export default {
     try {
       const url = new URL(request.url);
       if (!url.pathname.startsWith('/api/')) return err('Not found', 404);
+      if (
+        request.method === 'POST' &&
+        /^\/api\/auth\/(login|bootstrap|invite\/[^/]+\/set-password)$/.test(url.pathname) &&
+        !checkAuthRateLimit(request)
+      ) {
+        return err('Too many requests. Please wait and try again.', 429);
+      }
 
       if (request.method === 'OPTIONS') {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            'access-control-allow-origin': '*',
-            'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-            'access-control-allow-headers': 'content-type,authorization'
-          }
-        });
+        return withSecurityHeaders(
+          new Response(null, {
+            status: 204,
+            headers: {
+              'access-control-allow-origin': '*',
+              'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+              'access-control-allow-headers': 'content-type,authorization'
+            }
+          })
+        );
       }
 
       for (const route of routes) {
@@ -3330,7 +3385,7 @@ export default {
         if (!match) continue;
         const response = await route.handler(request, env, url, match);
         response.headers.set('access-control-allow-origin', '*');
-        return response;
+        return withSecurityHeaders(response);
       }
 
       return err('Not found', 404);

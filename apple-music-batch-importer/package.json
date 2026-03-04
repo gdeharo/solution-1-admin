@@ -1,0 +1,15 @@
+{
+  "name": "apple-music-batch-importer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Batch import song names into Apple Music playlists",
+  "type": "module",
+  "scripts": {
+    "import": "node src/import-songs.mjs",
+    "dev-token": "node src/generate-dev-token.mjs",
+    "token-helper": "open token-helper.html"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

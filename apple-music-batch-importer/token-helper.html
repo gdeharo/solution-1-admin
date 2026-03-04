@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Apple Music User Token Helper</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 2rem auto;
+        max-width: 720px;
+        padding: 0 1rem;
+        line-height: 1.4;
+      }
+      textarea,
+      input,
+      button {
+        width: 100%;
+        padding: 0.7rem;
+        margin-top: 0.5rem;
+        box-sizing: border-box;
+      }
+      textarea {
+        min-height: 130px;
+      }
+      .row {
+        margin-bottom: 1rem;
+      }
+      button {
+        cursor: pointer;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .small {
+        font-size: 0.9rem;
+        color: #444;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Apple Music User Token Helper</h1>
+    <p class="small">
+      Paste your <span class="mono">developer token</span>, click authorize, and copy the
+      <span class="mono">Music User Token</span> into your terminal as
+      <span class="mono">APPLE_MUSIC_USER_TOKEN</span>.
+    </p>
+
+    <div class="row">
+      <label for="devToken">Developer token (JWT)</label>
+      <textarea id="devToken" placeholder="eyJhbGciOi..." class="mono"></textarea>
+    </div>
+
+    <div class="row">
+      <button id="authorizeBtn">Authorize with Apple Music</button>
+    </div>
+
+    <div class="row">
+      <label for="userToken">Music User Token</label>
+      <textarea id="userToken" readonly class="mono"></textarea>
+    </div>
+
+    <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
+    <script>
+      const authorizeBtn = document.getElementById('authorizeBtn');
+      const devTokenEl = document.getElementById('devToken');
+      const userTokenEl = document.getElementById('userToken');
+
+      authorizeBtn.addEventListener('click', async () => {
+        const developerToken = devTokenEl.value.trim();
+        if (!developerToken) {
+          alert('Paste a developer token first.');
+          return;
+        }
+
+        try {
+          if (!window.MusicKit) {
+            throw new Error('MusicKit did not load. Check internet access and try again.');
+          }
+
+          MusicKit.configure({
+            developerToken,
+            app: {
+              name: 'Batch Import Helper',
+              build: '1.0.0'
+            }
+          });
+
+          const music = MusicKit.getInstance();
+          const userToken = await music.authorize();
+          userTokenEl.value = userToken;
+        } catch (error) {
+          alert(`Authorization failed: ${error.message}`);
+        }
+      });
+    </script>
+  </body>
+</html>

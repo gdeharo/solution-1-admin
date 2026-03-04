@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply CRM_DB --local"
+    "db:migrate": "wrangler d1 migrations apply CRM_DB --local",
+    "backup:d1": "bash ./scripts/backup_d1_daily.sh"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260208.0",

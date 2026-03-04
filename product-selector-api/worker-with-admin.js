@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-02-20-hardening-v1";
+const WORKER_BUILD = "2026-02-22-d1-runtime-v2";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -122,50 +122,57 @@ export default {
         });
       }
 
-      // Google Sheets-backed catalog endpoints
+      // D1-backed catalog endpoints
       if (path === "/catalog/brands" && request.method === "GET") {
-        const { barRows } = await getCatalogSheetData(env);
-        const brands = uniqueSorted(
-          barRows.map((r) => r["Chainsaw Brand"]).filter(Boolean)
-        );
+        await ensureD1CatalogTables(env);
+        const rows = await env.DB.prepare(
+          `SELECT DISTINCT chainsaw_brand
+           FROM bar_lengths
+           WHERE is_active = 1
+           ORDER BY chainsaw_brand COLLATE NOCASE`
+        ).all();
+        const brands = (rows.results || []).map((r) => toStr(r.chainsaw_brand)).filter(Boolean);
         return json({ brands });
       }
 
       if (path === "/catalog/models" && request.method === "GET") {
-        const { barRows } = await getCatalogSheetData(env);
+        await ensureD1CatalogTables(env);
         const brand = (url.searchParams.get("brand") || "").trim();
         if (!brand) return json({ error: "Missing required param: brand" }, 400);
 
-        const models = uniqueSorted(
-          barRows
-            .filter((r) => eqNorm(r["Chainsaw Brand"], brand))
-            .map((r) => r["Chainsaw Model"])
-            .filter(Boolean)
-        );
+        const rows = await env.DB.prepare(
+          `SELECT DISTINCT chainsaw_model
+           FROM bar_lengths
+           WHERE is_active = 1 AND lower(chainsaw_brand) = lower(?)
+           ORDER BY chainsaw_model COLLATE NOCASE`
+        ).bind(brand).all();
+        const models = (rows.results || []).map((r) => toStr(r.chainsaw_model)).filter(Boolean);
 
         return json({ brand, models });
       }
 
       if (path === "/catalog/bar-lengths" && request.method === "GET") {
-        const { barRows } = await getCatalogSheetData(env);
+        await ensureD1CatalogTables(env);
         const brand = (url.searchParams.get("brand") || "").trim();
         const model = (url.searchParams.get("model") || "").trim();
         if (!brand || !model) {
           return json({ error: "Missing required params: brand, model" }, 400);
         }
 
-        const lengths = uniqueSortedByNumericPrefix(
-          barRows
-            .filter((r) => eqNorm(r["Chainsaw Brand"], brand) && eqNorm(r["Chainsaw Model"], model))
-            .map((r) => r["Bar Length"])
-            .filter(Boolean)
-        );
+        const rows = await env.DB.prepare(
+          `SELECT DISTINCT bar_length
+           FROM bar_lengths
+           WHERE is_active = 1
+             AND lower(chainsaw_brand) = lower(?)
+             AND lower(chainsaw_model) = lower(?)`
+        ).bind(brand, model).all();
+        const lengths = uniqueSortedByNumericPrefix((rows.results || []).map((r) => toStr(r.bar_length)));
 
         return json({ brand, model, bar_lengths: lengths });
       }
 
       if (path === "/catalog/results" && request.method === "GET") {
-        const { barRows, kmcRows, chainTypeRows } = await getCatalogSheetData(env);
+        await ensureD1CatalogTables(env);
         const brand = (url.searchParams.get("brand") || "").trim();
         const model = (url.searchParams.get("model") || "").trim();
         const barLength = (url.searchParams.get("barLength") || "").trim();
@@ -175,23 +182,33 @@ export default {
           return json({ error: "Missing required params: brand, model, barLength" }, 400);
         }
 
-        const chainTypeMap = buildChainTypeMap(chainTypeRows);
         const settings = await getSettingsMap(env);
         const chainBrandFallback = settings.chain_brand_fallback || "KMC";
 
-        const matchingBarRows = barRows.filter(
-          (r) =>
-            eqNorm(r["Chainsaw Brand"], brand) &&
-            eqNorm(r["Chainsaw Model"], model) &&
-            eqNorm(r["Bar Length"], barLength)
-        );
+        const matchingBarRes = await env.DB.prepare(
+          `SELECT chain_type_code, pitch, gauge, drive_links
+           FROM bar_lengths
+           WHERE is_active = 1
+             AND lower(chainsaw_brand) = lower(?)
+             AND lower(chainsaw_model) = lower(?)
+             AND lower(bar_length) = lower(?)`
+        ).bind(brand, model, barLength).all();
+        const matchingBarRows = matchingBarRes.results || [];
+
+        const kmcRes = await env.DB.prepare(
+          `SELECT gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+                  links, part_reference, upc, url
+           FROM kmc_chains
+           WHERE is_active = 1`
+        ).all();
+        const kmcRows = kmcRes.results || [];
 
         const pathKeys = [];
         for (const row of matchingBarRows) {
-          const chainTypeCode = toStr(row["Chain Type Code"]);
-          const pitch = toStr(row.Pitch);
-          const gauge = toStr(row.Gauge);
-          const driveLinks = toStr(row["Drive Links"]);
+          const chainTypeCode = toStr(row.chain_type_code);
+          const pitch = toStr(row.pitch);
+          const gauge = toStr(row.gauge);
+          const driveLinks = toStr(row.drive_links);
           if (!pitch || !gauge || !driveLinks) continue;
           pathKeys.push({ chainTypeCode, pitch, gauge, driveLinks });
         }
@@ -201,17 +218,16 @@ export default {
 
         for (const key of uniqueKeys) {
           for (const kmc of kmcRows) {
-            if (!eqNorm(kmc.Pitch, key.pitch)) continue;
-            if (!eqNorm(kmc.Gauge, key.gauge)) continue;
-            if (!sameDriveLinks(kmc["Links"], key.driveLinks)) continue;
-            const chainTypeInfo = chainTypeMap.get(norm(kmc["Chain Type"])) || {};
-            const pitch = toStr(kmc.Pitch || chainTypeInfo.pitch);
-            const gauge = toStr(kmc.Gauge || chainTypeInfo.gauge);
-            const chiselStyle = toStr(kmc["Chisel Style"] || chainTypeInfo.chisel_style);
-            const ansiLowKickback = toStr(kmc["ANSI Low Kickback"] || chainTypeInfo.ansi_low_kickback);
-            const profileClass = toStr(kmc["Profile Class"] || chainTypeInfo.profile_class);
-            const kerfType = toStr(kmc["Kerf Type"] || chainTypeInfo.kerf_type);
-            const sequenceType = toStr(kmc["Sequence Type"] || chainTypeInfo.sequence_type);
+            if (!eqNorm(kmc.pitch, key.pitch)) continue;
+            if (!eqNorm(kmc.gauge, key.gauge)) continue;
+            if (!sameDriveLinks(kmc.links, key.driveLinks)) continue;
+            const pitch = toStr(kmc.pitch);
+            const gauge = toStr(kmc.gauge);
+            const chiselStyle = toStr(kmc.chisel_style);
+            const ansiLowKickback = toStr(kmc.ansi_low_kickback);
+            const profileClass = toStr(kmc.profile_class);
+            const kerfType = toStr(kmc.kerf_type);
+            const sequenceType = toStr(kmc.sequence_type);
             const chainModel =
               pitch && gauge
                 ? `Pitch ${pitch} / Gauge ${gauge}`
@@ -222,9 +238,9 @@ export default {
                     : "";
 
             results.push({
-              chain_brand: toStr(kmc["Chain Brand"]) || toStr(kmc.Brand) || chainBrandFallback,
+              chain_brand: chainBrandFallback,
               chain_model: chainModel,
-              chain_type: toStr(kmc["Chain Type"]),
+              chain_type: "",
               pitch,
               gauge,
               chisel_style: chiselStyle,
@@ -232,10 +248,10 @@ export default {
               profile_class: profileClass,
               kerf_type: kerfType,
               sequence_type: sequenceType,
-              links: toStr(kmc["Links"]),
-              part_reference: toStr(kmc["Part Reference"]),
-              upc: toStr(kmc["UPC"]),
-              url: toStr(kmc["URL"]),
+              links: toStr(kmc.links),
+              part_reference: toStr(kmc.part_reference),
+              upc: toStr(kmc.upc),
+              url: toStr(kmc.url),
             });
           }
         }
@@ -438,6 +454,142 @@ export default {
 
         const route = path.split("/").filter(Boolean);
 
+        if (route.length === 3 && route[0] === "admin" && route[1] === "d1" && route[2] === "init" && request.method === "POST") {
+          await ensureD1CatalogTables(env);
+          return json({ ok: true });
+        }
+
+        if (route.length === 3 && route[0] === "admin" && route[1] === "d1" && route[2] === "status" && request.method === "GET") {
+          await ensureD1CatalogTables(env);
+          const counts = await getD1CatalogCounts(env);
+          return json({ ok: true, counts });
+        }
+
+        if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "search-summary" && request.method === "GET") {
+          await ensureD1CatalogTables(env);
+          const days = Math.max(1, Number(url.searchParams.get("days") || 30));
+          const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+          const totals = await env.DB.prepare(
+            `SELECT
+                COUNT(*) AS searches,
+                SUM(CASE WHEN match_count > 0 THEN 1 ELSE 0 END) AS successful_searches,
+                SUM(match_count) AS total_matches
+             FROM search_log
+             WHERE timestamp_iso >= ?`
+          ).bind(sinceIso).first();
+          return json({
+            ok: true,
+            days,
+            summary: {
+              searches: Number((totals && totals.searches) || 0),
+              successful_searches: Number((totals && totals.successful_searches) || 0),
+              total_matches: Number((totals && totals.total_matches) || 0),
+            },
+          });
+        }
+
+        if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "top-searches" && request.method === "GET") {
+          await ensureD1CatalogTables(env);
+          const days = Math.max(1, Number(url.searchParams.get("days") || 30));
+          const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 20)));
+          const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+          const rows = await env.DB.prepare(
+            `SELECT brand, model, bar_length, COUNT(*) AS searches, SUM(match_count) AS total_matches
+             FROM search_log
+             WHERE timestamp_iso >= ?
+             GROUP BY brand, model, bar_length
+             ORDER BY searches DESC, total_matches DESC, brand, model, bar_length
+             LIMIT ?`
+          ).bind(sinceIso, limit).all();
+          return json({
+            ok: true,
+            days,
+            limit,
+            rows: (rows.results || []).map((r) => ({
+              brand: toStr(r.brand),
+              model: toStr(r.model),
+              bar_length: toStr(r.bar_length),
+              searches: Number(r.searches || 0),
+              total_matches: Number(r.total_matches || 0),
+            })),
+          });
+        }
+
+        if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "search-log" && request.method === "GET") {
+          await ensureD1CatalogTables(env);
+          const days = Math.max(1, Number(url.searchParams.get("days") || 30));
+          const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || 100)));
+          const brand = toStr(url.searchParams.get("brand")).trim();
+          const model = toStr(url.searchParams.get("model")).trim();
+          const barLength = toStr(url.searchParams.get("barLength")).trim();
+          const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+          const where = ["timestamp_iso >= ?"];
+          const binds = [sinceIso];
+          if (brand) {
+            where.push("lower(brand) = lower(?)");
+            binds.push(brand);
+          }
+          if (model) {
+            where.push("lower(model) = lower(?)");
+            binds.push(model);
+          }
+          if (barLength) {
+            where.push("lower(bar_length) = lower(?)");
+            binds.push(barLength);
+          }
+          binds.push(String(limit));
+
+          const rows = await env.DB.prepare(
+            `SELECT id, timestamp_iso, brand, model, bar_length, match_count,
+                    matched_part_references, matched_urls, chain_type_codes, drive_links
+             FROM search_log
+             WHERE ${where.join(" AND ")}
+             ORDER BY timestamp_iso DESC, id DESC
+             LIMIT ?`
+          ).bind(...binds).all();
+
+          return json({
+            ok: true,
+            days,
+            limit,
+            filters: { brand, model, bar_length: barLength },
+            rows: (rows.results || []).map((r) => ({
+              id: Number(r.id || 0),
+              timestamp_iso: toStr(r.timestamp_iso),
+              brand: toStr(r.brand),
+              model: toStr(r.model),
+              bar_length: toStr(r.bar_length),
+              match_count: Number(r.match_count || 0),
+              matched_part_references: toStr(r.matched_part_references),
+              matched_urls: toStr(r.matched_urls),
+              chain_type_codes: toStr(r.chain_type_codes),
+              drive_links: toStr(r.drive_links),
+            })),
+          });
+        }
+
+        if (
+          route.length === 3 &&
+          route[0] === "admin" &&
+          route[1] === "d1" &&
+          route[2] === "migrate-from-sheets" &&
+          (request.method === "GET" || request.method === "POST")
+        ) {
+          let dryRun = true;
+          let replace = true;
+          if (request.method === "POST") {
+            const body = await parseJson(request);
+            dryRun = body && body.dryRun === false ? false : true;
+            replace = body && body.replace === false ? false : true;
+          } else {
+            dryRun = toStr(url.searchParams.get("dryRun") || "1") !== "0";
+            replace = toStr(url.searchParams.get("replace") || "1") !== "0";
+          }
+          const result = await migrateD1FromSheets(env, { dryRun, replace });
+          return json(result);
+        }
+
         if (route.length === 2 && route[0] === "admin" && route[1] === "settings" && request.method === "GET") {
           const settings = await getSettingsMap(env);
           return json({ settings });
@@ -454,7 +606,7 @@ export default {
           const field = toStr(url.searchParams.get("field")).trim();
           const group = toStr(url.searchParams.get("group")).trim();
           const includeInactive = toStr(url.searchParams.get("includeInactive")) === "1";
-          const lookups = await getLookupValues(env, { field, group, includeInactive });
+          const lookups = await getLookupValuesFromD1(env, { field, group, includeInactive });
           return json({ lookups });
         }
 
@@ -470,7 +622,7 @@ export default {
             return json({ error: "lookups requires field and value" }, 400);
           }
 
-          const rowNumber = await upsertLookupValue(env, {
+          const rowNumber = await upsertLookupValueD1(env, {
             field,
             value,
             group,
@@ -488,18 +640,7 @@ export default {
           route[2] === "chain-type-codes" &&
           (request.method === "GET" || request.method === "POST")
         ) {
-          let dryRun = true;
-          let maxUpdates = 0;
-          if (request.method === "POST") {
-            const body = await parseJson(request);
-            dryRun = body && body.dryRun === false ? false : true;
-            maxUpdates = Number(body.maxUpdates || 0);
-          } else {
-            dryRun = toStr(url.searchParams.get("dryRun") || "1") !== "0";
-            maxUpdates = Number(url.searchParams.get("maxUpdates") || 0);
-          }
-          const result = await migrateChainTypeCodes(env, { dryRun, maxUpdates });
-          return json(result);
+          return json({ error: "Deprecated route. Chain type migration now runs via /admin/d1/migrate-from-sheets." }, 410);
         }
 
         if (route.length === 3 && route[0] === "admin" && route[1] === "gsheet" && request.method === "GET") {
@@ -507,8 +648,7 @@ export default {
           const cfg = SHEET_ENTITY_CONFIG[entity];
           if (!cfg) return json({ error: "Unknown sheet entity" }, 404);
 
-          // Read-only admin view should not mutate sheet headers.
-          const rows = await loadEntityRowsWithoutHeaderRepair(env, entity);
+          const rows = await loadAdminEntityRows(env, entity);
           return json({ entity, tab: cfg.tab, headers: cfg.headers, rows });
         }
 
@@ -524,14 +664,7 @@ export default {
           }
           const rowNumber = body && body.rowNumber ? Number(body.rowNumber) : Number(row.__row || 0);
 
-          if (entity === "chain-types") {
-            await enforceChainTypeUniqueness(env, row, rowNumber || null);
-          }
-          if (entity === "kmc-chains") {
-            await enforceKmcChainUniqueness(env, row, rowNumber || null);
-          }
-
-          const updatedRow = await upsertSheetEntityRow(env, cfg, row, rowNumber || null);
+          const updatedRow = await upsertAdminEntityRow(env, entity, row, rowNumber || null);
           return json({ ok: true, row_number: updatedRow });
         }
 
@@ -540,10 +673,10 @@ export default {
           const cfg = SHEET_ENTITY_CONFIG[entity];
           if (!cfg) return json({ error: "Unknown sheet entity" }, 404);
           const rowNumber = Number(url.searchParams.get("rowNumber") || 0);
-          if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+          if (!Number.isInteger(rowNumber) || rowNumber < 1) {
             return json({ error: "Missing or invalid rowNumber query parameter" }, 400);
           }
-          await deleteSheetRow(env, cfg.tab, rowNumber);
+          await deleteAdminEntityRow(env, entity, rowNumber);
           return json({ ok: true, row_number: rowNumber });
         }
 
@@ -851,33 +984,40 @@ async function parseJson(request) {
 }
 
 async function appendSearchLog(env, data) {
-  const now = new Date().toISOString();
-  const tab = env.SEARCH_LOG_TAB || DEFAULT_LOG_TAB;
+  await ensureD1CatalogTables(env);
+  const nowIso = new Date().toISOString();
+  const matchKeys = (data.matchKeys || []).map((k) => `${toStr(k.pitch)}/${toStr(k.gauge)}:${toStr(k.driveLinks)}`).join(" | ");
+  const chainTypeCodes = (data.matchKeys || []).map((k) => toStr(k.chainTypeCode)).filter(Boolean).join(",");
+  const driveLinks = (data.matchKeys || []).map((k) => toStr(k.driveLinks)).filter(Boolean).join(",");
+  const matchCount = Array.isArray(data.chains) ? Number(data.chains.length) : 0;
+  const matchedPartRefs = Array.isArray(data.chains)
+    ? data.chains.map((c) => toStr(c.part_reference)).filter(Boolean).join(",")
+    : "";
+  const matchedUrls = Array.isArray(data.chains)
+    ? data.chains.map((c) => toStr(c.url)).filter(Boolean).join(",")
+    : "";
 
-  await ensureLogHeader(env, tab);
-
-  const row = [
-    now,
-    data.brand || "",
-    data.model || "",
-    data.barLength || "",
-    (data.matchKeys || []).map((k) => `${toStr(k.pitch)}/${toStr(k.gauge)}:${toStr(k.driveLinks)}`).join(" | "),
-    (data.matchKeys || []).map((k) => `${toStr(k.pitch)}/${toStr(k.gauge)}`).filter(Boolean).join(","),
-    (data.matchKeys || []).map((k) => toStr(k.driveLinks)).filter(Boolean).join(","),
-    Array.isArray(data.chains) ? String(data.chains.length) : "0",
-    Array.isArray(data.chains)
-      ? data.chains.map((c) => toStr(c.part_reference)).filter(Boolean).join(",")
-      : "",
-    Array.isArray(data.chains)
-      ? data.chains.map((c) => toStr(c.url)).filter(Boolean).join(",")
-      : "",
-    data.clientIp || "",
-    data.userAgent || "",
-  ];
-
-  const range = `'${escapeSheetTab(tab)}'!A:L`;
-  const path = `/values/${encodeURIComponent(range)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-  await googleSheetsRequest(env, "POST", path, { values: [row] });
+  await env.DB.prepare(
+    `INSERT INTO search_log (
+      timestamp_iso, brand, model, bar_length, match_keys, chain_type_codes, drive_links,
+      match_count, matched_part_references, matched_urls, client_ip, user_agent
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      nowIso,
+      toStr(data.brand),
+      toStr(data.model),
+      toStr(data.barLength),
+      matchKeys,
+      chainTypeCodes,
+      driveLinks,
+      matchCount,
+      matchedPartRefs,
+      matchedUrls,
+      toStr(data.clientIp),
+      toStr(data.userAgent)
+    )
+    .run();
 }
 
 async function ensureLogHeader(env, tab) {
@@ -948,14 +1088,910 @@ async function ensureSettingsTable(env) {
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
+      value_json TEXT NOT NULL
     )`
   ).run();
 }
 
-async function getSettingsMap(env) {
+async function getAppSettingsValueColumn(env) {
   await ensureSettingsTable(env);
-  const result = await env.DB.prepare("SELECT key, value FROM app_settings").all();
+  const pragma = await env.DB.prepare("PRAGMA table_info(app_settings)").all();
+  const cols = (pragma.results || []).map((row) => toStr(row.name));
+  if (cols.includes("value_json")) return "value_json";
+  if (cols.includes("value")) return "value";
+  throw new Error("app_settings table is missing a value column");
+}
+
+async function ensureD1CatalogTables(env) {
+  if (!env.DB) throw new Error("Missing DB binding for D1 catalog tables");
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS chain_types (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chain_type TEXT NOT NULL,
+      gauge TEXT NOT NULL,
+      pitch TEXT NOT NULL,
+      chisel_style TEXT NOT NULL,
+      ansi_low_kickback TEXT NOT NULL,
+      profile_class TEXT NOT NULL,
+      kerf_type TEXT NOT NULL,
+      sequence_type TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_chain_types_code ON chain_types(chain_type)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_chain_types_signature
+     ON chain_types(gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type)`
+  ).run();
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS kmc_chains (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      gauge TEXT NOT NULL,
+      pitch TEXT NOT NULL,
+      chisel_style TEXT NOT NULL,
+      ansi_low_kickback TEXT NOT NULL,
+      profile_class TEXT NOT NULL,
+      kerf_type TEXT NOT NULL,
+      sequence_type TEXT NOT NULL,
+      links TEXT NOT NULL,
+      part_reference TEXT NOT NULL,
+      upc TEXT NOT NULL,
+      url TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_kmc_chains_part_reference ON kmc_chains(part_reference)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_kmc_chains_upc ON kmc_chains(upc)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_kmc_chains_match ON kmc_chains(pitch, gauge, links)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_kmc_chains_filters ON kmc_chains(gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type)`
+  ).run();
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS bar_lengths (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chainsaw_brand TEXT NOT NULL,
+      chainsaw_model TEXT NOT NULL,
+      bar_length TEXT NOT NULL,
+      chain_type_code TEXT,
+      gauge TEXT NOT NULL,
+      pitch TEXT NOT NULL,
+      drive_links TEXT NOT NULL,
+      name TEXT,
+      kmc_chain_url TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_bar_lengths_fitment ON bar_lengths(chainsaw_brand, chainsaw_model, bar_length, drive_links)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_bar_lengths_brand_model ON bar_lengths(chainsaw_brand, chainsaw_model)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_bar_lengths_match ON bar_lengths(pitch, gauge, drive_links)`
+  ).run();
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS lookup_values (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_name TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      value TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_lookup_values_group_field_value ON lookup_values(group_name, field_name, value)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_lookup_values_group_field_sort ON lookup_values(group_name, field_name, sort_order, value)`
+  ).run();
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS search_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp_iso TEXT NOT NULL,
+      brand TEXT,
+      model TEXT,
+      bar_length TEXT,
+      match_keys TEXT,
+      chain_type_codes TEXT,
+      drive_links TEXT,
+      match_count INTEGER NOT NULL DEFAULT 0,
+      matched_part_references TEXT,
+      matched_urls TEXT,
+      client_ip TEXT,
+      user_agent TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log(created_at DESC)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_search_log_brand_model_bar ON search_log(brand, model, bar_length)`
+  ).run();
+}
+
+async function getD1CatalogCounts(env) {
+  const tables = ["chain_types", "kmc_chains", "bar_lengths", "lookup_values", "search_log"];
+  const out = {};
+  for (const t of tables) {
+    const row = await env.DB.prepare(`SELECT COUNT(*) AS c FROM ${t}`).first();
+    out[t] = Number((row && row.c) || 0);
+  }
+  return out;
+}
+
+async function getLookupValuesFromD1(env, opts = {}) {
+  await ensureD1CatalogTables(env);
+  const where = [];
+  const binds = [];
+  const includeInactive = Boolean(opts.includeInactive);
+  const fieldFilter = toStr(opts.field).trim();
+  const groupFilter = normalizeLookupGroup(opts.group || "");
+
+  if (!includeInactive) where.push("is_active = 1");
+  if (fieldFilter) {
+    where.push("lower(field_name) = lower(?)");
+    binds.push(fieldFilter);
+  }
+  if (groupFilter) {
+    where.push("group_name = ?");
+    binds.push(groupFilter);
+  }
+
+  const sql =
+    `SELECT id, group_name, field_name, value, is_active, sort_order
+     FROM lookup_values` +
+    (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
+    ` ORDER BY group_name, field_name, sort_order, value`;
+  const res = await env.DB.prepare(sql).bind(...binds).all();
+  return (res.results || []).map((row) => ({
+    field: toStr(row.field_name),
+    value: toStr(row.value),
+    active: Number(row.is_active || 0) === 1 ? 1 : 0,
+    sort_order: Number(row.sort_order || 0),
+    group: normalizeLookupGroup(row.group_name || ""),
+    __row: Number(row.id || 0),
+  }));
+}
+
+async function upsertLookupValueD1(env, input) {
+  await ensureD1CatalogTables(env);
+  const nowTs = Math.floor(Date.now() / 1000);
+  const field = toStr(input.field).trim();
+  const value = toStr(input.value).trim();
+  const group = normalizeLookupGroup(input.group || "");
+  const isActive = toStr(input.active || "1") === "0" ? 0 : 1;
+  const sortOrder = Number(input.sortOrder || 0);
+
+  await env.DB.prepare(
+    `INSERT INTO lookup_values (group_name, field_name, value, is_active, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(group_name, field_name, value) DO UPDATE SET
+       is_active = excluded.is_active,
+       sort_order = excluded.sort_order,
+       updated_at = excluded.updated_at`
+  ).bind(group, field, value, isActive, sortOrder, nowTs, nowTs).run();
+
+  const row = await env.DB.prepare(
+    `SELECT id FROM lookup_values
+     WHERE group_name = ? AND field_name = ? AND value = ?`
+  ).bind(group, field, value).first();
+  return Number((row && row.id) || 0);
+}
+
+async function loadAdminEntityRows(env, entity) {
+  await ensureD1CatalogTables(env);
+  if (entity === "chain-types") {
+    const res = await env.DB.prepare(
+      `SELECT id, chain_type, gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type
+       FROM chain_types
+       WHERE is_active = 1
+       ORDER BY gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type`
+    ).all();
+    return (res.results || []).map((r) => ({
+      "Chain Type": toStr(r.chain_type),
+      Gauge: toStr(r.gauge),
+      Pitch: toStr(r.pitch),
+      "Chisel Style": toStr(r.chisel_style),
+      "ANSI Low Kickback": toStr(r.ansi_low_kickback),
+      "Profile Class": toStr(r.profile_class),
+      "Kerf Type": toStr(r.kerf_type),
+      "Sequence Type": toStr(r.sequence_type),
+      __row: Number(r.id),
+    }));
+  }
+  if (entity === "kmc-chains") {
+    const res = await env.DB.prepare(
+      `SELECT id, gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+              links, part_reference, upc, url
+       FROM kmc_chains
+       WHERE is_active = 1
+       ORDER BY id ASC`
+    ).all();
+    return (res.results || []).map((r) => ({
+      Gauge: toStr(r.gauge),
+      Pitch: toStr(r.pitch),
+      "Chisel Style": toStr(r.chisel_style),
+      "ANSI Low Kickback": toStr(r.ansi_low_kickback),
+      "Profile Class": toStr(r.profile_class),
+      "Kerf Type": toStr(r.kerf_type),
+      "Sequence Type": toStr(r.sequence_type),
+      Links: toStr(r.links),
+      "Part Reference": toStr(r.part_reference),
+      UPC: toStr(r.upc),
+      URL: toStr(r.url),
+      __row: Number(r.id),
+    }));
+  }
+  if (entity === "bar-lengths") {
+    const res = await env.DB.prepare(
+      `SELECT id, chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links, name, kmc_chain_url
+       FROM bar_lengths
+       WHERE is_active = 1
+       ORDER BY chainsaw_brand, chainsaw_model, bar_length, drive_links`
+    ).all();
+    return (res.results || []).map((r) => ({
+      "Chainsaw Brand": toStr(r.chainsaw_brand),
+      "Chainsaw Model": toStr(r.chainsaw_model),
+      "Chain Type Code": toStr(r.chain_type_code),
+      Gauge: toStr(r.gauge),
+      Pitch: toStr(r.pitch),
+      "Bar Length": toStr(r.bar_length),
+      "Drive Links": toStr(r.drive_links),
+      Name: toStr(r.name),
+      "KMC Chain URL": toStr(r.kmc_chain_url),
+      __row: Number(r.id),
+    }));
+  }
+  throw new Error("Unknown sheet entity");
+}
+
+async function upsertAdminEntityRow(env, entity, row, rowNumber) {
+  await ensureD1CatalogTables(env);
+  const nowTs = Math.floor(Date.now() / 1000);
+
+  if (entity === "chain-types") {
+    await enforceChainTypeUniquenessD1(env, row, rowNumber || null);
+    const requiredFields = [
+      "Chain Type",
+      "Gauge",
+      "Pitch",
+      "Chisel Style",
+      "ANSI Low Kickback",
+      "Profile Class",
+      "Kerf Type",
+      "Sequence Type",
+    ];
+    const missing = requiredFields.filter((f) => !toStr(row && row[f]).trim());
+    if (missing.length) throw new Error(`Missing required fields: ${missing.join(", ")}`);
+
+    const id = Number(rowNumber || 0);
+    if (id > 0) {
+      await env.DB.prepare(
+        `UPDATE chain_types
+         SET chain_type = ?, gauge = ?, pitch = ?, chisel_style = ?, ansi_low_kickback = ?, profile_class = ?, kerf_type = ?, sequence_type = ?,
+             is_active = 1, updated_at = ?
+         WHERE id = ?`
+      ).bind(
+        toStr(row["Chain Type"]).trim(),
+        toStr(row.Gauge).trim(),
+        toStr(row.Pitch).trim(),
+        toStr(row["Chisel Style"]).trim(),
+        toStr(row["ANSI Low Kickback"]).trim(),
+        toStr(row["Profile Class"]).trim(),
+        toStr(row["Kerf Type"]).trim(),
+        toStr(row["Sequence Type"]).trim(),
+        nowTs,
+        id
+      ).run();
+      return id;
+    }
+
+    const insert = await env.DB.prepare(
+      `INSERT INTO chain_types (
+        chain_type, gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+        is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    ).bind(
+      toStr(row["Chain Type"]).trim(),
+      toStr(row.Gauge).trim(),
+      toStr(row.Pitch).trim(),
+      toStr(row["Chisel Style"]).trim(),
+      toStr(row["ANSI Low Kickback"]).trim(),
+      toStr(row["Profile Class"]).trim(),
+      toStr(row["Kerf Type"]).trim(),
+      toStr(row["Sequence Type"]).trim(),
+      nowTs,
+      nowTs
+    ).run();
+    return Number(insert.meta && insert.meta.last_row_id);
+  }
+
+  if (entity === "kmc-chains") {
+    await enforceKmcChainUniquenessD1(env, row, rowNumber || null);
+    const requiredFields = [
+      "Gauge",
+      "Pitch",
+      "Chisel Style",
+      "ANSI Low Kickback",
+      "Profile Class",
+      "Kerf Type",
+      "Sequence Type",
+      "Links",
+      "Part Reference",
+      "UPC",
+      "URL",
+    ];
+    const missing = requiredFields.filter((f) => !toStr(row && row[f]).trim());
+    if (missing.length) throw new Error(`Missing required fields: ${missing.join(", ")}`);
+    if (!isValidUpcA(toStr(row.UPC))) {
+      throw new Error("Invalid UPC code. Please enter a valid 12-digit UPC-A.");
+    }
+
+    const id = Number(rowNumber || 0);
+    if (id > 0) {
+      await env.DB.prepare(
+        `UPDATE kmc_chains
+         SET gauge = ?, pitch = ?, chisel_style = ?, ansi_low_kickback = ?, profile_class = ?, kerf_type = ?, sequence_type = ?,
+             links = ?, part_reference = ?, upc = ?, url = ?, updated_at = ?, is_active = 1
+         WHERE id = ?`
+      ).bind(
+        toStr(row.Gauge).trim(),
+        toStr(row.Pitch).trim(),
+        toStr(row["Chisel Style"]).trim(),
+        toStr(row["ANSI Low Kickback"]).trim(),
+        toStr(row["Profile Class"]).trim(),
+        toStr(row["Kerf Type"]).trim(),
+        toStr(row["Sequence Type"]).trim(),
+        toStr(row.Links).trim(),
+        toStr(row["Part Reference"]).trim(),
+        normalizeUpc(row.UPC),
+        toStr(row.URL).trim(),
+        nowTs,
+        id
+      ).run();
+      return id;
+    }
+
+    const insert = await env.DB.prepare(
+      `INSERT INTO kmc_chains (
+        gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+        links, part_reference, upc, url, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    ).bind(
+      toStr(row.Gauge).trim(),
+      toStr(row.Pitch).trim(),
+      toStr(row["Chisel Style"]).trim(),
+      toStr(row["ANSI Low Kickback"]).trim(),
+      toStr(row["Profile Class"]).trim(),
+      toStr(row["Kerf Type"]).trim(),
+      toStr(row["Sequence Type"]).trim(),
+      toStr(row.Links).trim(),
+      toStr(row["Part Reference"]).trim(),
+      normalizeUpc(row.UPC),
+      toStr(row.URL).trim(),
+      nowTs,
+      nowTs
+    ).run();
+    return Number(insert.meta && insert.meta.last_row_id);
+  }
+
+  if (entity === "bar-lengths") {
+    const requiredFields = ["Chainsaw Brand", "Chainsaw Model", "Gauge", "Pitch", "Bar Length", "Drive Links"];
+    const missing = requiredFields.filter((f) => !toStr(row && row[f]).trim());
+    if (missing.length) throw new Error(`Missing required fields: ${missing.join(", ")}`);
+
+    const id = Number(rowNumber || 0);
+    if (id > 0) {
+      await env.DB.prepare(
+        `UPDATE bar_lengths
+         SET chainsaw_brand = ?, chainsaw_model = ?, chain_type_code = ?, gauge = ?, pitch = ?,
+             bar_length = ?, drive_links = ?, name = ?, kmc_chain_url = ?, updated_at = ?, is_active = 1
+         WHERE id = ?`
+      ).bind(
+        toStr(row["Chainsaw Brand"]).trim(),
+        toStr(row["Chainsaw Model"]).trim(),
+        toStr(row["Chain Type Code"]).trim(),
+        toStr(row.Gauge).trim(),
+        toStr(row.Pitch).trim(),
+        toStr(row["Bar Length"]).trim(),
+        toStr(row["Drive Links"]).trim(),
+        toStr(row.Name).trim(),
+        toStr(row["KMC Chain URL"]).trim(),
+        nowTs,
+        id
+      ).run();
+      return id;
+    }
+
+    const insert = await env.DB.prepare(
+      `INSERT INTO bar_lengths (
+        chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links,
+        name, kmc_chain_url, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    ).bind(
+      toStr(row["Chainsaw Brand"]).trim(),
+      toStr(row["Chainsaw Model"]).trim(),
+      toStr(row["Chain Type Code"]).trim(),
+      toStr(row.Gauge).trim(),
+      toStr(row.Pitch).trim(),
+      toStr(row["Bar Length"]).trim(),
+      toStr(row["Drive Links"]).trim(),
+      toStr(row.Name).trim(),
+      toStr(row["KMC Chain URL"]).trim(),
+      nowTs,
+      nowTs
+    ).run();
+    return Number(insert.meta && insert.meta.last_row_id);
+  }
+
+  throw new Error("Unknown sheet entity");
+}
+
+async function deleteAdminEntityRow(env, entity, rowNumber) {
+  await ensureD1CatalogTables(env);
+  const id = Number(rowNumber || 0);
+  if (!id) throw new Error("Missing or invalid rowNumber query parameter");
+  if (entity === "chain-types") {
+    await env.DB.prepare("DELETE FROM chain_types WHERE id = ?").bind(id).run();
+    return;
+  }
+  if (entity === "kmc-chains") {
+    await env.DB.prepare("DELETE FROM kmc_chains WHERE id = ?").bind(id).run();
+    return;
+  }
+  if (entity === "bar-lengths") {
+    await env.DB.prepare("DELETE FROM bar_lengths WHERE id = ?").bind(id).run();
+    return;
+  }
+  throw new Error("Unknown sheet entity");
+}
+
+async function enforceKmcChainUniquenessD1(env, row, rowNumber) {
+  const incomingPartRef = norm(row && row["Part Reference"]);
+  const incomingUpc = normalizeUpc(row && row.UPC);
+  const incomingSig = kmcChainRowSignature(row);
+  const id = Number(rowNumber || 0);
+
+  if (incomingUpc && !isValidUpcA(incomingUpc)) {
+    throw new Error("Invalid UPC code. Please enter a valid 12-digit UPC-A.");
+  }
+
+  const rowsRes = await env.DB.prepare(
+    `SELECT id, gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+            links, part_reference, upc, url
+     FROM kmc_chains`
+  ).all();
+
+  for (const existing of rowsRes.results || []) {
+    const existingId = Number(existing.id || 0);
+    if (id && existingId === id) continue;
+    const existingSig = kmcChainRowSignature({
+      Gauge: existing.gauge,
+      Pitch: existing.pitch,
+      "Chisel Style": existing.chisel_style,
+      "ANSI Low Kickback": existing.ansi_low_kickback,
+      "Profile Class": existing.profile_class,
+      "Kerf Type": existing.kerf_type,
+      "Sequence Type": existing.sequence_type,
+      Links: existing.links,
+      "Part Reference": existing.part_reference,
+      UPC: existing.upc,
+      URL: existing.url,
+    });
+    if (incomingSig && incomingSig === existingSig) {
+      throw new Error("Duplicate KMC chain row detected. This exact chain entry already exists.");
+    }
+    if (incomingPartRef && incomingPartRef === norm(existing.part_reference)) {
+      throw new Error("Duplicate Part Reference detected. Part Reference must be unique.");
+    }
+    if (incomingUpc && incomingUpc === normalizeUpc(existing.upc)) {
+      throw new Error("Duplicate UPC detected. UPC must be unique.");
+    }
+  }
+}
+
+async function enforceChainTypeUniquenessD1(env, row, rowNumber) {
+  const incomingSig = chainTypeSignature(row);
+  if (!incomingSig) return;
+  const incomingCode = norm(row && row["Chain Type"]);
+  const id = Number(rowNumber || 0);
+  const rowsRes = await env.DB.prepare(
+    `SELECT id, chain_type, gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type
+     FROM chain_types`
+  ).all();
+
+  for (const existing of rowsRes.results || []) {
+    const existingId = Number(existing.id || 0);
+    if (id && existingId === id) continue;
+    const existingSig = chainTypeSignature({
+      Gauge: existing.gauge,
+      Pitch: existing.pitch,
+      "Chisel Style": existing.chisel_style,
+      "ANSI Low Kickback": existing.ansi_low_kickback,
+      "Profile Class": existing.profile_class,
+      "Kerf Type": existing.kerf_type,
+      "Sequence Type": existing.sequence_type,
+    });
+    if (incomingSig && incomingSig === existingSig) {
+      const existingCode = toStr(existing.chain_type);
+      throw new Error(
+        `Duplicate chain type variables detected (existing code: ${existingCode || "unknown"}). ` +
+        "This combination already exists; use Edit instead of creating a new chain type code."
+      );
+    }
+    if (incomingCode && incomingCode === norm(existing.chain_type)) {
+      throw new Error("Duplicate Chain Type code detected. Chain Type must be unique.");
+    }
+  }
+}
+
+async function migrateD1FromSheets(env, opts = {}) {
+  await ensureD1CatalogTables(env);
+  const dryRun = opts && opts.dryRun !== false;
+  const replace = opts && opts.replace !== false;
+
+  const chainTypeRowsRaw = await loadEntityRowsWithoutHeaderRepair(env, "chain-types");
+  const kmcRowsRaw = await loadEntityRowsWithoutHeaderRepair(env, "kmc-chains");
+  const barRowsRaw = await loadEntityRowsWithoutHeaderRepair(env, "bar-lengths");
+  const lookupRowsRaw = await getLookupValues(env, { includeInactive: true });
+  const searchRowsRaw = await getSearchLogRowsSafe(env);
+
+  const chainTypeRows = buildD1ChainTypeRows(chainTypeRowsRaw);
+  const kmcRows = buildD1KmcRows(kmcRowsRaw);
+  const barRows = buildD1BarRows(barRowsRaw);
+  const lookupRows = buildD1LookupRows(lookupRowsRaw);
+  const searchRows = buildD1SearchLogRows(searchRowsRaw);
+
+  if (!dryRun) {
+    await replaceD1CatalogData(env, {
+      replace,
+      chainTypeRows,
+      kmcRows,
+      barRows,
+      lookupRows,
+      searchRows,
+    });
+  }
+
+  const countsAfter = dryRun ? null : await getD1CatalogCounts(env);
+  return {
+    ok: true,
+    dryRun,
+    replace,
+    source_counts: {
+      chain_types: chainTypeRows.length,
+      kmc_chains: kmcRows.length,
+      bar_lengths: barRows.length,
+      lookup_values: lookupRows.length,
+      search_log: searchRows.length,
+    },
+    d1_counts: countsAfter,
+    samples: {
+      chain_types: chainTypeRows.slice(0, 3),
+      kmc_chains: kmcRows.slice(0, 3),
+      bar_lengths: barRows.slice(0, 3),
+      lookup_values: lookupRows.slice(0, 5),
+      search_log: searchRows.slice(0, 3),
+    },
+  };
+}
+
+async function replaceD1CatalogData(env, payload) {
+  const nowTs = Math.floor(Date.now() / 1000);
+  const doReplace = payload && payload.replace !== false;
+  if (doReplace) {
+    await env.DB.prepare("DELETE FROM chain_types").run();
+    await env.DB.prepare("DELETE FROM kmc_chains").run();
+    await env.DB.prepare("DELETE FROM bar_lengths").run();
+    await env.DB.prepare("DELETE FROM lookup_values").run();
+    await env.DB.prepare("DELETE FROM search_log").run();
+  }
+
+  for (const row of payload.chainTypeRows || []) {
+    await env.DB.prepare(
+      `INSERT INTO chain_types (
+        chain_type, gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+        is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(chain_type) DO UPDATE SET
+        gauge = excluded.gauge,
+        pitch = excluded.pitch,
+        chisel_style = excluded.chisel_style,
+        ansi_low_kickback = excluded.ansi_low_kickback,
+        profile_class = excluded.profile_class,
+        kerf_type = excluded.kerf_type,
+        sequence_type = excluded.sequence_type,
+        is_active = 1,
+        updated_at = excluded.updated_at`
+    )
+      .bind(
+        row.chain_type,
+        row.gauge,
+        row.pitch,
+        row.chisel_style,
+        row.ansi_low_kickback,
+        row.profile_class,
+        row.kerf_type,
+        row.sequence_type,
+        nowTs,
+        nowTs
+      )
+      .run();
+  }
+
+  for (const row of payload.kmcRows || []) {
+    await env.DB.prepare(
+      `INSERT INTO kmc_chains (
+        gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+        links, part_reference, upc, url, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(part_reference) DO UPDATE SET
+        gauge = excluded.gauge,
+        pitch = excluded.pitch,
+        chisel_style = excluded.chisel_style,
+        ansi_low_kickback = excluded.ansi_low_kickback,
+        profile_class = excluded.profile_class,
+        kerf_type = excluded.kerf_type,
+        sequence_type = excluded.sequence_type,
+        links = excluded.links,
+        upc = excluded.upc,
+        url = excluded.url,
+        is_active = 1,
+        updated_at = excluded.updated_at`
+    )
+      .bind(
+        row.gauge,
+        row.pitch,
+        row.chisel_style,
+        row.ansi_low_kickback,
+        row.profile_class,
+        row.kerf_type,
+        row.sequence_type,
+        row.links,
+        row.part_reference,
+        row.upc,
+        row.url,
+        nowTs,
+        nowTs
+      )
+      .run();
+  }
+
+  for (const row of payload.barRows || []) {
+    await env.DB.prepare(
+      `INSERT INTO bar_lengths (
+        chainsaw_brand, chainsaw_model, bar_length, chain_type_code, gauge, pitch, drive_links, name, kmc_chain_url,
+        is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(chainsaw_brand, chainsaw_model, bar_length, drive_links) DO UPDATE SET
+        chain_type_code = excluded.chain_type_code,
+        gauge = excluded.gauge,
+        pitch = excluded.pitch,
+        name = excluded.name,
+        kmc_chain_url = excluded.kmc_chain_url,
+        is_active = 1,
+        updated_at = excluded.updated_at`
+    )
+      .bind(
+        row.chainsaw_brand,
+        row.chainsaw_model,
+        row.bar_length,
+        row.chain_type_code,
+        row.gauge,
+        row.pitch,
+        row.drive_links,
+        row.name,
+        row.kmc_chain_url,
+        nowTs,
+        nowTs
+      )
+      .run();
+  }
+
+  for (const row of payload.lookupRows || []) {
+    await env.DB.prepare(
+      `INSERT INTO lookup_values (
+        group_name, field_name, value, is_active, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(group_name, field_name, value) DO UPDATE SET
+        is_active = excluded.is_active,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at`
+    )
+      .bind(
+        row.group_name,
+        row.field_name,
+        row.value,
+        row.is_active,
+        row.sort_order,
+        nowTs,
+        nowTs
+      )
+      .run();
+  }
+
+  for (const row of payload.searchRows || []) {
+    await env.DB.prepare(
+      `INSERT INTO search_log (
+        timestamp_iso, brand, model, bar_length, match_keys, chain_type_codes, drive_links,
+        match_count, matched_part_references, matched_urls, client_ip, user_agent
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        row.timestamp_iso,
+        row.brand,
+        row.model,
+        row.bar_length,
+        row.match_keys,
+        row.chain_type_codes,
+        row.drive_links,
+        row.match_count,
+        row.matched_part_references,
+        row.matched_urls,
+        row.client_ip,
+        row.user_agent
+      )
+      .run();
+  }
+}
+
+function buildD1KmcRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    const partReference = toStr(row["Part Reference"]).trim();
+    const upc = normalizeUpc(row.UPC);
+    const url = toStr(row.URL).trim();
+    if (!partReference || !upc || !url) continue;
+    out.push({
+      gauge: toStr(row.Gauge).trim(),
+      pitch: toStr(row.Pitch).trim(),
+      chisel_style: toStr(row["Chisel Style"]).trim(),
+      ansi_low_kickback: toStr(row["ANSI Low Kickback"]).trim(),
+      profile_class: toStr(row["Profile Class"]).trim(),
+      kerf_type: toStr(row["Kerf Type"]).trim(),
+      sequence_type: toStr(row["Sequence Type"]).trim(),
+      links: toStr(row.Links).trim(),
+      part_reference: partReference,
+      upc,
+      url,
+    });
+  }
+  return dedupeByKey(out, (r) => norm(r.part_reference));
+}
+
+function buildD1ChainTypeRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    const chainType = toStr(row["Chain Type"]).trim();
+    const gauge = toStr(row.Gauge).trim();
+    const pitch = toStr(row.Pitch).trim();
+    const chiselStyle = toStr(row["Chisel Style"]).trim();
+    const ansiLowKickback = toStr(row["ANSI Low Kickback"]).trim();
+    const profileClass = toStr(row["Profile Class"]).trim();
+    const kerfType = toStr(row["Kerf Type"]).trim();
+    const sequenceType = toStr(row["Sequence Type"]).trim();
+    if (!chainType || !gauge || !pitch || !chiselStyle || !ansiLowKickback || !profileClass || !kerfType || !sequenceType) {
+      continue;
+    }
+    out.push({
+      chain_type: chainType,
+      gauge,
+      pitch,
+      chisel_style: chiselStyle,
+      ansi_low_kickback: ansiLowKickback,
+      profile_class: profileClass,
+      kerf_type: kerfType,
+      sequence_type: sequenceType,
+    });
+  }
+  return dedupeByKey(out, (r) => norm(r.chain_type));
+}
+
+function buildD1BarRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    const brand = toStr(row["Chainsaw Brand"]).trim();
+    const model = toStr(row["Chainsaw Model"]).trim();
+    const barLength = toStr(row["Bar Length"]).trim();
+    const driveLinks = toStr(row["Drive Links"]).trim();
+    if (!brand || !model || !barLength || !driveLinks) continue;
+    out.push({
+      chainsaw_brand: brand,
+      chainsaw_model: model,
+      bar_length: barLength,
+      chain_type_code: toStr(row["Chain Type Code"]).trim(),
+      gauge: toStr(row.Gauge).trim(),
+      pitch: toStr(row.Pitch).trim(),
+      drive_links: driveLinks,
+      name: toStr(row.Name).trim(),
+      kmc_chain_url: toStr(row["KMC Chain URL"]).trim(),
+    });
+  }
+  return dedupeByKey(
+    out,
+    (r) =>
+      `${norm(r.chainsaw_brand)}|${norm(r.chainsaw_model)}|${norm(r.bar_length)}|${normalizeDriveLinks(
+        r.drive_links
+      )}`
+  );
+}
+
+function buildD1LookupRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    const field = toStr(row.field || row.Field).trim();
+    const value = toStr(row.value || row.Value).trim();
+    if (!field || !value) continue;
+    out.push({
+      group_name: normalizeLookupGroup(row.group || row.Group || ""),
+      field_name: field,
+      value,
+      is_active: Number(row.active || row.Active || 1) === 0 ? 0 : 1,
+      sort_order: Number(row.sort_order || row["Sort Order"] || 0),
+    });
+  }
+  return dedupeByKey(out, (r) => `${norm(r.group_name)}|${norm(r.field_name)}|${norm(r.value)}`);
+}
+
+function buildD1SearchLogRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    out.push({
+      timestamp_iso: toStr(row.Timestamp).trim() || new Date().toISOString(),
+      brand: toStr(row.Brand).trim(),
+      model: toStr(row.Model).trim(),
+      bar_length: toStr(row["Bar Length"]).trim(),
+      match_keys: toStr(row["Match Keys"]).trim(),
+      chain_type_codes: toStr(row["Chain Type Codes"]).trim(),
+      drive_links: toStr(row["Drive Links"]).trim(),
+      match_count: Number(row["Match Count"] || 0),
+      matched_part_references: toStr(row["Matched Part References"]).trim(),
+      matched_urls: toStr(row["Matched URLs"]).trim(),
+      client_ip: toStr(row["Client IP"]).trim(),
+      user_agent: toStr(row["User Agent"]).trim(),
+    });
+  }
+  return out;
+}
+
+async function getSearchLogRowsSafe(env) {
+  const tab = env.SEARCH_LOG_TAB || DEFAULT_LOG_TAB;
+  try {
+    return await getSheetRows(env, tab);
+  } catch (err) {
+    const msg = String(err || "");
+    if (msg.includes("Unable to parse range")) return [];
+    throw err;
+  }
+}
+
+async function getSettingsMap(env) {
+  const valueCol = await getAppSettingsValueColumn(env);
+  const result = await env.DB.prepare(`SELECT key, ${valueCol} AS value FROM app_settings`).all();
   const out = {};
   for (const row of result.results || []) {
     out[row.key] = row.value;
@@ -964,7 +2000,7 @@ async function getSettingsMap(env) {
 }
 
 async function upsertSettings(env, input) {
-  await ensureSettingsTable(env);
+  const valueCol = await getAppSettingsValueColumn(env);
   const allowed = new Set([
     "form_title",
     "accent_color",
@@ -977,9 +2013,9 @@ async function upsertSettings(env, input) {
   for (const [key, value] of Object.entries(input || {})) {
     if (!allowed.has(key)) continue;
     await env.DB.prepare(
-      `INSERT INTO app_settings (key, value)
+      `INSERT INTO app_settings (key, ${valueCol})
        VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+       ON CONFLICT(key) DO UPDATE SET ${valueCol} = excluded.${valueCol}`
     ).bind(key, toStr(value)).run();
   }
 }

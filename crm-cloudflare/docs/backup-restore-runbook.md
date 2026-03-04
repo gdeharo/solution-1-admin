@@ -25,6 +25,29 @@ npx wrangler d1 export CRM_DB --remote --output "../backups/crm-db-$TS.sql"
 
 If your Wrangler version does not support `d1 export`, use Cloudflare Dashboard D1 export for `crm-db` and store the SQL file under `crm-cloudflare/backups/`.
 
+## Daily Backup Automation (Local Scheduler)
+Use the script:
+
+```bash
+cd "/Users/gregoriodeharo/Documents/New project/crm-cloudflare/worker"
+chmod +x ./scripts/backup_d1_daily.sh
+./scripts/backup_d1_daily.sh
+```
+
+Schedule it daily at 2:15 AM with `crontab`:
+
+```bash
+crontab -e
+```
+
+Add:
+
+```cron
+15 2 * * * cd "/Users/gregoriodeharo/Documents/New project/crm-cloudflare/worker" && ./scripts/backup_d1_daily.sh >> ./backups/backup.log 2>&1
+```
+
+The script keeps the newest 30 `.sql` backups.
+
 ## R2 Backup
 Use the Cloudflare Dashboard for bucket export/sync, or your approved internal object-storage sync tooling.
 
