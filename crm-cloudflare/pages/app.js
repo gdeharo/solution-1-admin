@@ -270,6 +270,10 @@ function shortDetails(valueJson) {
   }
 }
 
+function companyHasMissingAddress(company) {
+  return ['address', 'city', 'state', 'zip'].some((key) => !String(company?.[key] || '').trim());
+}
+
 function normalizeZipForMatch(value) {
   return String(value || '').replace(/\D/g, '').trim();
 }
@@ -775,7 +779,7 @@ function renderCompanies() {
   body.innerHTML = rows
     .map(
       (c) => `<tr class="clickable" data-company-id="${c.id}">
-      <td>${escapeHtml(c.name)}</td>
+      <td>${(Number(c.has_incomplete_address) || companyHasMissingAddress(c)) ? '<span class="warning-badge" title="Missing address information">!</span>' : ''}${escapeHtml(c.name)}</td>
       <td>${escapeHtml(c.city || '')}</td>
       <td>${escapeHtml(c.state || '')}</td>
       <td>${c.next_action_at ? escapeHtml(new Date(c.next_action_at).toLocaleDateString()) : '-'}</td>
@@ -832,8 +836,11 @@ async function openCompany(companyId, pushHistory = true) {
 
   renderCompanyDetail();
   const assignedRepNames = (state.currentCompany.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
+  const missingBadge = (Number(state.currentCompany.has_incomplete_address) || companyHasMissingAddress(state.currentCompany))
+    ? '<span class="warning-badge" title="Missing address information">!</span>'
+    : '';
   setView('companyDetailView', state.currentCompany.name, pushHistory);
-  els.pageTitle.innerHTML = `${escapeHtml(state.currentCompany.name)} <span class="title-rep">(Rep: ${escapeHtml(assignedRepNames)})</span>`;
+  els.pageTitle.innerHTML = `${missingBadge}${escapeHtml(state.currentCompany.name)} <span class="title-rep">(Rep: ${escapeHtml(assignedRepNames)})</span>`;
   els.pageHint.textContent = `${state.currentCompany.name} (Rep: ${assignedRepNames})`;
 }
 

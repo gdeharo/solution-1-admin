@@ -288,6 +288,15 @@ function normalizedText(value: string | null | undefined): string {
   return String(value || '').trim();
 }
 
+function companyMissingAddressSql(alias: string): string {
+  return `(
+    trim(coalesce(${alias}.address, '')) = ''
+    OR trim(coalesce(${alias}.city, '')) = ''
+    OR trim(coalesce(${alias}.state, '')) = ''
+    OR trim(coalesce(${alias}.zip, '')) = ''
+  )`;
+}
+
 function splitCsvValues(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((v) => normalizedText(String(v))).filter(Boolean);
   if (typeof value !== 'string') return [];
@@ -1145,7 +1154,9 @@ addRoute(
       binds.push(user.email);
     }
     if (q) {
-      if (/^[A-Za-z]{2}$/.test(q)) {
+      if (q === '!') {
+        whereParts.push(companyMissingAddressSql('c'));
+      } else if (/^[A-Za-z]{2}$/.test(q)) {
         whereParts.push(`upper(coalesce(c.state, '')) = ?${binds.length + 1}`);
         binds.push(q.toUpperCase());
       } else {
@@ -1224,6 +1235,7 @@ addRoute(
     const companies = await env.CRM_DB.prepare(
       `SELECT
          c.*,
+         CASE WHEN ${companyMissingAddressSql('c')} THEN 1 ELSE 0 END AS has_incomplete_address,
          (SELECT COUNT(*) FROM customers cu WHERE cu.company_id = c.id AND cu.deleted_at IS NULL) AS customer_count,
          (SELECT COUNT(*) FROM company_reps cr WHERE cr.company_id = c.id) AS rep_count,
          (
@@ -1389,6 +1401,7 @@ addRoute(
     const company = await env.CRM_DB.prepare(
       `SELECT
          c.*,
+         CASE WHEN ${companyMissingAddressSql('c')} THEN 1 ELSE 0 END AS has_incomplete_address,
          (SELECT COUNT(*) FROM customers cu WHERE cu.company_id = c.id AND cu.deleted_at IS NULL) AS customer_count,
          (SELECT COUNT(*) FROM company_reps cr WHERE cr.company_id = c.id) AS rep_count
        FROM companies c
