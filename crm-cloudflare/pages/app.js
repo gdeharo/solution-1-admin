@@ -274,6 +274,41 @@ function normalizeZipForMatch(value) {
   return String(value || '').replace(/\D/g, '').trim();
 }
 
+function expandZipInputToken(rawToken) {
+  const token = String(rawToken || '').trim();
+  if (!token) return { tokens: [], invalid: false };
+  const isExclusion = token.startsWith('-');
+  const next = isExclusion ? token.slice(1).trim() : token;
+  const rangeParts = next.split('..').map((part) => normalizeZipForMatch(part));
+  if (rangeParts.length === 2) {
+    const [start, end] = rangeParts;
+    if (!start || !end || start.length !== end.length || (start.length !== 3 && start.length !== 5)) {
+      return { tokens: [], invalid: true };
+    }
+    const startNum = Number.parseInt(start, 10);
+    const endNum = Number.parseInt(end, 10);
+    if (!Number.isFinite(startNum) || !Number.isFinite(endNum) || endNum < startNum || endNum - startNum > 500) {
+      return { tokens: [], invalid: true };
+    }
+    return {
+      tokens: Array.from({ length: endNum - startNum + 1 }, (_, index) => ({
+        isExclusion,
+        digits: String(startNum + index).padStart(start.length, '0'),
+        raw: token
+      })),
+      invalid: false
+    };
+  }
+  const digits = normalizeZipForMatch(next);
+  if (!digits || (digits.length !== 3 && digits.length !== 5)) {
+    return { tokens: [], invalid: true };
+  }
+  return {
+    tokens: [{ isExclusion, digits, raw: token }],
+    invalid: false
+  };
+}
+
 function zipTokenToZip3Range(value) {
   const digits = normalizeZipForMatch(value);
   if (!digits) return null;
@@ -2004,7 +2039,7 @@ async function renderRepsView() {
       </div>
       <div class="field-group">
         <strong>Zip Rules</strong>
-        <textarea name="zipCodes" rows="2" placeholder="901, 90210, -905"></textarea>
+        <textarea name="zipCodes" rows="2" placeholder="901, 90210, 900..930, -905, -910..915"></textarea>
         <p class="tiny">Use commas/new lines. Prefix with '-' to exclude. Allowed: 3-digit ZIP3 or 5-digit ZIP.</p>
         <div id="territoryZipPreview" class="tiny"></div>
         <div id="territoryConflictPreview" class="tiny"></div>
@@ -2256,14 +2291,11 @@ function bindRepsEvents() {
       .split(/[\n,]/g)
       .map((part) => part.trim())
       .filter(Boolean)
-      .map((token) => {
-        const isExclusion = token.startsWith('-');
-        const raw = isExclusion ? token.slice(1) : token;
-        const digits = raw.replace(/\D/g, '');
-        if (digits && digits.length !== 3 && digits.length !== 5) invalidTokens.push(token);
-        return { isExclusion, digits, raw: token };
-      })
-      .filter((token) => token.digits.length > 0 && (token.digits.length === 3 || token.digits.length === 5));
+      .flatMap((token) => {
+        const expanded = expandZipInputToken(token);
+        if (expanded.invalid) invalidTokens.push(token);
+        return expanded.tokens;
+      });
     return { tokens, invalidTokens };
   };
 
@@ -2423,7 +2455,7 @@ function bindRepsEvents() {
       label.classList.toggle('conflict', isConflict);
     });
     if (invalidTokens.length > 0) {
-      zipPreviewEl.textContent = `Invalid ZIP token(s): ${invalidTokens.join(', ')}. Use only 3 or 5 digits.`;
+      zipPreviewEl.textContent = `Invalid ZIP token(s): ${invalidTokens.join(', ')}. Use 3 or 5 digits, or a range like 900..930.`;
       zipPreviewEl.classList.add('territory-exclude');
     } else {
       const hintText = tokenHints.length > 0 ? `ZIP coverage: ${tokenHints.join(' | ')}` : 'ZIP coverage: none';
@@ -2529,7 +2561,7 @@ function bindRepsEvents() {
     const zipCodes = String(zipCodesEl.value || '');
     const { invalidTokens } = parseDraftZipTokens();
     if (invalidTokens.length > 0) {
-      showToast('Zip codes must be 3 or 5 digits only', true);
+      showToast('Zip codes must be 3 or 5 digits, or a range like 900..930', true);
       return;
     }
     if (!repId) {

@@ -313,6 +313,22 @@ function parseZipEntries(value: unknown): Array<{ value: string; isExclusion: bo
       isExclusion = true;
       next = next.slice(1).trim();
     }
+    const rangeParts = next.split('..').map((part) => normalizeZip(part));
+    if (rangeParts.length === 2) {
+      const [start, end] = rangeParts;
+      if (!start || !end) continue;
+      if (start.length !== end.length) continue;
+      if (start.length !== 3 && start.length !== 5) continue;
+      const startNum = Number.parseInt(start, 10);
+      const endNum = Number.parseInt(end, 10);
+      if (!Number.isFinite(startNum) || !Number.isFinite(endNum) || endNum < startNum) continue;
+      // Prevent accidental huge expansions from malformed ranges.
+      if (endNum - startNum > 500) continue;
+      for (let current = startNum; current <= endNum; current += 1) {
+        out.push({ value: String(current).padStart(start.length, '0'), isExclusion });
+      }
+      continue;
+    }
     const normalized = normalizeZip(next);
     if (!normalized) continue;
     out.push({ value: normalized, isExclusion });
