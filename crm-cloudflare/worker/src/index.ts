@@ -223,6 +223,67 @@ async function ensureSegmentAndTypeExist(env: Env, segment?: string | null, cust
   return null;
 }
 
+async function syncRepRecordForUser(
+  env: Env,
+  input: {
+    currentEmail: string;
+    nextEmail: string;
+    nextFullName: string;
+    nextRole: UserRole;
+    nextIsActive: boolean;
+  }
+): Promise<number | null> {
+  const currentEmail = input.currentEmail.toLowerCase().trim();
+  const nextEmail = input.nextEmail.toLowerCase().trim();
+  const shouldExposeRep = input.nextRole === 'rep' && input.nextIsActive;
+
+  if (!shouldExposeRep) {
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(
+        `UPDATE reps
+         SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE email IS NOT NULL AND lower(email) = lower(?1) AND deleted_at IS NULL`
+      ).bind(currentEmail),
+      env.CRM_DB.prepare(
+        `UPDATE reps
+         SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE email IS NOT NULL AND lower(email) = lower(?1) AND deleted_at IS NULL`
+      ).bind(nextEmail)
+    ]);
+    return null;
+  }
+
+  const existingRep = await env.CRM_DB.prepare(
+    `SELECT id
+     FROM reps
+     WHERE email IS NOT NULL
+       AND (lower(email) = lower(?1) OR lower(email) = lower(?2))
+     ORDER BY CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END, id DESC
+     LIMIT 1`
+  )
+    .bind(nextEmail, currentEmail)
+    .first<{ id: number }>();
+
+  if (existingRep?.id) {
+    await env.CRM_DB.prepare(
+      `UPDATE reps
+       SET full_name = ?1, email = ?2, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?3`
+    )
+      .bind(input.nextFullName, nextEmail, existingRep.id)
+      .run();
+    return existingRep.id;
+  }
+
+  const inserted = await env.CRM_DB.prepare(
+    `INSERT INTO reps (full_name, company_name, is_independent, email, phone, segment, customer_type)
+     VALUES (?1, NULL, 0, ?2, NULL, NULL, NULL)`
+  )
+    .bind(input.nextFullName, nextEmail)
+    .run();
+  return Number(inserted.meta.last_row_id);
+}
+
 function normalizedText(value: string | null | undefined): string {
   return String(value || '').trim();
 }
@@ -1517,6 +1578,13 @@ addRoute(
     const reps = await env.CRM_DB.prepare(
       `SELECT
          r.*,
+         (
+           SELECT u.id
+           FROM users u
+           WHERE lower(coalesce(u.email, '')) = lower(coalesce(r.email, ''))
+           ORDER BY u.id DESC
+           LIMIT 1
+         ) AS user_id,
          (
            SELECT MAX(i.created_at)
            FROM interactions i
@@ -2978,7 +3046,15 @@ addRoute(
       .bind(nextRole, nextIsActive, nextFullName, nextEmail, userId)
       .run();
 
-    await audit(env, user, 'update', 'user', String(userId), body);
+    const repId = await syncRepRecordForUser(env, {
+      currentEmail: current.email,
+      nextEmail,
+      nextFullName,
+      nextRole,
+      nextIsActive: nextIsActive === 1
+    });
+
+    await audit(env, user, 'update', 'user', String(userId), { ...body, repId });
     return json({ success: true });
   }) as any
 );
@@ -2993,9 +3069,9 @@ addRoute(
     if (!userId) return err('user id is required');
     if (userId === user.id) return err('You cannot delete your own account', 409);
 
-    const current = await env.CRM_DB.prepare(`SELECT id, role, is_active FROM users WHERE id = ?1`)
+    const current = await env.CRM_DB.prepare(`SELECT id, role, is_active, email FROM users WHERE id = ?1`)
       .bind(userId)
-      .first<{ id: number; role: UserRole; is_active: number }>();
+      .first<{ id: number; role: UserRole; is_active: number; email: string }>();
     if (!current) return err('User not found', 404);
 
     if (current.role === 'admin' && current.is_active === 1) {
@@ -3011,6 +3087,13 @@ addRoute(
       env.CRM_DB.prepare(`UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(userId),
       env.CRM_DB.prepare(`DELETE FROM sessions WHERE user_id = ?1`).bind(userId)
     ]);
+    await syncRepRecordForUser(env, {
+      currentEmail: current.email,
+      nextEmail: current.email,
+      nextFullName: '',
+      nextRole: current.role,
+      nextIsActive: false
+    });
     await audit(env, user, 'delete', 'user', String(userId));
     return json({ success: true });
   }) as any

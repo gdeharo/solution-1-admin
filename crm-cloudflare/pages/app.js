@@ -1943,6 +1943,7 @@ async function renderRepsView() {
       const territoryCount = Number.isFinite(territories.length) ? territories.length : 0;
       const territoryPreview = territories.slice(0, 2).map((item) => territoryRuleHtml(item)).join('');
       const territoryMore = territoryCount > 2 ? `<div class="tiny">+${territoryCount - 2} more</div>` : '';
+      const linkedUserId = toPositiveInt(rep.user_id);
       return `<tr class="clickable" data-open-rep-detail="${repId}">
         <td>${escapeHtml(rep.full_name)}</td>
         <td>${escapeHtml(rep.email || '')}</td>
@@ -1952,6 +1953,7 @@ async function renderRepsView() {
         <td class="territory-cell">
           ${territoryCount ? `${territoryPreview}${territoryMore}` : '<span class="tiny">No territories assigned</span>'}
         </td>
+        <td>${!linkedUserId ? `<button type="button" class="danger small-btn" data-delete-rep="${repId}" onclick="event.stopPropagation();">⌦</button>` : ''}</td>
       </tr>`;
       })
       .join('');
@@ -2693,6 +2695,21 @@ function bindRepsEvents() {
       const repId = toPositiveInt(row.dataset.openRepDetail);
       if (!repId) return;
       openRepAccounts(repId);
+    };
+  });
+
+  document.querySelectorAll('[data-delete-rep]').forEach((btn) => {
+    btn.onclick = async () => {
+      const repId = toPositiveInt(btn.dataset.deleteRep);
+      if (!repId) return;
+      if (!confirm('Delete this placeholder rep?')) return;
+      try {
+        await api(`/api/reps/${repId}`, { method: 'DELETE' });
+        await renderRepsView();
+        showToast('Rep deleted');
+      } catch (error) {
+        showToast(error.message, true);
+      }
     };
   });
 
