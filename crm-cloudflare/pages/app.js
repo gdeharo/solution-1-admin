@@ -2701,11 +2701,12 @@ function bindRepsEvents() {
     userCreateForm.onsubmit = async (event) => {
       event.preventDefault();
       const fd = new FormData(userCreateForm);
+      const fullName = String(fd.get('fullName') || '').trim();
       try {
         const created = await api('/api/users', {
           method: 'POST',
           body: JSON.stringify({
-            fullName: fd.get('fullName'),
+            fullName,
             email: fd.get('email'),
             role: fd.get('role'),
             phone: fd.get('phone')
@@ -2718,6 +2719,11 @@ function bindRepsEvents() {
           created.temporaryPassword
         );
         showInviteEmailDialog(payload);
+        if (String(fd.get('role') || '') === 'rep' && toPositiveInt(created.repId)) {
+          state.adminOpenSection = 'Territories';
+          state.selectedTerritoryRepId = toPositiveInt(created.repId);
+          state.territoryRepSearch = fullName;
+        }
         await renderRepsView();
         showToast('User created. Invitation ready.');
       } catch (error) {
