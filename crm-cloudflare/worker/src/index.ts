@@ -1139,6 +1139,7 @@ addRoute(
   withAuth(async (_request, env, user, url) => {
     const page = Math.max(1, Number(url.searchParams.get('page') || 1));
     const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize') || 25)));
+    const sortBy = normalizedText(url.searchParams.get('sortBy')) || 'name';
     const q = normalizedText(url.searchParams.get('q'));
     const stateFilter = normalizedText(url.searchParams.get('state')).toUpperCase();
     const cityFilter = normalizedText(url.searchParams.get('city'));
@@ -1226,6 +1227,28 @@ addRoute(
       );
     }
     const whereClause = whereParts.join(' AND ');
+    const sortKey = new Set(['name', 'city', 'state', 'next_action', 'last_interaction']).has(sortBy) ? sortBy : 'name';
+    const orderClause =
+      sortKey === 'city'
+        ? `lower(coalesce(c.city, '')) ASC, lower(coalesce(c.name, '')) ASC`
+        : sortKey === 'state'
+          ? `lower(coalesce(c.state, '')) ASC, lower(coalesce(c.city, '')) ASC, lower(coalesce(c.name, '')) ASC`
+          : sortKey === 'next_action'
+            ? `coalesce((
+                 SELECT MIN(datetime(i.next_action_at))
+                 FROM interactions i
+                 WHERE i.company_id = c.id
+                   AND i.deleted_at IS NULL
+                   AND i.next_action_at IS NOT NULL
+               ), '9999-12-31') ASC, lower(coalesce(c.name, '')) ASC`
+            : sortKey === 'last_interaction'
+              ? `coalesce((
+                   SELECT MAX(datetime(coalesce(i.interaction_at, i.created_at)))
+                   FROM interactions i
+                   WHERE i.company_id = c.id
+                     AND i.deleted_at IS NULL
+                 ), '0001-01-01') DESC, lower(coalesce(c.name, '')) ASC`
+              : `lower(coalesce(c.name, '')) ASC`;
 
     const totalRow = await env.CRM_DB.prepare(`SELECT COUNT(*) AS c FROM companies c WHERE ${whereClause}`)
       .bind(...binds)
@@ -1246,6 +1269,12 @@ addRoute(
              AND i.next_action_at IS NOT NULL
          ) AS next_action_at,
          (
+           SELECT MAX(coalesce(i.interaction_at, i.created_at))
+           FROM interactions i
+           WHERE i.company_id = c.id
+             AND i.deleted_at IS NULL
+         ) AS last_interaction_at,
+         (
            SELECT GROUP_CONCAT(name, ', ')
            FROM (
              SELECT DISTINCT rr.full_name AS name
@@ -1260,14 +1289,10 @@ addRoute(
          ) AS rep_names
        FROM companies c
        WHERE ${whereClause}
-       ORDER BY
-         CASE WHEN ?${binds.length + 1} = 1 THEN
-           COALESCE((SELECT MIN(datetime(i.next_action_at)) FROM interactions i WHERE i.company_id = c.id AND i.deleted_at IS NULL AND i.next_action_at IS NOT NULL), '9999-12-31')
-         ELSE c.name END ASC,
-         c.name ASC
-       LIMIT ?${binds.length + 2} OFFSET ?${binds.length + 3}`
+       ORDER BY ${orderClause}
+       LIMIT ?${binds.length + 1} OFFSET ?${binds.length + 2}`
     )
-      .bind(...binds, dueDays > 0 ? 1 : 0, pageSize, offset)
+      .bind(...binds, pageSize, offset)
       .all();
 
     return json({ companies: companies.results, total, page, pageSize });
@@ -3466,6 +3491,86 @@ addRoute(
     sql += ` GROUP BY c.id, c.name ORDER BY interactions DESC, c.name ASC`;
     const rows = await env.CRM_DB.prepare(sql).bind(...binds).all();
     return json({ days, companyEngagement: rows.results });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/feedback$/,
+  withAuth(async (_request, env, _user, url) => {
+    const includeResolved = normalizedText(url.searchParams.get('includeResolved')) === '1';
+    const dateFilter = normalizedText(url.searchParams.get('date'));
+    const userId = Number(url.searchParams.get('userId') || 0);
+    const whereParts = ['1 = 1'];
+    const binds: unknown[] = [];
+    if (!includeResolved) {
+      whereParts.push(`f.is_resolved = 0`);
+    }
+    if (dateFilter) {
+      whereParts.push(`date(f.feedback_at) = date(?${binds.length + 1})`);
+      binds.push(dateFilter);
+    }
+    if (userId > 0) {
+      whereParts.push(`f.user_id = ?${binds.length + 1}`);
+      binds.push(userId);
+    }
+
+    const entries = await env.CRM_DB.prepare(
+      `SELECT f.id, f.user_id, f.user_name, f.feedback_at, f.message, f.is_resolved, f.resolved_at, f.created_at
+       FROM feedback_items f
+       WHERE ${whereParts.join(' AND ')}
+       ORDER BY datetime(f.feedback_at) DESC, f.id DESC`
+    )
+      .bind(...binds)
+      .all();
+
+    const users = await env.CRM_DB.prepare(
+      `SELECT id, full_name
+       FROM users
+       WHERE is_active = 1
+       ORDER BY full_name ASC`
+    ).all();
+
+    return json({ entries: entries.results, users: users.results });
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/feedback$/,
+  withAuth(async (request, env, user) => {
+    const body = await parseJson<{ feedbackAt?: string; message?: string; isResolved?: boolean }>(request);
+    if (!body?.message?.trim()) return err('message is required');
+    const feedbackAt = normalizedText(body.feedbackAt) || new Date().toISOString();
+    const result = await env.CRM_DB.prepare(
+      `INSERT INTO feedback_items (user_id, user_name, feedback_at, message, is_resolved, resolved_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+    )
+      .bind(user.id, user.full_name, feedbackAt, body.message.trim(), body.isResolved ? 1 : 0, body.isResolved ? new Date().toISOString() : null)
+      .run();
+    await audit(env, user, 'create', 'feedback', String(result.meta.last_row_id), body);
+    return json({ id: result.meta.last_row_id }, 201);
+  }) as any
+);
+
+addRoute(
+  'PATCH',
+  /^\/api\/feedback\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    const match = request.url.match(/\/api\/feedback\/(\d+)$/);
+    const feedbackId = Number(match?.[1]);
+    if (!feedbackId) return err('feedback id is required');
+    const body = await parseJson<{ isResolved?: boolean }>(request);
+    if (typeof body?.isResolved !== 'boolean') return err('isResolved is required');
+    await env.CRM_DB.prepare(
+      `UPDATE feedback_items
+       SET is_resolved = ?1, resolved_at = ?2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?3`
+    )
+      .bind(body.isResolved ? 1 : 0, body.isResolved ? new Date().toISOString() : null, feedbackId)
+      .run();
+    await audit(env, user, 'update', 'feedback', String(feedbackId), body);
+    return json({ success: true });
   }) as any
 );
 

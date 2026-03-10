@@ -74,6 +74,8 @@ summary {
   display: flex;
   align-items: center;
   gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .whoami {
@@ -188,6 +190,31 @@ table {
   border-collapse: collapse;
   margin-top: 0.8rem;
   font-size: 0.88rem;
+}
+
+#feedbackView table {
+  table-layout: fixed;
+}
+
+#feedbackView th:nth-child(1),
+#feedbackView td:nth-child(1) {
+  width: 16%;
+}
+
+#feedbackView th:nth-child(2),
+#feedbackView td:nth-child(2) {
+  width: 16%;
+}
+
+#feedbackView th:nth-child(3),
+#feedbackView td:nth-child(3) {
+  width: 56%;
+}
+
+#feedbackView th:nth-child(4),
+#feedbackView td:nth-child(4) {
+  width: 12%;
+  text-align: center;
 }
 
 th,

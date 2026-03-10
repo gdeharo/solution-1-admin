@@ -45,7 +45,7 @@
           .catch(() => {});
       })();
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20260310b" />
+    <link rel="stylesheet" href="./styles.css?v=20260310c" />
   </head>
   <body>
     <header class="topbar">
@@ -57,6 +57,7 @@
         <button id="backBtn" class="ghost hidden" type="button">Back</button>
         <button id="weeklyReportBtn" class="hidden" type="button">Activity Report</button>
         <button id="manageRepsBtn" class="hidden" type="button">Admin Panel</button>
+        <button id="feedbackBtn" class="hidden" type="button">Feedback</button>
         <span id="whoami" class="whoami hidden"></span>
         <button id="logoutBtn" class="hidden" type="button">Log out</button>
       </div>
@@ -98,6 +99,13 @@
             <button id="showCreateCompanyBtn" type="button">Add Company</button>
             <button id="due14FilterBtn" class="ghost" type="button">Due/Overdue +14d</button>
             <button id="pendingInteractionFilterBtn" class="ghost" type="button">Pending Interaction</button>
+            <select id="companySortSelect" aria-label="Sort companies">
+              <option value="name">Sort: Name</option>
+              <option value="city">Sort: City</option>
+              <option value="state">Sort: State</option>
+              <option value="next_action">Sort: Next Action</option>
+              <option value="last_interaction">Sort: Last Interaction</option>
+            </select>
           </div>
         </div>
         <div class="row">
@@ -136,6 +144,7 @@
               <th>City</th>
               <th>State</th>
               <th>Next Action</th>
+              <th>Last Interaction</th>
               <th>Rep(s)</th>
             </tr>
           </thead>
@@ -156,6 +165,27 @@
         <form id="weeklyReportForm" class="row wrap"></form>
         <div id="weeklyReportMeta" class="tiny"></div>
         <div id="weeklyReportBody"></div>
+      </section>
+
+      <section id="feedbackView" class="panel hidden">
+        <div class="row between wrap">
+          <h2>Feedback</h2>
+        </div>
+        <form id="feedbackCreateForm" class="card form-grid"></form>
+        <div class="card">
+          <form id="feedbackFilterForm" class="row wrap"></form>
+          <table>
+            <thead>
+              <tr>
+                <th>Date/Time</th>
+                <th>User</th>
+                <th>Feedback</th>
+                <th>Resolved</th>
+              </tr>
+            </thead>
+            <tbody id="feedbackBody"></tbody>
+          </table>
+        </div>
       </section>
 
       <section id="companyDetailView" class="hidden">
@@ -390,6 +420,6 @@
     <script>
       window.CRM_API_BASE = "https://api.rtf-cloud.com";
     </script>
-    <script src="./app.js?v=20260310b" defer></script>
+    <script src="./app.js?v=20260310c" defer></script>
   </body>
 </html>

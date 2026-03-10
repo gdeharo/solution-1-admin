@@ -9,6 +9,7 @@ const state = {
   companyRowsTotal: 0,
   companyPage: 1,
   companyPageSize: 25,
+  companySortBy: 'name',
   companyDue14Only: false,
   companyPendingOnly: false,
   repAssignments: [],
@@ -34,7 +35,10 @@ const state = {
   selectedTerritoryRepId: 0,
   auditDays: 14,
   auditLimit: 50,
-  weeklyReport: null
+  weeklyReport: null,
+  feedbackShowResolved: false,
+  feedbackDate: '',
+  feedbackUserId: ''
 };
 
 const API_BASE = window.CRM_API_BASE || '';
@@ -44,6 +48,7 @@ const VIEW_IDS = [
   'authView',
   'companyListView',
   'weeklyReportView',
+  'feedbackView',
   'companyDetailView',
   'contactDetailView',
   'contactCreateView',
@@ -59,6 +64,7 @@ const els = {
   backBtn: document.getElementById('backBtn'),
   weeklyReportBtn: document.getElementById('weeklyReportBtn'),
   manageRepsBtn: document.getElementById('manageRepsBtn'),
+  feedbackBtn: document.getElementById('feedbackBtn'),
   whoami: document.getElementById('whoami'),
   logoutBtn: document.getElementById('logoutBtn'),
   toast: document.getElementById('toast')
@@ -272,6 +278,12 @@ function shortDetails(valueJson) {
 
 function companyHasMissingAddress(company) {
   return ['address', 'city', 'state', 'zip'].some((key) => !String(company?.[key] || '').trim());
+}
+
+function toLocalDateTimeInputValue(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  const pad = (num) => String(num).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function isImageAttachment(file) {
@@ -734,6 +746,7 @@ async function loadCompanies() {
   const params = new URLSearchParams();
   params.set('page', String(state.companyPage));
   params.set('pageSize', String(state.companyPageSize));
+  params.set('sortBy', state.companySortBy || 'name');
   if (parsed.q) params.set('q', parsed.q);
   if (parsed.state) params.set('state', parsed.state);
   if (parsed.city) params.set('city', parsed.city);
@@ -807,6 +820,7 @@ function renderCompanies() {
       <td>${escapeHtml(c.city || '')}</td>
       <td>${escapeHtml(c.state || '')}</td>
       <td>${c.next_action_at ? escapeHtml(new Date(c.next_action_at).toLocaleDateString()) : '-'}</td>
+      <td>${c.last_interaction_at ? escapeHtml(new Date(c.last_interaction_at).toLocaleDateString()) : '-'}</td>
       <td>${escapeHtml(c.rep_names || '-')}</td>
     </tr>`
     )
@@ -816,8 +830,10 @@ function renderCompanies() {
   document.getElementById('quickAddCompanyBtn').classList.toggle('hidden', !canWrite());
   const dueBtn = document.getElementById('due14FilterBtn');
   const pendingBtn = document.getElementById('pendingInteractionFilterBtn');
+  const sortSelect = document.getElementById('companySortSelect');
   if (dueBtn) dueBtn.classList.toggle('ghost', !state.companyDue14Only);
   if (pendingBtn) pendingBtn.classList.toggle('ghost', !state.companyPendingOnly);
+  if (sortSelect) sortSelect.value = state.companySortBy || 'name';
 
   const pageInfo = document.getElementById('companyPageInfo');
   const totalPages = Math.max(1, Math.ceil((state.companyRowsTotal || 0) / state.companyPageSize));
@@ -830,6 +846,105 @@ function renderCompanies() {
   body.querySelectorAll('tr[data-company-id]').forEach((row) => {
     row.onclick = () => openCompany(Number(row.dataset.companyId));
   });
+}
+
+async function openFeedbackView() {
+  const createForm = document.getElementById('feedbackCreateForm');
+  const filterForm = document.getElementById('feedbackFilterForm');
+  const body = document.getElementById('feedbackBody');
+  if (!createForm || !filterForm || !body) return;
+
+  createForm.innerHTML = `
+    <label><span class="field-caption">Date/Time</span><input name="feedbackAt" type="datetime-local" value="${toLocalDateTimeInputValue()}" required /></label>
+    <label><span class="field-caption">User</span><input value="${escapeHtml(state.user?.fullName || '')}" disabled /></label>
+    <label class="full"><span class="field-caption">Feedback</span><textarea name="message" rows="5" placeholder="Describe the issue, request, or observation" required></textarea></label>
+    <label class="row wrap"><input name="isResolved" type="checkbox" /> Resolved</label>
+    <div class="row wrap full">
+      <button type="submit">Save Feedback</button>
+    </div>
+  `;
+
+  const loadFeedback = async () => {
+    const params = new URLSearchParams();
+    if (state.feedbackShowResolved) params.set('includeResolved', '1');
+    if (state.feedbackDate) params.set('date', state.feedbackDate);
+    if (state.feedbackUserId) params.set('userId', state.feedbackUserId);
+    const data = await api(`/api/feedback?${params.toString()}`);
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    const users = Array.isArray(data.users) ? data.users : [];
+    filterForm.innerHTML = `
+      <label><span class="field-caption">Date</span><input name="date" type="date" value="${escapeHtml(state.feedbackDate || '')}" /></label>
+      <label><span class="field-caption">User</span><select name="userId"><option value="">All users</option>${users
+        .map((user) => `<option value="${toPositiveInt(user.id)}" ${String(state.feedbackUserId) === String(user.id) ? 'selected' : ''}>${escapeHtml(user.full_name || '')}</option>`)
+        .join('')}</select></label>
+      <button type="submit">Apply</button>
+      <button type="button" id="feedbackToggleResolvedBtn" class="ghost">${state.feedbackShowResolved ? 'Hide Resolved' : 'Show All'}</button>
+    `;
+    body.innerHTML = entries.length
+      ? entries
+          .map(
+            (entry) => `<tr>
+        <td>${entry.feedback_at ? new Date(entry.feedback_at).toLocaleString() : '-'}</td>
+        <td>${escapeHtml(entry.user_name || '')}</td>
+        <td class="readonly-multiline">${escapeHtml(entry.message || '')}</td>
+        <td><input type="checkbox" data-feedback-resolved="${entry.id}" ${entry.is_resolved ? 'checked' : ''} /></td>
+      </tr>`
+          )
+          .join('')
+      : '<tr><td colspan="4" class="tiny">No feedback found.</td></tr>';
+
+    document.querySelectorAll('[data-feedback-resolved]').forEach((el) => {
+      el.onchange = async () => {
+        try {
+          await api(`/api/feedback/${toPositiveInt(el.dataset.feedbackResolved)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ isResolved: !!el.checked })
+          });
+          await loadFeedback();
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      };
+    });
+
+    filterForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const fd = new FormData(filterForm);
+      state.feedbackDate = String(fd.get('date') || '');
+      state.feedbackUserId = String(fd.get('userId') || '');
+      await loadFeedback();
+    };
+    const toggleBtn = document.getElementById('feedbackToggleResolvedBtn');
+    if (toggleBtn) {
+      toggleBtn.onclick = async () => {
+        state.feedbackShowResolved = !state.feedbackShowResolved;
+        await loadFeedback();
+      };
+    }
+  };
+
+  createForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(createForm);
+    try {
+      await api('/api/feedback', {
+        method: 'POST',
+        body: JSON.stringify({
+          feedbackAt: String(fd.get('feedbackAt') || ''),
+          message: String(fd.get('message') || ''),
+          isResolved: !!fd.get('isResolved')
+        })
+      });
+      createForm.reset();
+      await loadFeedback();
+      showToast('Feedback saved');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  await loadFeedback();
+  setView('feedbackView', 'Feedback');
 }
 
 function repOptions(selectedIds = []) {
@@ -3171,6 +3286,7 @@ async function loadSession() {
     els.logoutBtn.classList.remove('hidden');
     els.weeklyReportBtn.classList.toggle('hidden', !canWrite());
     els.manageRepsBtn.classList.toggle('hidden', !canManageReps());
+    els.feedbackBtn.classList.remove('hidden');
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
     await Promise.all([loadCompanies(), loadReps(), loadMetadata(), loadTheme()]);
@@ -3281,6 +3397,7 @@ els.logoutBtn.onclick = async () => {
   els.logoutBtn.classList.add('hidden');
   els.weeklyReportBtn.classList.add('hidden');
   els.manageRepsBtn.classList.add('hidden');
+  els.feedbackBtn.classList.add('hidden');
   setView('authView', 'Sign in', false);
 };
 
@@ -3312,6 +3429,14 @@ els.backBtn.onclick = async () => {
 els.manageRepsBtn.onclick = async () => {
   try {
     await renderRepsView();
+  } catch (error) {
+    showToast(error.message, true);
+  }
+};
+
+els.feedbackBtn.onclick = async () => {
+  try {
+    await openFeedbackView();
   } catch (error) {
     showToast(error.message, true);
   }
@@ -3364,6 +3489,12 @@ document.getElementById('due14FilterBtn').onclick = async () => {
 
 document.getElementById('pendingInteractionFilterBtn').onclick = async () => {
   state.companyPendingOnly = !state.companyPendingOnly;
+  state.companyPage = 1;
+  await loadCompanies();
+};
+
+document.getElementById('companySortSelect').onchange = async (event) => {
+  state.companySortBy = event.target.value || 'name';
   state.companyPage = 1;
   await loadCompanies();
 };
