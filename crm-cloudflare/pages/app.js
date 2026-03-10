@@ -274,6 +274,30 @@ function companyHasMissingAddress(company) {
   return ['address', 'city', 'state', 'zip'].some((key) => !String(company?.[key] || '').trim());
 }
 
+function isImageAttachment(file) {
+  return String(file?.mime_type || '').toLowerCase().startsWith('image/') || String(file?.file_name || '').startsWith('interaction-photo-');
+}
+
+function renderPhotoGridHtml(photos, canEdit = false) {
+  const visiblePhotos = photos.slice(0, 4);
+  const extraCount = Math.max(0, photos.length - 4);
+  const cells = visiblePhotos.map((photo, index) => {
+    const fileUrl = `${API_BASE}/api/files/${encodeURIComponent(photo.file_key)}?token=${encodeURIComponent(state.token || '')}`;
+    const extraBadge = index === 3 && extraCount > 0 ? `<span class="photo-grid-count">+${extraCount}</span>` : '';
+    return `<a class="photo-grid-item" href="${fileUrl}" target="_blank" rel="noreferrer">
+      <img src="${fileUrl}" alt="${escapeHtml(photo.file_name || 'Interaction photo')}" class="contact-photo" />
+      ${extraBadge}
+    </a>`;
+  });
+  if (canEdit && cells.length < 4) {
+    cells.push(`<button type="button" class="photo-grid-item photo-grid-add" id="interactionPhotoAddBtn">+</button>`);
+  }
+  while (cells.length < 4) {
+    cells.push('<div class="photo-grid-item photo-grid-empty"></div>');
+  }
+  return `<div class="photo-grid">${cells.join('')}</div>`;
+}
+
 function normalizeZipForMatch(value) {
   return String(value || '').replace(/\D/g, '').trim();
 }
@@ -1623,7 +1647,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
       <div class="interaction-right-stack">
         <div class="card">
           <strong>Photo</strong>
-          <input id="interactionCreatePhotoInput" name="photo" type="file" accept="image/*" class="hidden" />
+          <input id="interactionCreatePhotoInput" name="photo" type="file" accept="image/*" multiple class="hidden" />
           <div id="interactionCreatePhotoTile" class="photo-tile photo-tile-editable">
             <div id="interactionCreatePhotoPreview" class="photo-preview"><span class="muted">Click to add photo</span></div>
           </div>
@@ -1642,10 +1666,18 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
   if (createPhotoInput && createPhotoTile && createPhotoPreview) {
     createPhotoTile.onclick = () => createPhotoInput.click();
     createPhotoInput.onchange = () => {
-      const file = createPhotoInput.files?.[0];
-      if (!file) return;
-      const previewUrl = URL.createObjectURL(file);
-      createPhotoPreview.innerHTML = `<img src="${previewUrl}" alt="Interaction photo preview" class="contact-photo" />`;
+      const files = Array.from(createPhotoInput.files || []).filter((file) => file.size > 0).slice(0, 4);
+      if (!files.length) return;
+      createPhotoPreview.innerHTML = renderPhotoGridHtml(
+        files.map((file, index) => ({
+          file_key: URL.createObjectURL(file),
+          file_name: file.name || `Photo ${index + 1}`,
+          mime_type: file.type || 'image/jpeg'
+        })),
+        true
+      );
+      const addBtn = document.getElementById('interactionPhotoAddBtn');
+      if (addBtn) addBtn.onclick = () => createPhotoInput.click();
     };
   }
 
@@ -1680,15 +1712,15 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
           nextActionAt: fd.get('nextActionAt') ? toIsoDateStart(String(fd.get('nextActionAt'))) : null
         })
       });
-      const photo = fd.get('photo');
-      if (photo instanceof File && photo.size > 0) {
-        const processedPhoto = await toSquareImageFile(photo);
+      const photos = Array.from(createPhotoInput?.files || []).filter((file) => file.size > 0);
+      for (let index = 0; index < photos.length; index += 1) {
+        const processedPhoto = await toSquareImageFile(photos[index]);
         const formData = new FormData();
         formData.set('entityType', 'interaction');
         formData.set('entityId', String(created.id));
         formData.set(
           'file',
-          new File([processedPhoto], `interaction-photo-${Date.now()}.jpg`, {
+          new File([processedPhoto], `interaction-photo-${Date.now()}-${index + 1}.jpg`, {
             type: processedPhoto.type || 'image/jpeg'
           })
         );
@@ -1756,7 +1788,7 @@ async function openInteractionDetail(interactionId) {
       <div class="interaction-right-stack">
         <div class="card">
           <strong>Photo</strong>
-          <input id="interactionPhotoInput" type="file" accept="image/*" class="hidden" />
+          <input id="interactionPhotoInput" type="file" accept="image/*" multiple class="hidden" />
           <div id="interactionPhotoTile" class="photo-tile ${canWrite() ? 'photo-tile-editable' : ''}">
             <div id="interactionPhotoPreview" class="photo-preview"></div>
           </div>
@@ -1817,20 +1849,20 @@ async function openInteractionDetail(interactionId) {
     try {
       const files = await api(`/api/attachments?entityType=interaction&entityId=${interactionId}`);
       const attachments = files.attachments || [];
-      const photo = attachments.find((a) => (a.file_name || '').startsWith('interaction-photo-')) ||
-        attachments.find((a) => String(a.mime_type || '').toLowerCase().startsWith('image/'));
-      const photoKey = photo?.file_key || null;
+      const photos = attachments.filter((a) => isImageAttachment(a));
 
       const photoContainer = document.getElementById('interactionPhotoPreview');
-      if (photoKey) {
-        photoContainer.innerHTML = `<img src="${API_BASE}/api/files/${encodeURIComponent(photoKey)}?token=${encodeURIComponent(
-          state.token || ''
-        )}" alt="Interaction photo" class="contact-photo" />`;
+      if (photos.length) {
+        photoContainer.innerHTML = renderPhotoGridHtml(photos, canWrite());
       } else {
-        photoContainer.innerHTML = '<span class="muted">Click to add photo</span>';
+        photoContainer.innerHTML = canWrite()
+          ? renderPhotoGridHtml([], true)
+          : '<span class="muted">No photos</span>';
       }
+      const addBtn = document.getElementById('interactionPhotoAddBtn');
+      if (addBtn && canWrite()) addBtn.onclick = () => document.getElementById('interactionPhotoInput')?.click();
 
-      const docs = attachments.filter((a) => a.file_key !== photoKey);
+      const docs = attachments.filter((a) => !isImageAttachment(a));
       document.getElementById('interactionFilesList').innerHTML = docs
         .map(
           (file) => `<div class="doc-card">
@@ -1872,22 +1904,28 @@ async function openInteractionDetail(interactionId) {
   const interactionPhotoTile = document.getElementById('interactionPhotoTile');
   const interactionPhotoInput = document.getElementById('interactionPhotoInput');
   if (interactionPhotoTile && interactionPhotoInput && canWrite()) {
-    interactionPhotoTile.onclick = () => interactionPhotoInput.click();
+    interactionPhotoTile.onclick = (event) => {
+      if (event.target.closest('a')) return;
+      if (event.target.id === 'interactionPhotoAddBtn') return;
+      interactionPhotoInput.click();
+    };
     interactionPhotoInput.onchange = async () => {
-      const rawFile = interactionPhotoInput.files?.[0];
-      if (!rawFile) return;
+      const rawFiles = Array.from(interactionPhotoInput.files || []).filter((file) => file.size > 0);
+      if (!rawFiles.length) return;
       try {
-        const processedFile = await toSquareImageFile(rawFile);
-        const formData = new FormData();
-        formData.set('entityType', 'interaction');
-        formData.set('entityId', String(interactionId));
-        formData.set(
-          'file',
-          new File([processedFile], `interaction-photo-${Date.now()}.jpg`, { type: processedFile.type || 'image/jpeg' })
-        );
-        await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        for (let index = 0; index < rawFiles.length; index += 1) {
+          const processedFile = await toSquareImageFile(rawFiles[index]);
+          const formData = new FormData();
+          formData.set('entityType', 'interaction');
+          formData.set('entityId', String(interactionId));
+          formData.set(
+            'file',
+            new File([processedFile], `interaction-photo-${Date.now()}-${index + 1}.jpg`, { type: processedFile.type || 'image/jpeg' })
+          );
+          await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
+        }
         await renderInteractionAssets();
-        showToast('Photo uploaded');
+        showToast(rawFiles.length > 1 ? 'Photos uploaded' : 'Photo uploaded');
       } catch (error) {
         showToast(error.message, true);
       } finally {
