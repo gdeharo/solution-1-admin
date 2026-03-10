@@ -997,7 +997,7 @@ function renderCompanyDetail() {
   interactionsBody.innerHTML = state.companyInteractions
     .map(
       (i) => `<tr class="clickable" data-interaction-id="${i.id}">
-        <td>${new Date(i.created_at).toLocaleDateString()}</td>
+        <td>${new Date(i.interaction_at || i.created_at).toLocaleDateString()}</td>
         <td>${escapeHtml(i.created_by_name || i.rep_name || '')}</td>
         <td>${escapeHtml(i.interaction_type || '')}</td>
         <td>${escapeHtml(i.meeting_notes || '')}</td>
@@ -1570,6 +1570,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
   const initial = {
     customerId: selectedContactId || draft?.customerId || '',
     interactionType: draft?.interactionType || 'Store Visit',
+    interactionAt: draft?.interactionAt || new Date().toISOString().slice(0, 10),
     meetingNotes: draft?.meetingNotes || '',
     nextAction: draft?.nextAction || '',
     nextActionAt: draft?.nextActionAt || ''
@@ -1601,6 +1602,9 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
                 initial.interactionType
               )}</select>
             </label>
+            <label><span class="sr-only">Visit date</span><input name="interactionAt" type="date" aria-label="Visit date" value="${escapeHtml(
+              initial.interactionAt
+            )}" /></label>
           </div>
         </div>
         <div class="card">
@@ -1619,7 +1623,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
       <div class="interaction-right-stack">
         <div class="card">
           <strong>Photo</strong>
-          <input id="interactionCreatePhotoInput" name="photo" type="file" accept="image/*" capture="environment" class="hidden" />
+          <input id="interactionCreatePhotoInput" name="photo" type="file" accept="image/*" class="hidden" />
           <div id="interactionCreatePhotoTile" class="photo-tile photo-tile-editable">
             <div id="interactionCreatePhotoPreview" class="photo-preview"><span class="muted">Click to add photo</span></div>
           </div>
@@ -1648,12 +1652,13 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
   form.querySelector('[name="customerId"]').onchange = async (event) => {
     if (event.target.value !== '__new_contact__') return;
     const fd = new FormData(form);
-    const interactionDraft = {
-      customerId: '',
-      interactionType: fd.get('interactionType') || '',
-      meetingNotes: fd.get('meetingNotes') || '',
-      nextAction: fd.get('nextAction') || '',
-      nextActionAt: fd.get('nextActionAt') || ''
+      const interactionDraft = {
+        customerId: '',
+        interactionType: fd.get('interactionType') || '',
+        interactionAt: fd.get('interactionAt') || '',
+        meetingNotes: fd.get('meetingNotes') || '',
+        nextAction: fd.get('nextAction') || '',
+        nextActionAt: fd.get('nextActionAt') || ''
     };
     await openContactCreate(companyId, { returnToInteraction: true, interactionDraft });
   };
@@ -1669,6 +1674,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
           customerId: fd.get('customerId') ? Number(fd.get('customerId')) : null,
           repId: null,
           interactionType: fd.get('interactionType'),
+          interactionAt: fd.get('interactionAt') ? toIsoDateStart(String(fd.get('interactionAt'))) : null,
           meetingNotes: fd.get('meetingNotes'),
           nextAction: fd.get('nextAction'),
           nextActionAt: fd.get('nextActionAt') ? toIsoDateStart(String(fd.get('nextActionAt'))) : null
@@ -1729,6 +1735,9 @@ async function openInteractionDetail(interactionId) {
             <label><span class="sr-only">Type</span><select name="interactionType" id="interactionDetailType" aria-label="Type" ${readOnly}>${interactionTypeOptions(
               interaction.interaction_type || ''
             )}</select></label>
+            <label><span class="sr-only">Visit date</span><input name="interactionAt" type="date" aria-label="Visit date" value="${
+              (interaction.interaction_at || interaction.created_at) ? new Date(interaction.interaction_at || interaction.created_at).toISOString().slice(0, 10) : ''
+            }" ${readOnly} /></label>
           </div>
         </div>
         <div class="card">
@@ -1747,7 +1756,7 @@ async function openInteractionDetail(interactionId) {
       <div class="interaction-right-stack">
         <div class="card">
           <strong>Photo</strong>
-          <input id="interactionPhotoInput" type="file" accept="image/*" capture="environment" class="hidden" />
+          <input id="interactionPhotoInput" type="file" accept="image/*" class="hidden" />
           <div id="interactionPhotoTile" class="photo-tile ${canWrite() ? 'photo-tile-editable' : ''}">
             <div id="interactionPhotoPreview" class="photo-preview"></div>
           </div>
@@ -1780,6 +1789,7 @@ async function openInteractionDetail(interactionId) {
           customerId: fd.get('customerId') ? Number(fd.get('customerId')) : null,
           repId: null,
           interactionType: fd.get('interactionType'),
+          interactionAt: fd.get('interactionAt') ? toIsoDateStart(String(fd.get('interactionAt'))) : null,
           meetingNotes: fd.get('meetingNotes'),
           nextAction: fd.get('nextAction'),
           nextActionAt: fd.get('nextActionAt') ? toIsoDateStart(String(fd.get('nextActionAt'))) : null

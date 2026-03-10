@@ -1749,7 +1749,7 @@ addRoute(
       sql += ` AND ${repTerritoryCompanyScopeClause('c', binds.length + 1)}`;
       binds.push(user.email);
     }
-    sql += ` ORDER BY i.created_at DESC`;
+    sql += ` ORDER BY coalesce(i.interaction_at, i.created_at) DESC, i.id DESC`;
 
     const stmt = env.CRM_DB.prepare(sql);
     const rows = binds.length > 0 ? await stmt.bind(...binds).all() : await stmt.all();
@@ -1768,6 +1768,7 @@ addRoute(
       repId?: number;
       interactionType?: string;
       meetingNotes: string;
+      interactionAt?: string;
       nextAction?: string;
       nextActionAt?: string;
       attachmentKeys?: string[];
@@ -1778,8 +1779,8 @@ addRoute(
     if (repAccessError) return repAccessError;
 
     const result = await env.CRM_DB.prepare(
-      `INSERT INTO interactions (company_id, customer_id, rep_id, interaction_type, meeting_notes, next_action, next_action_at, created_by_user_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
+      `INSERT INTO interactions (company_id, customer_id, rep_id, interaction_type, meeting_notes, interaction_at, next_action, next_action_at, created_by_user_id)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
     )
       .bind(
         body.companyId,
@@ -1787,6 +1788,7 @@ addRoute(
         body.repId ?? null,
         body.interactionType ?? null,
         body.meetingNotes,
+        body.interactionAt ?? new Date().toISOString(),
         body.nextAction ?? null,
         body.nextActionAt ?? null,
         user.id
@@ -2978,6 +2980,7 @@ addRoute(
       repId?: number;
       interactionType?: string;
       meetingNotes: string;
+      interactionAt?: string;
       nextAction?: string;
       nextActionAt?: string;
     }>(request);
@@ -2991,8 +2994,8 @@ addRoute(
 
     await env.CRM_DB.prepare(
       `UPDATE interactions
-       SET company_id = ?1, customer_id = ?2, rep_id = ?3, interaction_type = ?4, meeting_notes = ?5, next_action = ?6, next_action_at = ?7, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?8 AND deleted_at IS NULL`
+       SET company_id = ?1, customer_id = ?2, rep_id = ?3, interaction_type = ?4, meeting_notes = ?5, interaction_at = ?6, next_action = ?7, next_action_at = ?8, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?9 AND deleted_at IS NULL`
     )
       .bind(
         body.companyId,
@@ -3000,6 +3003,7 @@ addRoute(
         body.repId ?? null,
         body.interactionType ?? null,
         body.meetingNotes,
+        body.interactionAt ?? null,
         body.nextAction ?? null,
         body.nextActionAt ?? null,
         interactionId
@@ -3291,7 +3295,7 @@ addRoute(
 
       const lastWeek = await env.CRM_DB.prepare(
         `SELECT
-           date(i.created_at) AS interaction_date,
+           date(coalesce(i.interaction_at, i.created_at)) AS interaction_date,
            c.name AS company_name,
            COALESCE((
              SELECT GROUP_CONCAT(name, ', ')
@@ -3311,11 +3315,11 @@ addRoute(
          WHERE i.deleted_at IS NULL
            AND c.deleted_at IS NULL
            AND lower(u.email) = lower(?1)
-           AND date(i.created_at) >= date(?2)
-           AND date(i.created_at) <= date(?3)
+           AND date(coalesce(i.interaction_at, i.created_at)) >= date(?2)
+           AND date(coalesce(i.interaction_at, i.created_at)) <= date(?3)
            ${baseFilters}
            AND ${territoryScope}
-         ORDER BY date(i.created_at) ASC, c.name ASC`
+         ORDER BY date(coalesce(i.interaction_at, i.created_at)) ASC, c.name ASC`
       )
         .bind(rep.email, startIso, endIso, segment, customerType, rep.id)
         .all<{
@@ -3451,9 +3455,9 @@ addRoute(
          c.id,
          c.name AS company_name,
          COUNT(i.id) AS interactions,
-         MAX(i.created_at) AS last_interaction_at
+         MAX(coalesce(i.interaction_at, i.created_at)) AS last_interaction_at
        FROM companies c
-       LEFT JOIN interactions i ON i.company_id = c.id AND i.deleted_at IS NULL AND i.created_at >= ?1
+       LEFT JOIN interactions i ON i.company_id = c.id AND i.deleted_at IS NULL AND coalesce(i.interaction_at, i.created_at) >= ?1
        WHERE c.deleted_at IS NULL`;
     if (user.role === 'rep') {
       sql += ` AND ${repTerritoryCompanyScopeClause('c', 2)}`;
