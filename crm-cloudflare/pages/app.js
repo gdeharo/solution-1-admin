@@ -1602,7 +1602,7 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
                 initial.interactionType
               )}</select>
             </label>
-            <label><span class="sr-only">Visit date</span><input name="interactionAt" type="date" aria-label="Visit date" value="${escapeHtml(
+            <label><span class="field-caption">Visit date</span><input name="interactionAt" type="date" aria-label="Visit date" value="${escapeHtml(
               initial.interactionAt
             )}" /></label>
           </div>
@@ -1735,7 +1735,7 @@ async function openInteractionDetail(interactionId) {
             <label><span class="sr-only">Type</span><select name="interactionType" id="interactionDetailType" aria-label="Type" ${readOnly}>${interactionTypeOptions(
               interaction.interaction_type || ''
             )}</select></label>
-            <label><span class="sr-only">Visit date</span><input name="interactionAt" type="date" aria-label="Visit date" value="${
+            <label><span class="field-caption">Visit date</span><input name="interactionAt" type="date" aria-label="Visit date" value="${
               (interaction.interaction_at || interaction.created_at) ? new Date(interaction.interaction_at || interaction.created_at).toISOString().slice(0, 10) : ''
             }" ${readOnly} /></label>
           </div>

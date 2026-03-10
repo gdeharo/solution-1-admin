@@ -372,6 +372,14 @@ tr.clickable:hover {
   margin: 0;
 }
 
+.field-caption {
+  display: block;
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 #weeklyReportBody {
   margin-top: 0.8rem;
 }
