@@ -79,6 +79,11 @@ const json = (data: unknown, status = 200): Response =>
 
 const err = (message: string, status = 400): Response => json({ error: message }, status);
 
+function withCors(response: Response): Response {
+  response.headers.set('access-control-allow-origin', '*');
+  return response;
+}
+
 const toBase64 = (bytes: Uint8Array): string => {
   let str = '';
   for (const b of bytes) str += String.fromCharCode(b);
@@ -2189,13 +2194,36 @@ addRoute(
       return err('email, fullName, and role are required');
     }
     if (!['admin', 'manager', 'rep', 'viewer'].includes(body.role)) return err('Invalid role');
+    const normalizedEmail = body.email.toLowerCase().trim();
+
+    const existingUser = await env.CRM_DB.prepare(
+      `SELECT id, is_active, full_name, role
+       FROM users
+       WHERE email = ?1
+       LIMIT 1`
+    )
+      .bind(normalizedEmail)
+      .first<{ id: number; is_active: number; full_name: string; role: UserRole }>();
+    if (existingUser) {
+      return json(
+        {
+          error: existingUser.is_active ? 'A user with this email already exists.' : 'This email belongs to an inactive user.',
+          code: existingUser.is_active ? 'USER_EXISTS_ACTIVE' : 'USER_EXISTS_INACTIVE',
+          userId: existingUser.id,
+          isActive: existingUser.is_active === 1,
+          fullName: existingUser.full_name,
+          role: existingUser.role
+        },
+        409
+      );
+    }
 
     const pwd = await hashPassword(body.password?.trim() || randomPassword(12));
     const result = await env.CRM_DB.prepare(
       `INSERT INTO users (email, full_name, role, password_hash, password_salt)
        VALUES (?1, ?2, ?3, ?4, ?5)`
     )
-      .bind(body.email.toLowerCase().trim(), body.fullName.trim(), body.role, pwd.hash, pwd.salt)
+      .bind(normalizedEmail, body.fullName.trim(), body.role, pwd.hash, pwd.salt)
       .run();
 
     const inviteToken = randomToken(24);
@@ -2216,7 +2244,7 @@ addRoute(
          ORDER BY id DESC
          LIMIT 1`
       )
-        .bind(body.email.toLowerCase().trim())
+        .bind(normalizedEmail)
         .first<{ id: number }>();
       if (existingRep?.id) {
         repId = existingRep.id;
@@ -2232,7 +2260,7 @@ addRoute(
           `INSERT INTO reps (full_name, company_name, is_independent, email, phone, segment, customer_type)
            VALUES (?1, NULL, 0, ?2, ?3, NULL, NULL)`
         )
-          .bind(body.fullName.trim(), body.email.toLowerCase().trim(), normalizedText(body.phone) || null)
+          .bind(body.fullName.trim(), normalizedEmail, normalizedText(body.phone) || null)
           .run();
         repId = Number(repInsert.meta.last_row_id);
       }
@@ -2242,8 +2270,8 @@ addRoute(
     let emailError: string | null = null;
     try {
       await sendEmail(env, {
-        to: body.email.toLowerCase().trim(),
-        ...buildInviteEmail(env, user.full_name, body.fullName.trim(), body.email.toLowerCase().trim(), inviteToken)
+        to: normalizedEmail,
+        ...buildInviteEmail(env, user.full_name, body.fullName.trim(), normalizedEmail, inviteToken)
       });
     } catch (error) {
       emailSent = false;
@@ -3758,26 +3786,26 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       const url = new URL(request.url);
-      if (!url.pathname.startsWith('/api/')) return err('Not found', 404);
+      if (!url.pathname.startsWith('/api/')) return withCors(err('Not found', 404));
       if (
         request.method === 'POST' &&
         /^\/api\/auth\/(login|bootstrap|invite\/accept|password-reset\/request|password-reset\/confirm)$/.test(url.pathname) &&
         !checkAuthRateLimit(request)
       ) {
-        return err('Too many requests. Please wait and try again.', 429);
+        return withCors(err('Too many requests. Please wait and try again.', 429));
       }
 
       if (request.method === 'OPTIONS') {
-        return withSecurityHeaders(
+        return withCors(
+          withSecurityHeaders(
           new Response(null, {
             status: 204,
             headers: {
-              'access-control-allow-origin': '*',
               'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
               'access-control-allow-headers': 'content-type,authorization'
             }
           })
-        );
+        ));
       }
 
       for (const route of routes) {
@@ -3785,14 +3813,13 @@ export default {
         const match = url.pathname.match(route.match);
         if (!match) continue;
         const response = await route.handler(request, env, url, match);
-        response.headers.set('access-control-allow-origin', '*');
-        return withSecurityHeaders(response);
+        return withCors(withSecurityHeaders(response));
       }
 
-      return err('Not found', 404);
+      return withCors(err('Not found', 404));
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unexpected error';
-      return err(msg, 500);
+      return withCors(err(msg, 500));
     }
   }
 };

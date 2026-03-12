@@ -2879,6 +2879,33 @@ function bindRepsEvents() {
         await renderRepsView();
         showToast(created.emailSent ? 'User created. Invitation emailed.' : `User created. Email failed: ${created.emailError || 'unknown error'}`, !created.emailSent);
       } catch (error) {
+        if (error?.status === 409 && error?.data?.code === 'USER_EXISTS_INACTIVE' && toPositiveInt(error.data.userId)) {
+          const shouldReactivate = confirm(
+            `${error.data.fullName || 'This user'} already exists but is inactive. Reactivate and send a new invitation email?`
+          );
+          if (!shouldReactivate) {
+            showToast(error.data.error || 'This email belongs to an inactive user.', true);
+            return;
+          }
+          try {
+            await api(`/api/users/${toPositiveInt(error.data.userId)}`, {
+              method: 'PATCH',
+              body: JSON.stringify({
+                isActive: true,
+                role: String(fd.get('role') || error.data.role || 'viewer'),
+                fullName,
+                email: String(fd.get('email') || '').trim()
+              })
+            });
+            const resend = await api(`/api/users/${toPositiveInt(error.data.userId)}/resend-invite`, { method: 'POST' });
+            await renderRepsView();
+            showToast(resend.emailSent ? 'User reactivated. Invitation emailed.' : `User reactivated, but email failed: ${resend.emailError || 'unknown error'}`, !resend.emailSent);
+            return;
+          } catch (reactivateError) {
+            showToast(reactivateError.message, true);
+            return;
+          }
+        }
         showToast(error.message, true);
       }
     };
