@@ -21,7 +21,7 @@ const state = {
   typeValues: [],
   interactionTypeValues: [],
   theme: null,
-  companySettings: { companyName: 'Company CRM', defaultCcEmail: '' },
+  companySettings: { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '' },
   companyFilter: '',
   history: [],
   companyEditMode: false,
@@ -2255,6 +2255,7 @@ async function renderRepsView() {
     document.getElementById('companySettingsForm').innerHTML = `
       <input name="companyName" placeholder="Company Name" value="${escapeHtml(state.companySettings?.companyName || '')}" required />
       <input name="defaultCcEmail" placeholder="Default CC Email" type="email" value="${escapeHtml(state.companySettings?.defaultCcEmail || '')}" />
+      <input name="featureNotificationEmail" placeholder="Feature Notification Email" type="email" value="${escapeHtml(state.companySettings?.featureNotificationEmail || '')}" />
       <button type="submit">Save Company Settings</button>
     `;
   } else {
@@ -2309,7 +2310,8 @@ function bindRepsEvents() {
           method: 'PUT',
           body: JSON.stringify({
             companyName: String(fd.get('companyName') || ''),
-            defaultCcEmail: String(fd.get('defaultCcEmail') || '')
+            defaultCcEmail: String(fd.get('defaultCcEmail') || ''),
+            featureNotificationEmail: String(fd.get('featureNotificationEmail') || '')
           })
         });
         state.companySettings = result.settings || state.companySettings;

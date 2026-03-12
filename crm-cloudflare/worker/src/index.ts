@@ -138,25 +138,26 @@ async function sendEmail(env: Env, payload: { to: string; subject: string; text:
   }
 }
 
-async function getCompanySettings(env: Env): Promise<{ companyName: string; defaultCcEmail: string }> {
+async function getCompanySettings(env: Env): Promise<{ companyName: string; defaultCcEmail: string; featureNotificationEmail: string }> {
   const row = await env.CRM_DB.prepare(`SELECT value_json FROM app_settings WHERE key = 'company'`).first<{ value_json: string }>();
   if (!row?.value_json) {
-    return { companyName: 'Company CRM', defaultCcEmail: '' };
+    return { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '' };
   }
   try {
     const parsed = JSON.parse(row.value_json);
     return {
       companyName: normalizedText(parsed.companyName) || 'Company CRM',
-      defaultCcEmail: normalizedText(parsed.defaultCcEmail).toLowerCase()
+      defaultCcEmail: normalizedText(parsed.defaultCcEmail).toLowerCase(),
+      featureNotificationEmail: normalizedText(parsed.featureNotificationEmail).toLowerCase()
     };
   } catch {
-    return { companyName: 'Company CRM', defaultCcEmail: '' };
+    return { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '' };
   }
 }
 
 function buildInviteEmail(
   appBaseUrl: string,
-  settings: { companyName: string; defaultCcEmail: string },
+  settings: { companyName: string; defaultCcEmail: string; featureNotificationEmail: string },
   adminName: string,
   recipientName: string,
   email: string,
@@ -176,6 +177,24 @@ function buildInviteEmail(
       `Your user ID is: ${email}`,
       '',
       'If you were not expecting this invitation, you can ignore this email.'
+    ].join('\n')
+  };
+}
+
+function buildFeedbackEmail(
+  settings: { companyName: string; defaultCcEmail: string; featureNotificationEmail: string },
+  entry: { feedbackAt: string; userName: string; message: string }
+): { subject: string; text: string } {
+  return {
+    subject: `New Feedback for ${settings.companyName}`,
+    text: [
+      `A new feedback note was submitted for ${settings.companyName}.`,
+      '',
+      `Date/Time: ${entry.feedbackAt}`,
+      `User: ${entry.userName}`,
+      '',
+      'Feedback:',
+      entry.message
     ].join('\n')
   };
 }
@@ -1326,12 +1345,14 @@ addRoute(
   /^\/api\/settings\/company$/,
   withAuth(async (request, env, user) => {
     if (user.role !== 'admin') return err('Forbidden', 403);
-    const body = await parseJson<{ companyName?: string; defaultCcEmail?: string }>(request);
+    const body = await parseJson<{ companyName?: string; defaultCcEmail?: string; featureNotificationEmail?: string }>(request);
     const companyName = normalizedText(body?.companyName);
     const defaultCcEmail = normalizedText(body?.defaultCcEmail).toLowerCase();
+    const featureNotificationEmail = normalizedText(body?.featureNotificationEmail).toLowerCase();
     if (!companyName) return err('companyName is required');
     if (defaultCcEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(defaultCcEmail)) return err('Invalid CC email');
-    const settings = { companyName, defaultCcEmail };
+    if (featureNotificationEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(featureNotificationEmail)) return err('Invalid feature notification email');
+    const settings = { companyName, defaultCcEmail, featureNotificationEmail };
     await env.CRM_DB.prepare(
       `INSERT INTO app_settings (key, value_json, updated_by_user_id)
        VALUES ('company', ?1, ?2)
@@ -3811,6 +3832,24 @@ addRoute(
     )
       .bind(user.id, user.full_name, feedbackAt, body.message.trim(), body.isResolved ? 1 : 0, body.isResolved ? new Date().toISOString() : null)
       .run();
+    const companySettings = await getCompanySettings(env);
+    if (companySettings.featureNotificationEmail) {
+      try {
+        await sendEmail(env, {
+          to: companySettings.featureNotificationEmail,
+          ...buildFeedbackEmail(companySettings, {
+            feedbackAt,
+            userName: user.full_name,
+            message: body.message.trim()
+          })
+        });
+      } catch (error) {
+        await audit(env, user, 'feedback_notification_failed', 'feedback', String(result.meta.last_row_id), {
+          email: companySettings.featureNotificationEmail,
+          error: error instanceof Error ? error.message : 'Unable to send feedback notification'
+        });
+      }
+    }
     await audit(env, user, 'create', 'feedback', String(result.meta.last_row_id), body);
     return json({ id: result.meta.last_row_id }, 201);
   }) as any
