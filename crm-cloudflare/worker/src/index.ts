@@ -116,7 +116,7 @@ const isoAfterHours = (hours: number): string => new Date(Date.now() + hours * 6
 const getAppBaseUrl = (env: Env): string => (env.APP_BASE_URL || 'https://crm.rtf-cloud.com').replace(/\/+$/, '');
 const getMailFrom = (env: Env): string => env.MAIL_FROM || 'noreply@mail.rtf-cloud.com';
 
-async function sendEmail(env: Env, payload: { to: string; subject: string; text: string }): Promise<void> {
+async function sendEmail(env: Env, payload: { to: string; subject: string; text: string; cc?: string[] }): Promise<void> {
   if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is not configured');
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -127,6 +127,7 @@ async function sendEmail(env: Env, payload: { to: string; subject: string; text:
     body: JSON.stringify({
       from: getMailFrom(env),
       to: [payload.to],
+      cc: Array.isArray(payload.cc) && payload.cc.length ? payload.cc : undefined,
       subject: payload.subject,
       text: payload.text
     })
@@ -137,20 +138,37 @@ async function sendEmail(env: Env, payload: { to: string; subject: string; text:
   }
 }
 
+async function getCompanySettings(env: Env): Promise<{ companyName: string; defaultCcEmail: string }> {
+  const row = await env.CRM_DB.prepare(`SELECT value_json FROM app_settings WHERE key = 'company'`).first<{ value_json: string }>();
+  if (!row?.value_json) {
+    return { companyName: 'Company CRM', defaultCcEmail: '' };
+  }
+  try {
+    const parsed = JSON.parse(row.value_json);
+    return {
+      companyName: normalizedText(parsed.companyName) || 'Company CRM',
+      defaultCcEmail: normalizedText(parsed.defaultCcEmail).toLowerCase()
+    };
+  } catch {
+    return { companyName: 'Company CRM', defaultCcEmail: '' };
+  }
+}
+
 function buildInviteEmail(
-  env: Env,
+  appBaseUrl: string,
+  settings: { companyName: string; defaultCcEmail: string },
   adminName: string,
   recipientName: string,
   email: string,
   inviteToken: string
 ): { subject: string; text: string } {
-  const inviteUrl = `${getAppBaseUrl(env)}?invite=${encodeURIComponent(inviteToken)}`;
+  const inviteUrl = `${appBaseUrl}?invite=${encodeURIComponent(inviteToken)}`;
   return {
-    subject: `Invitation from ${adminName} to access Company CRM`,
+    subject: `Invitation from ${adminName} to access ${settings.companyName}`,
     text: [
       `Hello ${recipientName || email},`,
       '',
-      'You have been invited to access the Company CRM.',
+      `You have been invited to access ${settings.companyName}.`,
       '',
       'Use the link below to set your password and sign in:',
       inviteUrl,
@@ -1295,6 +1313,39 @@ addRoute(
 
 addRoute(
   'GET',
+  /^\/api\/settings\/company$/,
+  withAuth(async (_request, env, user) => {
+    if (user.role !== 'admin') return err('Forbidden', 403);
+    const settings = await getCompanySettings(env);
+    return json({ settings });
+  }) as any
+);
+
+addRoute(
+  'PUT',
+  /^\/api\/settings\/company$/,
+  withAuth(async (request, env, user) => {
+    if (user.role !== 'admin') return err('Forbidden', 403);
+    const body = await parseJson<{ companyName?: string; defaultCcEmail?: string }>(request);
+    const companyName = normalizedText(body?.companyName);
+    const defaultCcEmail = normalizedText(body?.defaultCcEmail).toLowerCase();
+    if (!companyName) return err('companyName is required');
+    if (defaultCcEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(defaultCcEmail)) return err('Invalid CC email');
+    const settings = { companyName, defaultCcEmail };
+    await env.CRM_DB.prepare(
+      `INSERT INTO app_settings (key, value_json, updated_by_user_id)
+       VALUES ('company', ?1, ?2)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_by_user_id = excluded.updated_by_user_id, updated_at = CURRENT_TIMESTAMP`
+    )
+      .bind(JSON.stringify(settings), user.id)
+      .run();
+    await audit(env, user, 'update', 'setting', 'company', settings);
+    return json({ success: true, settings });
+  }) as any
+);
+
+addRoute(
+  'GET',
   /^\/api\/companies$/,
   withAuth(async (_request, env, user, url) => {
     const page = Math.max(1, Number(url.searchParams.get('page') || 1));
@@ -2266,12 +2317,14 @@ addRoute(
       }
     }
 
+    const companySettings = await getCompanySettings(env);
     let emailSent = true;
     let emailError: string | null = null;
     try {
       await sendEmail(env, {
         to: normalizedEmail,
-        ...buildInviteEmail(env, user.full_name, body.fullName.trim(), normalizedEmail, inviteToken)
+        cc: companySettings.defaultCcEmail ? [companySettings.defaultCcEmail] : undefined,
+        ...buildInviteEmail(getAppBaseUrl(env), companySettings, user.full_name, body.fullName.trim(), normalizedEmail, inviteToken)
       });
     } catch (error) {
       emailSent = false;
@@ -3386,12 +3439,14 @@ addRoute(
       ).bind(inviteToken, userId, inviteExpiresAt, user.id)
     ]);
 
+    const companySettings = await getCompanySettings(env);
     let emailSent = true;
     let emailError: string | null = null;
     try {
       await sendEmail(env, {
         to: target.email,
-        ...buildInviteEmail(env, user.full_name, target.full_name, target.email, inviteToken)
+        cc: companySettings.defaultCcEmail ? [companySettings.defaultCcEmail] : undefined,
+        ...buildInviteEmail(getAppBaseUrl(env), companySettings, user.full_name, target.full_name, target.email, inviteToken)
       });
     } catch (error) {
       emailSent = false;
@@ -3801,7 +3856,7 @@ export default {
           new Response(null, {
             status: 204,
             headers: {
-              'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+              'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
               'access-control-allow-headers': 'content-type,authorization'
             }
           })

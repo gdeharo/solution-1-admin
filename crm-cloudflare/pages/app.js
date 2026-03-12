@@ -21,6 +21,7 @@ const state = {
   typeValues: [],
   interactionTypeValues: [],
   theme: null,
+  companySettings: { companyName: 'Company CRM', defaultCcEmail: '' },
   companyFilter: '',
   history: [],
   companyEditMode: false,
@@ -2027,8 +2028,9 @@ async function renderRepsView() {
   let users = [];
   if (isAdmin) {
     try {
-      const usersData = await api('/api/users');
+      const [usersData, companySettingsData] = await Promise.all([api('/api/users'), api('/api/settings/company')]);
       users = usersData.users || [];
+      state.companySettings = companySettingsData.settings || state.companySettings;
     } catch {
       users = [];
     }
@@ -2209,6 +2211,8 @@ async function renderRepsView() {
 
   const userCard = document.getElementById('userAdminCard');
   userCard.classList.toggle('hidden', !isAdmin);
+  const companySettingsCard = document.getElementById('companySettingsCard');
+  companySettingsCard.classList.toggle('hidden', !isAdmin);
   if (isAdmin) {
     document.getElementById('userCreateForm').innerHTML = `
       <input name="fullName" placeholder="Full name" required />
@@ -2248,9 +2252,15 @@ async function renderRepsView() {
         </tr>`
       )
       .join('');
+    document.getElementById('companySettingsForm').innerHTML = `
+      <input name="companyName" placeholder="Company Name" value="${escapeHtml(state.companySettings?.companyName || '')}" required />
+      <input name="defaultCcEmail" placeholder="Default CC Email" type="email" value="${escapeHtml(state.companySettings?.defaultCcEmail || '')}" />
+      <button type="submit">Save Company Settings</button>
+    `;
   } else {
     document.getElementById('userCreateForm').innerHTML = '';
     document.getElementById('usersBody').innerHTML = '';
+    document.getElementById('companySettingsForm').innerHTML = '';
   }
 
   bindRepsEvents();
@@ -2288,6 +2298,27 @@ function bindRepsEvents() {
   themeForm.querySelector('[name="accent"]').oninput = (event) => {
     applyTheme(deriveThemeFromAccent(event.target.value), false);
   };
+
+  const companySettingsForm = document.getElementById('companySettingsForm');
+  if (companySettingsForm && state.user?.role === 'admin') {
+    companySettingsForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const fd = new FormData(companySettingsForm);
+      try {
+        const result = await api('/api/settings/company', {
+          method: 'PUT',
+          body: JSON.stringify({
+            companyName: String(fd.get('companyName') || ''),
+            defaultCcEmail: String(fd.get('defaultCcEmail') || '')
+          })
+        });
+        state.companySettings = result.settings || state.companySettings;
+        showToast('Company settings updated');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  }
 
   const interactionTypeValueForm = document.getElementById('interactionTypeValueForm');
   interactionTypeValueForm.onsubmit = async (event) => {
