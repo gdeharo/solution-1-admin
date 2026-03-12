@@ -45,7 +45,7 @@
           .catch(() => {});
       })();
     </script>
-    <link rel="stylesheet" href="./styles.css?v=20260310c" />
+    <link rel="stylesheet" href="./styles.css?v=20260311a" />
   </head>
   <body>
     <header class="topbar">
@@ -80,10 +80,26 @@
             <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" required /></label>
             <label><span class="sr-only">Password</span><input name="password" type="password" placeholder="Password" aria-label="Password" required /></label>
             <button type="submit">Sign in</button>
+            <button id="showForgotPasswordBtn" type="button" class="ghost">Forgot password?</button>
+          </form>
+
+          <form id="forgotPasswordForm" class="card hidden">
+            <h3>Reset Password</h3>
+            <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" required /></label>
+            <button type="submit">Email Reset Link</button>
+            <button id="cancelForgotPasswordBtn" type="button" class="ghost">Back to Log in</button>
           </form>
 
           <form id="inviteSetupForm" class="card hidden">
             <h3>Set Your Password</h3>
+            <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" disabled /></label>
+            <label><span class="sr-only">New password</span><input name="password" type="password" placeholder="New password" aria-label="New password" required /></label>
+            <label><span class="sr-only">Confirm password</span><input name="confirmPassword" type="password" placeholder="Confirm password" aria-label="Confirm password" required /></label>
+            <button type="submit">Save Password</button>
+          </form>
+
+          <form id="resetPasswordForm" class="card hidden">
+            <h3>Choose a New Password</h3>
             <label><span class="sr-only">Email</span><input name="email" type="email" placeholder="Email" aria-label="Email" disabled /></label>
             <label><span class="sr-only">New password</span><input name="password" type="password" placeholder="New password" aria-label="New password" required /></label>
             <label><span class="sr-only">Confirm password</span><input name="confirmPassword" type="password" placeholder="Confirm password" aria-label="Confirm password" required /></label>
@@ -105,6 +121,10 @@
               <option value="state">Sort: State</option>
               <option value="next_action">Sort: Next Action</option>
               <option value="last_interaction">Sort: Last Interaction</option>
+            </select>
+            <select id="companySortDirSelect" aria-label="Sort direction">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
             </select>
           </div>
         </div>
@@ -143,8 +163,8 @@
               <th>Company</th>
               <th>City</th>
               <th>State</th>
-              <th>Next Action</th>
               <th>Last Interaction</th>
+              <th>Next Action</th>
               <th>Rep(s)</th>
             </tr>
           </thead>
@@ -420,6 +440,6 @@
     <script>
       window.CRM_API_BASE = "https://api.rtf-cloud.com";
     </script>
-    <script src="./app.js?v=20260310c" defer></script>
+    <script src="./app.js?v=20260311a" defer></script>
   </body>
 </html>

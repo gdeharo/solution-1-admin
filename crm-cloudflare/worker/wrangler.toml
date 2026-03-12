@@ -17,3 +17,5 @@ bucket_name = "crm-files"
 
 [vars]
 SESSION_TTL_HOURS = "24"
+MAIL_FROM = "noreply@mail.rtf-cloud.com"
+APP_BASE_URL = "https://crm.rtf-cloud.com"

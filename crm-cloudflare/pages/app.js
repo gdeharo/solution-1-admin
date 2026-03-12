@@ -10,6 +10,7 @@ const state = {
   companyPage: 1,
   companyPageSize: 25,
   companySortBy: 'name',
+  companySortDir: 'asc',
   companyDue14Only: false,
   companyPendingOnly: false,
   repAssignments: [],
@@ -597,70 +598,6 @@ function applyTheme(theme, persist = true) {
   }
 }
 
-function copyText(value) {
-  const text = String(value || '');
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
-  const temp = document.createElement('textarea');
-  temp.value = text;
-  document.body.appendChild(temp);
-  temp.select();
-  document.execCommand('copy');
-  temp.remove();
-  return Promise.resolve();
-}
-
-function showInviteEmailDialog({ to, subject, body, mailto }) {
-  const overlay = document.createElement('div');
-  overlay.className = 'action-modal-overlay';
-  overlay.innerHTML = `
-    <div class="action-modal invite-modal">
-      <h3>Send Invitation</h3>
-      <p class="muted">Automatic compose is blocked by Safari. Use one of these options:</p>
-      <label><span class="sr-only">To</span><input value="${escapeHtml(to)}" readonly /></label>
-      <label><span class="sr-only">Subject</span><input id="inviteSubject" value="${escapeHtml(subject)}" readonly /></label>
-      <label><span class="sr-only">Body</span><textarea id="inviteBody" rows="8" readonly>${escapeHtml(body)}</textarea></label>
-      <div class="row wrap">
-        <a class="button-link" href="${escapeHtml(mailto)}" target="_blank" rel="noreferrer">Open Email App</a>
-        <button type="button" class="ghost" id="copyInviteSubjectBtn">Copy Subject</button>
-        <button type="button" class="ghost" id="copyInviteBodyBtn">Copy Body</button>
-        <button type="button" id="closeInviteDialogBtn">Close</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  const close = () => overlay.remove();
-  overlay.onclick = (event) => {
-    if (event.target === overlay) close();
-  };
-  overlay.querySelector('#closeInviteDialogBtn').onclick = close;
-  overlay.querySelector('#copyInviteSubjectBtn').onclick = async () => {
-    await copyText(subject);
-    showToast('Subject copied');
-  };
-  overlay.querySelector('#copyInviteBodyBtn').onclick = async () => {
-    await copyText(body);
-    showToast('Body copied');
-  };
-}
-
-function buildInviteEmailPayload(adminName, email, inviteToken, temporaryPassword) {
-  const baseUrl = `${window.location.origin}${window.location.pathname}`;
-  const inviteUrl = `${baseUrl}?invite=${inviteToken}`;
-  const subject = `Invitation from ${adminName} to access Company CRM`;
-  const body = [
-    'Hello, welcome to the Company CRM. By using this web application you will be able to manage companies, contacts and interactions with them easily.',
-    '',
-    'Copy this link to your browser to access the application and set your password:',
-    inviteUrl,
-    '',
-    `Your user ID is your email: ${email}`,
-    `Your temporary password is: ${temporaryPassword}`
-  ].join('\n');
-  const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  return { to: email, subject, body, mailto };
-}
-
 function deriveThemeFromAccent(accent) {
   const hex = String(accent || '').replace('#', '');
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) return { ...DEFAULT_THEME };
@@ -747,6 +684,7 @@ async function loadCompanies() {
   params.set('page', String(state.companyPage));
   params.set('pageSize', String(state.companyPageSize));
   params.set('sortBy', state.companySortBy || 'name');
+  params.set('sortDir', state.companySortDir || 'asc');
   if (parsed.q) params.set('q', parsed.q);
   if (parsed.state) params.set('state', parsed.state);
   if (parsed.city) params.set('city', parsed.city);
@@ -819,8 +757,8 @@ function renderCompanies() {
       <td>${(Number(c.has_incomplete_address) || companyHasMissingAddress(c)) ? '<span class="warning-badge" title="Missing address information">!</span>' : ''}${escapeHtml(c.name)}</td>
       <td>${escapeHtml(c.city || '')}</td>
       <td>${escapeHtml(c.state || '')}</td>
-      <td>${c.next_action_at ? escapeHtml(new Date(c.next_action_at).toLocaleDateString()) : '-'}</td>
       <td>${c.last_interaction_at ? escapeHtml(new Date(c.last_interaction_at).toLocaleDateString()) : '-'}</td>
+      <td>${c.next_action_at ? escapeHtml(new Date(c.next_action_at).toLocaleDateString()) : '-'}</td>
       <td>${escapeHtml(c.rep_names || '-')}</td>
     </tr>`
     )
@@ -831,9 +769,11 @@ function renderCompanies() {
   const dueBtn = document.getElementById('due14FilterBtn');
   const pendingBtn = document.getElementById('pendingInteractionFilterBtn');
   const sortSelect = document.getElementById('companySortSelect');
+  const sortDirSelect = document.getElementById('companySortDirSelect');
   if (dueBtn) dueBtn.classList.toggle('ghost', !state.companyDue14Only);
   if (pendingBtn) pendingBtn.classList.toggle('ghost', !state.companyPendingOnly);
   if (sortSelect) sortSelect.value = state.companySortBy || 'name';
+  if (sortDirSelect) sortDirSelect.value = state.companySortDir || 'asc';
 
   const pageInfo = document.getElementById('companyPageInfo');
   const totalPages = Math.max(1, Math.ceil((state.companyRowsTotal || 0) / state.companyPageSize));
@@ -2931,20 +2871,13 @@ function bindRepsEvents() {
             phone: fd.get('phone')
           })
         });
-        const payload = buildInviteEmailPayload(
-          state.user.fullName,
-          String(fd.get('email') || ''),
-          created.inviteToken,
-          created.temporaryPassword
-        );
-        showInviteEmailDialog(payload);
         if (String(fd.get('role') || '') === 'rep' && toPositiveInt(created.repId)) {
           state.adminOpenSection = 'Territories';
           state.selectedTerritoryRepId = toPositiveInt(created.repId);
           state.territoryRepSearch = fullName;
         }
         await renderRepsView();
-        showToast('User created. Invitation ready.');
+        showToast(created.emailSent ? 'User created. Invitation emailed.' : `User created. Email failed: ${created.emailError || 'unknown error'}`, !created.emailSent);
       } catch (error) {
         showToast(error.message, true);
       }
@@ -3008,15 +2941,8 @@ function bindRepsEvents() {
     btn.onclick = async () => {
       const userId = Number(btn.dataset.resendUser);
       try {
-        const invite = await api(`/api/users/${userId}/resend-invite`, { method: 'POST' });
-        const payload = buildInviteEmailPayload(
-          state.user.fullName,
-          invite.email,
-          invite.inviteToken,
-          invite.temporaryPassword
-        );
-        showInviteEmailDialog(payload);
-        showToast('Invitation regenerated');
+        const result = await api(`/api/users/${userId}/resend-invite`, { method: 'POST' });
+        showToast(result.emailSent ? 'Invitation emailed' : `Invite regenerated, but email failed: ${result.emailError || 'unknown error'}`, !result.emailSent);
       } catch (error) {
         showToast(error.message, true);
       }
@@ -3301,29 +3227,53 @@ async function loadSession() {
 function initInviteSetupForm() {
   const form = document.getElementById('inviteSetupForm');
   const loginForm = document.getElementById('loginForm');
+  const forgotForm = document.getElementById('forgotPasswordForm');
+  const resetForm = document.getElementById('resetPasswordForm');
   const bootstrapForm = document.getElementById('bootstrapForm');
   const url = new URL(window.location.href);
   const inviteToken = url.searchParams.get('invite');
+  const resetToken = url.searchParams.get('reset');
 
-  if (!inviteToken) {
+  const showLoginOnly = () => {
     form.classList.add('hidden');
+    resetForm.classList.add('hidden');
     loginForm.classList.remove('hidden');
+    forgotForm.classList.add('hidden');
     bootstrapForm.classList.add('hidden');
+  };
+
+  if (!inviteToken && !resetToken) {
+    showLoginOnly();
     return;
   }
 
-  form.classList.remove('hidden');
+  form.classList.toggle('hidden', !inviteToken);
+  resetForm.classList.toggle('hidden', !resetToken);
   loginForm.classList.add('hidden');
+  forgotForm.classList.add('hidden');
   bootstrapForm.classList.add('hidden');
   form.querySelector('[name="email"]').value = '';
+  resetForm.querySelector('[name="email"]').value = '';
 
-  api(`/api/auth/invite/${encodeURIComponent(inviteToken)}`)
-    .then((data) => {
-      form.querySelector('[name="email"]').value = data.email || '';
-    })
-    .catch((error) => {
-      showToast(error.message, true);
-    });
+  if (inviteToken) {
+    api(`/api/auth/invite/${encodeURIComponent(inviteToken)}`)
+      .then((data) => {
+        form.querySelector('[name="email"]').value = data.email || '';
+      })
+      .catch((error) => {
+        showToast(error.message, true);
+      });
+  }
+
+  if (resetToken) {
+    api(`/api/auth/password-reset/${encodeURIComponent(resetToken)}`)
+      .then((data) => {
+        resetForm.querySelector('[name="email"]').value = data.email || '';
+      })
+      .catch((error) => {
+        showToast(error.message, true);
+      });
+  }
 
   form.onsubmit = async (event) => {
     event.preventDefault();
@@ -3342,10 +3292,32 @@ function initInviteSetupForm() {
       url.searchParams.delete('invite');
       window.history.replaceState({}, '', url.toString());
       form.reset();
-      form.classList.add('hidden');
-      loginForm.classList.remove('hidden');
-      bootstrapForm.classList.add('hidden');
+      showLoginOnly();
       showToast('Password saved. You can sign in now.');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  };
+
+  resetForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(resetForm);
+    const password = String(fd.get('password') || '');
+    const confirmPassword = String(fd.get('confirmPassword') || '');
+    if (password !== confirmPassword) {
+      showToast('Passwords do not match', true);
+      return;
+    }
+    try {
+      await api('/api/auth/password-reset/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ token: resetToken, password })
+      });
+      url.searchParams.delete('reset');
+      window.history.replaceState({}, '', url.toString());
+      resetForm.reset();
+      showLoginOnly();
+      showToast('Password reset. You can sign in now.');
     } catch (error) {
       showToast(error.message, true);
     }
@@ -3378,6 +3350,36 @@ document.getElementById('loginForm').onsubmit = async (event) => {
     localStorage.setItem('crm_token', state.token);
     await loadSession();
     showToast('Logged in');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+};
+
+document.getElementById('showForgotPasswordBtn').onclick = () => {
+  document.getElementById('loginForm').classList.add('hidden');
+  document.getElementById('bootstrapForm').classList.add('hidden');
+  document.getElementById('inviteSetupForm').classList.add('hidden');
+  document.getElementById('resetPasswordForm').classList.add('hidden');
+  document.getElementById('forgotPasswordForm').classList.remove('hidden');
+};
+
+document.getElementById('cancelForgotPasswordBtn').onclick = () => {
+  document.getElementById('forgotPasswordForm').classList.add('hidden');
+  document.getElementById('loginForm').classList.remove('hidden');
+};
+
+document.getElementById('forgotPasswordForm').onsubmit = async (event) => {
+  event.preventDefault();
+  const fd = new FormData(event.target);
+  try {
+    const result = await api('/api/auth/password-reset/request', {
+      method: 'POST',
+      body: JSON.stringify({ email: fd.get('email') })
+    });
+    showToast(result.message || 'If that email is active in the CRM, a password reset link has been sent.');
+    event.target.reset();
+    document.getElementById('forgotPasswordForm').classList.add('hidden');
+    document.getElementById('loginForm').classList.remove('hidden');
   } catch (error) {
     showToast(error.message, true);
   }
@@ -3495,6 +3497,12 @@ document.getElementById('pendingInteractionFilterBtn').onclick = async () => {
 
 document.getElementById('companySortSelect').onchange = async (event) => {
   state.companySortBy = event.target.value || 'name';
+  state.companyPage = 1;
+  await loadCompanies();
+};
+
+document.getElementById('companySortDirSelect').onchange = async (event) => {
+  state.companySortDir = event.target.value || 'asc';
   state.companyPage = 1;
   await loadCompanies();
 };

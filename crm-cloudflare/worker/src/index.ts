@@ -2,6 +2,9 @@ interface Env {
   CRM_DB: D1Database;
   CRM_FILES: R2Bucket;
   SESSION_TTL_HOURS: string;
+  RESEND_API_KEY?: string;
+  MAIL_FROM?: string;
+  APP_BASE_URL?: string;
 }
 
 type UserRole = 'admin' | 'manager' | 'rep' | 'viewer';
@@ -105,6 +108,71 @@ const randomPassword = (length = 12): string => {
 };
 
 const isoAfterHours = (hours: number): string => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+const getAppBaseUrl = (env: Env): string => (env.APP_BASE_URL || 'https://crm.rtf-cloud.com').replace(/\/+$/, '');
+const getMailFrom = (env: Env): string => env.MAIL_FROM || 'noreply@mail.rtf-cloud.com';
+
+async function sendEmail(env: Env, payload: { to: string; subject: string; text: string }): Promise<void> {
+  if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is not configured');
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: getMailFrom(env),
+      to: [payload.to],
+      subject: payload.subject,
+      text: payload.text
+    })
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    throw new Error(`Email send failed (${response.status}): ${raw}`);
+  }
+}
+
+function buildInviteEmail(
+  env: Env,
+  adminName: string,
+  recipientName: string,
+  email: string,
+  inviteToken: string
+): { subject: string; text: string } {
+  const inviteUrl = `${getAppBaseUrl(env)}?invite=${encodeURIComponent(inviteToken)}`;
+  return {
+    subject: `Invitation from ${adminName} to access Company CRM`,
+    text: [
+      `Hello ${recipientName || email},`,
+      '',
+      'You have been invited to access the Company CRM.',
+      '',
+      'Use the link below to set your password and sign in:',
+      inviteUrl,
+      '',
+      `Your user ID is: ${email}`,
+      '',
+      'If you were not expecting this invitation, you can ignore this email.'
+    ].join('\n')
+  };
+}
+
+function buildPasswordResetEmail(env: Env, email: string, resetToken: string): { subject: string; text: string } {
+  const resetUrl = `${getAppBaseUrl(env)}?reset=${encodeURIComponent(resetToken)}`;
+  return {
+    subject: 'Reset your Company CRM password',
+    text: [
+      'We received a request to reset your Company CRM password.',
+      '',
+      'Use the link below to choose a new password:',
+      resetUrl,
+      '',
+      `Account: ${email}`,
+      '',
+      'If you did not request this reset, you can ignore this email.'
+    ].join('\n')
+  };
+}
 
 async function hashPassword(password: string, saltBase64?: string): Promise<{ hash: string; salt: string }> {
   const salt = saltBase64 ? fromBase64(saltBase64) : crypto.getRandomValues(new Uint8Array(16));
@@ -875,6 +943,93 @@ addRoute('POST', /^\/api\/auth\/invite\/accept$/, async (request, env) => {
   return json({ success: true });
 });
 
+addRoute('GET', /^\/api\/auth\/password-reset\/([^/]+)$/, async (request, env) => {
+  const match = request.url.match(/\/api\/auth\/password-reset\/([^/]+)$/);
+  const token = decodeURIComponent(match?.[1] || '');
+  if (!token) return err('token is required');
+  const reset = await env.CRM_DB.prepare(
+    `SELECT pr.id, pr.user_id, pr.expires_at, pr.used_at, u.email
+     FROM password_resets pr
+     JOIN users u ON u.id = pr.user_id
+     WHERE pr.token = ?1`
+  )
+    .bind(token)
+    .first<{ id: number; user_id: number; expires_at: string; used_at: string | null; email: string }>();
+  if (!reset) return err('Invalid reset token', 404);
+  if (reset.used_at) return err('Reset token already used', 409);
+  if (new Date(reset.expires_at).getTime() < Date.now()) return err('Reset token expired', 410);
+  return json({ email: reset.email });
+});
+
+addRoute('POST', /^\/api\/auth\/password-reset\/request$/, async (request, env) => {
+  const body = await parseJson<{ email: string }>(request);
+  const email = body?.email?.toLowerCase().trim();
+  if (!email) return err('email is required');
+
+  const user = await env.CRM_DB.prepare(
+    `SELECT id, email, is_active
+     FROM users
+     WHERE email = ?1`
+  )
+    .bind(email)
+    .first<{ id: number; email: string; is_active: number }>();
+
+  if (user && user.is_active === 1) {
+    const token = randomToken(24);
+    const expiresAt = isoAfterHours(1);
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`DELETE FROM password_resets WHERE user_id = ?1 AND used_at IS NULL`).bind(user.id),
+      env.CRM_DB.prepare(
+        `INSERT INTO password_resets (token, user_id, expires_at)
+         VALUES (?1, ?2, ?3)`
+      ).bind(token, user.id, expiresAt)
+    ]);
+    await sendEmail(env, {
+      to: user.email,
+      ...buildPasswordResetEmail(env, user.email, token)
+    });
+    await audit(env, null, 'request_password_reset', 'user', String(user.id), { email: user.email });
+  }
+
+  return json({
+    success: true,
+    message: 'If that email is active in the CRM, a password reset link has been sent.'
+  });
+});
+
+addRoute('POST', /^\/api\/auth\/password-reset\/confirm$/, async (request, env) => {
+  const body = await parseJson<{ token: string; password: string }>(request);
+  if (!body?.token || !body?.password) return err('token and password are required');
+  if (String(body.password).length < 8) return err('Password must be at least 8 characters');
+
+  const reset = await env.CRM_DB.prepare(
+    `SELECT pr.id, pr.user_id, pr.expires_at, pr.used_at, u.email
+     FROM password_resets pr
+     JOIN users u ON u.id = pr.user_id
+     WHERE pr.token = ?1`
+  )
+    .bind(body.token)
+    .first<{ id: number; user_id: number; expires_at: string; used_at: string | null; email: string }>();
+
+  if (!reset) return err('Invalid reset token', 404);
+  if (reset.used_at) return err('Reset token already used', 409);
+  if (new Date(reset.expires_at).getTime() < Date.now()) return err('Reset token expired', 410);
+
+  const pwd = await hashPassword(body.password);
+  await env.CRM_DB.batch([
+    env.CRM_DB.prepare(
+      `UPDATE users
+       SET password_hash = ?1, password_salt = ?2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?3`
+    ).bind(pwd.hash, pwd.salt, reset.user_id),
+    env.CRM_DB.prepare(`UPDATE password_resets SET used_at = CURRENT_TIMESTAMP WHERE id = ?1`).bind(reset.id),
+    env.CRM_DB.prepare(`DELETE FROM sessions WHERE user_id = ?1`).bind(reset.user_id)
+  ]);
+
+  await audit(env, null, 'confirm_password_reset', 'user', String(reset.user_id), { email: reset.email });
+  return json({ success: true });
+});
+
 addRoute('GET', /^\/api\/auth\/me$/, async (request, env) => {
   const user = await getAuthedUser(request, env);
   if (!user) return err('Unauthorized', 401);
@@ -1140,6 +1295,7 @@ addRoute(
     const page = Math.max(1, Number(url.searchParams.get('page') || 1));
     const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize') || 25)));
     const sortBy = normalizedText(url.searchParams.get('sortBy')) || 'name';
+    const sortDir = normalizedText(url.searchParams.get('sortDir')) === 'desc' ? 'desc' : 'asc';
     const q = normalizedText(url.searchParams.get('q'));
     const stateFilter = normalizedText(url.searchParams.get('state')).toUpperCase();
     const cityFilter = normalizedText(url.searchParams.get('city'));
@@ -1228,27 +1384,28 @@ addRoute(
     }
     const whereClause = whereParts.join(' AND ');
     const sortKey = new Set(['name', 'city', 'state', 'next_action', 'last_interaction']).has(sortBy) ? sortBy : 'name';
-    const orderClause =
-      sortKey === 'city'
-        ? `lower(coalesce(c.city, '')) ASC, lower(coalesce(c.name, '')) ASC`
-        : sortKey === 'state'
-          ? `lower(coalesce(c.state, '')) ASC, lower(coalesce(c.city, '')) ASC, lower(coalesce(c.name, '')) ASC`
-          : sortKey === 'next_action'
-            ? `coalesce((
-                 SELECT MIN(datetime(i.next_action_at))
+    const textDirection = sortDir === 'desc' ? 'DESC' : 'ASC';
+    const dateDirection = sortDir === 'desc' ? 'DESC' : 'ASC';
+    const tieTextDirection = sortDir === 'desc' ? 'DESC' : 'ASC';
+    const nextActionExpr = `(SELECT MIN(datetime(i.next_action_at))
                  FROM interactions i
                  WHERE i.company_id = c.id
                    AND i.deleted_at IS NULL
-                   AND i.next_action_at IS NOT NULL
-               ), '9999-12-31') ASC, lower(coalesce(c.name, '')) ASC`
-            : sortKey === 'last_interaction'
-              ? `coalesce((
-                   SELECT MAX(datetime(coalesce(i.interaction_at, i.created_at)))
+                   AND i.next_action_at IS NOT NULL)`;
+    const lastInteractionExpr = `(SELECT MAX(datetime(coalesce(i.interaction_at, i.created_at)))
                    FROM interactions i
                    WHERE i.company_id = c.id
-                     AND i.deleted_at IS NULL
-                 ), '0001-01-01') DESC, lower(coalesce(c.name, '')) ASC`
-              : `lower(coalesce(c.name, '')) ASC`;
+                     AND i.deleted_at IS NULL)`;
+    const orderClause =
+      sortKey === 'city'
+        ? `lower(coalesce(c.city, '')) ${textDirection}, lower(coalesce(c.name, '')) ${tieTextDirection}`
+        : sortKey === 'state'
+          ? `lower(coalesce(c.state, '')) ${textDirection}, lower(coalesce(c.city, '')) ${textDirection}, lower(coalesce(c.name, '')) ${tieTextDirection}`
+          : sortKey === 'next_action'
+            ? `CASE WHEN ${nextActionExpr} IS NULL THEN 1 ELSE 0 END ASC, ${nextActionExpr} ${dateDirection}, lower(coalesce(c.name, '')) ${tieTextDirection}`
+            : sortKey === 'last_interaction'
+              ? `CASE WHEN ${lastInteractionExpr} IS NULL THEN 1 ELSE 0 END ASC, ${lastInteractionExpr} ${dateDirection}, lower(coalesce(c.name, '')) ${tieTextDirection}`
+              : `lower(coalesce(c.name, '')) ${textDirection}`;
 
     const totalRow = await env.CRM_DB.prepare(`SELECT COUNT(*) AS c FROM companies c WHERE ${whereClause}`)
       .bind(...binds)
@@ -2033,8 +2190,7 @@ addRoute(
     }
     if (!['admin', 'manager', 'rep', 'viewer'].includes(body.role)) return err('Invalid role');
 
-    const temporaryPassword = body.password?.trim() || randomPassword(12);
-    const pwd = await hashPassword(temporaryPassword);
+    const pwd = await hashPassword(body.password?.trim() || randomPassword(12));
     const result = await env.CRM_DB.prepare(
       `INSERT INTO users (email, full_name, role, password_hash, password_salt)
        VALUES (?1, ?2, ?3, ?4, ?5)`
@@ -2082,19 +2238,33 @@ addRoute(
       }
     }
 
+    let emailSent = true;
+    let emailError: string | null = null;
+    try {
+      await sendEmail(env, {
+        to: body.email.toLowerCase().trim(),
+        ...buildInviteEmail(env, user.full_name, body.fullName.trim(), body.email.toLowerCase().trim(), inviteToken)
+      });
+    } catch (error) {
+      emailSent = false;
+      emailError = error instanceof Error ? error.message : 'Unable to send invitation email';
+    }
+
     await audit(env, user, 'create', 'user', String(result.meta.last_row_id), {
       email: body.email,
       role: body.role,
       phone: normalizedText(body.phone) || null,
-      repId
+      repId,
+      emailSent,
+      emailError
     });
     return json(
       {
         id: result.meta.last_row_id,
-        temporaryPassword,
-        inviteToken,
         inviteExpiresAt,
-        repId
+        repId,
+        emailSent,
+        emailError
       },
       201
     );
@@ -3171,8 +3341,7 @@ addRoute(
       .first<{ id: number; email: string; full_name: string }>();
     if (!target) return err('User not found', 404);
 
-    const temporaryPassword = randomPassword(12);
-    const pwd = await hashPassword(temporaryPassword);
+    const pwd = await hashPassword(randomPassword(12));
     const inviteToken = randomToken(24);
     const inviteExpiresAt = isoAfterHours(24 * 7);
 
@@ -3189,8 +3358,19 @@ addRoute(
       ).bind(inviteToken, userId, inviteExpiresAt, user.id)
     ]);
 
-    await audit(env, user, 'resend_invite', 'user', String(userId), { email: target.email });
-    return json({ temporaryPassword, inviteToken, inviteExpiresAt, email: target.email, fullName: target.full_name });
+    let emailSent = true;
+    let emailError: string | null = null;
+    try {
+      await sendEmail(env, {
+        to: target.email,
+        ...buildInviteEmail(env, user.full_name, target.full_name, target.email, inviteToken)
+      });
+    } catch (error) {
+      emailSent = false;
+      emailError = error instanceof Error ? error.message : 'Unable to send invitation email';
+    }
+    await audit(env, user, 'resend_invite', 'user', String(userId), { email: target.email, emailSent, emailError });
+    return json({ inviteExpiresAt, email: target.email, fullName: target.full_name, emailSent, emailError });
   }) as any
 );
 
@@ -3581,7 +3761,7 @@ export default {
       if (!url.pathname.startsWith('/api/')) return err('Not found', 404);
       if (
         request.method === 'POST' &&
-        /^\/api\/auth\/(login|bootstrap|invite\/[^/]+\/set-password)$/.test(url.pathname) &&
+        /^\/api\/auth\/(login|bootstrap|invite\/accept|password-reset\/request|password-reset\/confirm)$/.test(url.pathname) &&
         !checkAuthRateLimit(request)
       ) {
         return err('Too many requests. Please wait and try again.', 429);
