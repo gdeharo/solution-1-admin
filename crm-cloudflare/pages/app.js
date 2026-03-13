@@ -914,6 +914,12 @@ function repOptions(selectedIds = []) {
     .join('');
 }
 
+function toProperCaseDisplay(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (match) => match.toUpperCase());
+}
+
 async function openCompany(companyId, pushHistory = true) {
   const [companyData, contactsData, interactionsData] = await Promise.all([
     api(`/api/companies/${companyId}`),
@@ -943,6 +949,11 @@ function renderCompanyDetail() {
   const isEditing = canWrite() && state.companyEditMode;
   const readOnly = isEditing ? '' : 'disabled';
   const assignedRepNames = (c.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
+  const displayName = c.name ? toProperCaseDisplay(c.name) : '-';
+  const displayAddress = c.address ? toProperCaseDisplay(c.address) : '-';
+  const displayCity = c.city ? toProperCaseDisplay(c.city) : '-';
+  const displaySegment = c.segment ? toProperCaseDisplay(c.segment) : '-';
+  const displayCustomerType = c.customer_type ? toProperCaseDisplay(c.customer_type) : '-';
   const companyPhoneHref = telHref(c.main_phone || '', c.country || 'US');
   const mapsUrl = companyMapUrl(c);
   const segmentOptions = [`<option value="">Segment</option>`]
@@ -966,7 +977,7 @@ function renderCompanyDetail() {
       <label><span class="sr-only">Name</span>${
         isEditing
           ? `<input name="name" value="${escapeHtml(c.name || '')}" placeholder="Name" aria-label="Name" ${readOnly} required />`
-          : `<div class="readonly-value">${escapeHtml(c.name || '-')}</div>`
+          : `<div class="readonly-value">${escapeHtml(displayName)}</div>`
       }</label>
       <label><span class="sr-only">Main phone</span>${
         isEditing
@@ -983,12 +994,12 @@ function renderCompanyDetail() {
           <label><span class="sr-only">Street</span>${
             isEditing
               ? `<textarea name="address" rows="1" class="street-field" placeholder="Street" aria-label="Street" ${readOnly}>${escapeHtml(c.address || '')}</textarea>`
-              : `<div class="readonly-value">${escapeHtml(c.address || '-')}</div>`
+              : `<div class="readonly-value">${escapeHtml(displayAddress)}</div>`
           }</label>
           <label><span class="sr-only">City</span>${
             isEditing
               ? `<input name="city" value="${escapeHtml(c.city || '')}" placeholder="City" aria-label="City" ${readOnly} />`
-              : `<div class="readonly-value">${escapeHtml(c.city || '-')}</div>`
+              : `<div class="readonly-value">${escapeHtml(displayCity)}</div>`
           }</label>
           <div class="address-row">
             <label id="companyStateWrap"></label>
@@ -1018,12 +1029,12 @@ function renderCompanyDetail() {
           <label><span class="sr-only">Segment</span>${
             isEditing
               ? `<select name="segment" aria-label="Segment" ${readOnly}>${segmentOptions}</select>`
-              : `<div class="readonly-value">${escapeHtml(c.segment || '-')}</div>`
+              : `<div class="readonly-value">${escapeHtml(displaySegment)}</div>`
           }</label>
           <label><span class="sr-only">Type</span>${
             isEditing
               ? `<select name="customerType" aria-label="Type" ${readOnly}>${typeOptions}</select>`
-              : `<div class="readonly-value">${escapeHtml(c.customer_type || '-')}</div>`
+              : `<div class="readonly-value">${escapeHtml(displayCustomerType)}</div>`
           }</label>
         </div>
       </div>
