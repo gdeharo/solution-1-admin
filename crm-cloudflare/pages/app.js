@@ -63,6 +63,7 @@ const VIEW_IDS = [
 const els = {
   pageTitle: document.getElementById('pageTitle'),
   pageHint: document.getElementById('pageHint'),
+  headerLogo: document.getElementById('headerLogo'),
   backBtn: document.getElementById('backBtn'),
   weeklyReportBtn: document.getElementById('weeklyReportBtn'),
   manageRepsBtn: document.getElementById('manageRepsBtn'),
@@ -650,9 +651,28 @@ function setView(viewId, hint, pushHistory = true) {
   VIEW_IDS.forEach((v) => document.getElementById(v).classList.add('hidden'));
   document.getElementById(viewId).classList.remove('hidden');
 
-  els.pageTitle.textContent = hint;
+  applyHeaderBranding();
   els.pageHint.textContent = hint;
   els.backBtn.classList.toggle('hidden', viewId === 'companyListView' || viewId === 'authView');
+}
+
+function companyLogoUrl() {
+  if (!state.companySettings?.logoKey || !state.token) return '';
+  return `${API_BASE}/api/settings/company/logo?token=${encodeURIComponent(state.token)}`;
+}
+
+function applyHeaderBranding() {
+  els.pageTitle.textContent = state.companySettings?.companyName || 'Company CRM';
+  if (els.headerLogo) {
+    const logoUrl = companyLogoUrl();
+    if (logoUrl) {
+      els.headerLogo.src = logoUrl;
+      els.headerLogo.classList.remove('hidden');
+    } else {
+      els.headerLogo.removeAttribute('src');
+      els.headerLogo.classList.add('hidden');
+    }
+  }
 }
 
 async function api(path, options = {}) {
@@ -915,13 +935,7 @@ async function openCompany(companyId, pushHistory = true) {
   }
 
   renderCompanyDetail();
-  const assignedRepNames = (state.currentCompany.assignedReps || []).map((r) => r.full_name).join(', ') || '-';
-  const missingBadge = (Number(state.currentCompany.has_incomplete_address) || companyHasMissingAddress(state.currentCompany))
-    ? '<span class="warning-badge" title="Missing address information">!</span>'
-    : '';
   setView('companyDetailView', state.currentCompany.name, pushHistory);
-  els.pageTitle.innerHTML = `${missingBadge}${escapeHtml(state.currentCompany.name)} <span class="title-rep">(Rep: ${escapeHtml(assignedRepNames)})</span>`;
-  els.pageHint.textContent = `${state.currentCompany.name} (Rep: ${assignedRepNames})`;
 }
 
 function renderCompanyDetail() {
@@ -2026,11 +2040,16 @@ async function renderRepsView() {
   state.repTerritories = Array.isArray(data.territories) ? data.territories : [];
   const isAdmin = state.user?.role === 'admin';
   let users = [];
+  try {
+    const companySettingsData = await api('/api/settings/company');
+    state.companySettings = companySettingsData.settings || state.companySettings;
+    applyHeaderBranding();
+  } catch {
+  }
   if (isAdmin) {
     try {
-      const [usersData, companySettingsData] = await Promise.all([api('/api/users'), api('/api/settings/company')]);
+      const usersData = await api('/api/users');
       users = usersData.users || [];
-      state.companySettings = companySettingsData.settings || state.companySettings;
     } catch {
       users = [];
     }
@@ -2256,6 +2275,8 @@ async function renderRepsView() {
       <input name="companyName" placeholder="Company Name" value="${escapeHtml(state.companySettings?.companyName || '')}" required />
       <input name="defaultCcEmail" placeholder="Default CC Email" type="email" value="${escapeHtml(state.companySettings?.defaultCcEmail || '')}" />
       <input name="featureNotificationEmail" placeholder="Feature Notification Email" type="email" value="${escapeHtml(state.companySettings?.featureNotificationEmail || '')}" />
+      <input name="logoFile" type="file" accept="image/*" />
+      ${state.companySettings?.logoKey ? `<button type="button" class="ghost" id="deleteCompanyLogoBtn">Delete Logo</button>` : ''}
       <button type="submit">Save Company Settings</button>
     `;
   } else {
@@ -2306,20 +2327,49 @@ function bindRepsEvents() {
       event.preventDefault();
       const fd = new FormData(companySettingsForm);
       try {
+        const logoFile = fd.get('logoFile');
+        let logoKey = state.companySettings?.logoKey || '';
+        if (logoFile instanceof File && logoFile.size > 0) {
+          const uploadForm = new FormData();
+          uploadForm.set('file', logoFile);
+          const upload = await api('/api/settings/company/logo', {
+            method: 'POST',
+            body: uploadForm,
+            headers: {}
+          });
+          logoKey = upload.logoKey || logoKey;
+        }
         const result = await api('/api/settings/company', {
           method: 'PUT',
           body: JSON.stringify({
             companyName: String(fd.get('companyName') || ''),
             defaultCcEmail: String(fd.get('defaultCcEmail') || ''),
-            featureNotificationEmail: String(fd.get('featureNotificationEmail') || '')
+            featureNotificationEmail: String(fd.get('featureNotificationEmail') || ''),
+            logoKey
           })
         });
         state.companySettings = result.settings || state.companySettings;
+        applyHeaderBranding();
+        await renderRepsView();
         showToast('Company settings updated');
       } catch (error) {
         showToast(error.message, true);
       }
     };
+    const deleteCompanyLogoBtn = document.getElementById('deleteCompanyLogoBtn');
+    if (deleteCompanyLogoBtn) {
+      deleteCompanyLogoBtn.onclick = async () => {
+        try {
+          await api('/api/settings/company/logo', { method: 'DELETE' });
+          state.companySettings.logoKey = '';
+          applyHeaderBranding();
+          await renderRepsView();
+          showToast('Logo removed');
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      };
+    }
   }
 
   const interactionTypeValueForm = document.getElementById('interactionTypeValueForm');
@@ -3276,6 +3326,12 @@ async function loadSession() {
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
     await Promise.all([loadCompanies(), loadReps(), loadMetadata(), loadTheme()]);
+    try {
+      const companySettingsData = await api('/api/settings/company');
+      state.companySettings = companySettingsData.settings || state.companySettings;
+    } catch {
+    }
+    applyHeaderBranding();
     setView('companyListView', 'Company list', false);
   } catch {
     localStorage.removeItem('crm_token');

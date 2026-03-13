@@ -138,26 +138,27 @@ async function sendEmail(env: Env, payload: { to: string; subject: string; text:
   }
 }
 
-async function getCompanySettings(env: Env): Promise<{ companyName: string; defaultCcEmail: string; featureNotificationEmail: string }> {
+async function getCompanySettings(env: Env): Promise<{ companyName: string; defaultCcEmail: string; featureNotificationEmail: string; logoKey: string }> {
   const row = await env.CRM_DB.prepare(`SELECT value_json FROM app_settings WHERE key = 'company'`).first<{ value_json: string }>();
   if (!row?.value_json) {
-    return { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '' };
+    return { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '', logoKey: '' };
   }
   try {
     const parsed = JSON.parse(row.value_json);
     return {
       companyName: normalizedText(parsed.companyName) || 'Company CRM',
       defaultCcEmail: normalizedText(parsed.defaultCcEmail).toLowerCase(),
-      featureNotificationEmail: normalizedText(parsed.featureNotificationEmail).toLowerCase()
+      featureNotificationEmail: normalizedText(parsed.featureNotificationEmail).toLowerCase(),
+      logoKey: normalizedText(parsed.logoKey)
     };
   } catch {
-    return { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '' };
+    return { companyName: 'Company CRM', defaultCcEmail: '', featureNotificationEmail: '', logoKey: '' };
   }
 }
 
 function buildInviteEmail(
   appBaseUrl: string,
-  settings: { companyName: string; defaultCcEmail: string; featureNotificationEmail: string },
+  settings: { companyName: string; defaultCcEmail: string; featureNotificationEmail: string; logoKey: string },
   adminName: string,
   recipientName: string,
   email: string,
@@ -182,7 +183,7 @@ function buildInviteEmail(
 }
 
 function buildFeedbackEmail(
-  settings: { companyName: string; defaultCcEmail: string; featureNotificationEmail: string },
+  settings: { companyName: string; defaultCcEmail: string; featureNotificationEmail: string; logoKey: string },
   entry: { feedbackAt: string; userName: string; message: string }
 ): { subject: string; text: string } {
   return {
@@ -1334,7 +1335,6 @@ addRoute(
   'GET',
   /^\/api\/settings\/company$/,
   withAuth(async (_request, env, user) => {
-    if (user.role !== 'admin') return err('Forbidden', 403);
     const settings = await getCompanySettings(env);
     return json({ settings });
   }) as any
@@ -1345,14 +1345,16 @@ addRoute(
   /^\/api\/settings\/company$/,
   withAuth(async (request, env, user) => {
     if (user.role !== 'admin') return err('Forbidden', 403);
-    const body = await parseJson<{ companyName?: string; defaultCcEmail?: string; featureNotificationEmail?: string }>(request);
+    const body = await parseJson<{ companyName?: string; defaultCcEmail?: string; featureNotificationEmail?: string; logoKey?: string }>(request);
+    const current = await getCompanySettings(env);
     const companyName = normalizedText(body?.companyName);
     const defaultCcEmail = normalizedText(body?.defaultCcEmail).toLowerCase();
     const featureNotificationEmail = normalizedText(body?.featureNotificationEmail).toLowerCase();
+    const logoKey = normalizedText(body?.logoKey) || current.logoKey;
     if (!companyName) return err('companyName is required');
     if (defaultCcEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(defaultCcEmail)) return err('Invalid CC email');
     if (featureNotificationEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(featureNotificationEmail)) return err('Invalid feature notification email');
-    const settings = { companyName, defaultCcEmail, featureNotificationEmail };
+    const settings = { companyName, defaultCcEmail, featureNotificationEmail, logoKey };
     await env.CRM_DB.prepare(
       `INSERT INTO app_settings (key, value_json, updated_by_user_id)
        VALUES ('company', ?1, ?2)
@@ -1362,6 +1364,76 @@ addRoute(
       .run();
     await audit(env, user, 'update', 'setting', 'company', settings);
     return json({ success: true, settings });
+  }) as any
+);
+
+addRoute(
+  'POST',
+  /^\/api\/settings\/company\/logo$/,
+  withAuth(async (request, env, user) => {
+    if (user.role !== 'admin') return err('Forbidden', 403);
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!(file instanceof File)) return err('file is required');
+    if (!String(file.type || '').toLowerCase().startsWith('image/')) return err('Logo must be an image file');
+
+    const current = await getCompanySettings(env);
+    const ext = (file.name.split('.').pop() || 'png').replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'png';
+    const key = `settings/company/logo/${Date.now()}-${randomToken(8)}.${ext}`;
+    await env.CRM_FILES.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type || 'application/octet-stream' }
+    });
+    if (current.logoKey) {
+      await env.CRM_FILES.delete(current.logoKey).catch(() => null);
+    }
+    const next = { ...current, logoKey: key };
+    await env.CRM_DB.prepare(
+      `INSERT INTO app_settings (key, value_json, updated_by_user_id)
+       VALUES ('company', ?1, ?2)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_by_user_id = excluded.updated_by_user_id, updated_at = CURRENT_TIMESTAMP`
+    )
+      .bind(JSON.stringify(next), user.id)
+      .run();
+    await audit(env, user, 'upload', 'setting', 'company_logo', { logoKey: key });
+    return json({ success: true, logoKey: key });
+  }) as any
+);
+
+addRoute(
+  'DELETE',
+  /^\/api\/settings\/company\/logo$/,
+  withAuth(async (_request, env, user) => {
+    if (user.role !== 'admin') return err('Forbidden', 403);
+    const current = await getCompanySettings(env);
+    if (current.logoKey) {
+      await env.CRM_FILES.delete(current.logoKey).catch(() => null);
+    }
+    const next = { ...current, logoKey: '' };
+    await env.CRM_DB.prepare(
+      `INSERT INTO app_settings (key, value_json, updated_by_user_id)
+       VALUES ('company', ?1, ?2)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_by_user_id = excluded.updated_by_user_id, updated_at = CURRENT_TIMESTAMP`
+    )
+      .bind(JSON.stringify(next), user.id)
+      .run();
+    await audit(env, user, 'delete', 'setting', 'company_logo');
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
+  'GET',
+  /^\/api\/settings\/company\/logo$/,
+  withAuth(async (_request, env) => {
+    const settings = await getCompanySettings(env);
+    if (!settings.logoKey) return err('Logo not found', 404);
+    const object = await env.CRM_FILES.get(settings.logoKey);
+    if (!object) return err('Logo not found', 404);
+    const headers = new Headers();
+    object.writeHttpMetadata(headers);
+    headers.set('etag', object.httpEtag);
+    headers.set('content-disposition', 'inline; filename="company-logo"');
+    return new Response(object.body, { headers });
   }) as any
 );
 
