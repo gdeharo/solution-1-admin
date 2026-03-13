@@ -2131,7 +2131,7 @@ async function renderRepsView() {
       <div class="rep-picker">
         <input id="territoryRepSearch" placeholder="Find rep" />
         <input type="hidden" name="repId" />
-        <select id="territoryRepSelect" size="4" aria-label="Territory rep list"></select>
+        <div id="territoryRepList" class="rep-picker-list" aria-label="Territory rep list"></div>
       </div>
       <div class="field-group">
         <strong>Type</strong>
@@ -2465,8 +2465,8 @@ function bindRepsEvents() {
   const repSelectEl = territoryForm.querySelector('[name="repId"]');
   const zipCodesEl = territoryForm.querySelector('[name="zipCodes"]');
   const repSearchPickerEl = territoryForm.querySelector('#territoryRepSearch');
-  const repPickerSelectEl = territoryForm.querySelector('#territoryRepSelect');
-  if (!repSelectEl || !zipCodesEl || !repSearchPickerEl || !repPickerSelectEl) return;
+  const repPickerListEl = territoryForm.querySelector('#territoryRepList');
+  if (!repSelectEl || !zipCodesEl || !repSearchPickerEl || !repPickerListEl) return;
 
   const getCheckedValues = (fieldName) =>
     Array.from(territoryForm.querySelectorAll(`input[name="${fieldName}"]:checked`)).map((el) => el.value);
@@ -2710,33 +2710,35 @@ function bindRepsEvents() {
       const selectedRep = state.reps.find((rep) => toPositiveInt(rep.id) === state.selectedTerritoryRepId);
       if (selectedRep) candidates = [selectedRep, ...candidates];
     }
-    candidates = candidates.slice(0, 4);
+    candidates = candidates.slice(0, 8);
 
-    repPickerSelectEl.innerHTML = candidates.length
+    repPickerListEl.innerHTML = candidates.length
       ? candidates
           .map((rep) => {
             const repId = toPositiveInt(rep.id);
-            return `<option value="${repId}" ${state.selectedTerritoryRepId === repId ? 'selected' : ''}>${escapeHtml(rep.full_name || '')}</option>`;
+            return `<button type="button" class="rep-picker-item ${state.selectedTerritoryRepId === repId ? 'active' : ''}" data-territory-pick-rep="${repId}">${escapeHtml(rep.full_name || '')}</button>`;
           })
           .join('')
-      : '<option value="">No reps found</option>';
+      : '<div class="tiny">No reps found</div>';
+    repPickerListEl.querySelectorAll('[data-territory-pick-rep]').forEach((btn) => {
+      btn.onclick = () => {
+        const repId = toPositiveInt(btn.dataset.territoryPickRep);
+        if (!repId) return;
+        state.selectedTerritoryRepId = repId;
+        repSelectEl.value = String(repId);
+        renderRepPickerList();
+        loadTerritoryScope(repId);
+      };
+    });
   };
   repSearchPickerEl.value = state.territoryRepSearch || '';
   repSearchPickerEl.oninput = () => {
     state.territoryRepSearch = repSearchPickerEl.value || '';
     renderRepPickerList();
   };
-  repPickerSelectEl.onchange = () => {
-    const repId = toPositiveInt(repPickerSelectEl.value);
-    if (!repId) return;
-    state.selectedTerritoryRepId = repId;
-    repSelectEl.value = String(repId);
-    loadTerritoryScope(repId);
-  };
   renderRepPickerList();
   if (state.selectedTerritoryRepId) {
     repSelectEl.value = String(state.selectedTerritoryRepId);
-    repPickerSelectEl.value = String(state.selectedTerritoryRepId);
     loadTerritoryScope(state.selectedTerritoryRepId);
   }
 
@@ -3546,6 +3548,8 @@ els.backBtn.onclick = async () => {
 
 els.manageRepsBtn.onclick = async () => {
   try {
+    state.territoryRepSearch = '';
+    state.selectedTerritoryRepId = 0;
     await renderRepsView();
   } catch (error) {
     showToast(error.message, true);

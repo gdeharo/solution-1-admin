@@ -380,21 +380,36 @@ tr.clickable:hover {
   min-width: 260px;
 }
 
-#territoryRepSelect {
+.rep-picker-list {
   border: 1px solid var(--line);
   border-radius: 8px;
-  height: 7.2rem;
   min-height: 7.2rem;
   max-height: 10rem;
   overflow: auto;
   background: #fff;
-  resize: vertical;
   padding: 0.2rem;
+  display: grid;
+  gap: 0.2rem;
 }
 
-#territoryRepSelect option {
-  padding: 0.2rem 0.35rem;
+.rep-picker-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 0.38rem 0.45rem;
+  background: transparent;
+  color: var(--ink);
   line-height: 1.15;
+}
+
+.rep-picker-item:hover {
+  background: var(--accent-soft);
+}
+
+.rep-picker-item.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .hidden {
