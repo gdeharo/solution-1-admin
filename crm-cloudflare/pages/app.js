@@ -2071,6 +2071,7 @@ async function renderRepsView() {
       (item) => `<li>
         <span>${escapeHtml(item.name)}</span>
         <button type="button" class="ghost" title="Edit" aria-label="Edit" data-rename-interaction-type="${item.id}">✎</button>
+        <button type="button" class="danger small-btn" title="Delete" aria-label="Delete" data-delete-interaction-type="${item.id}">⌦</button>
       </li>`
     )
     .join('');
@@ -2397,6 +2398,23 @@ function bindRepsEvents() {
         await loadMetadata();
         await renderRepsView();
         showToast('Meeting type renamed');
+      } catch (error) {
+        showToast(error.message, true);
+      }
+    };
+  });
+
+  document.querySelectorAll('[data-delete-interaction-type]').forEach((btn) => {
+    btn.onclick = async () => {
+      const id = Number(btn.dataset.deleteInteractionType);
+      const current = state.interactionTypeValues.find((x) => x.id === id);
+      if (!id || !current) return;
+      if (!confirm(`Delete meeting type "${current.name}"? Existing interactions using it will be cleared.`)) return;
+      try {
+        await api(`/api/interaction-types/${id}`, { method: 'DELETE' });
+        await loadMetadata();
+        await renderRepsView();
+        showToast('Meeting type deleted');
       } catch (error) {
         showToast(error.message, true);
       }

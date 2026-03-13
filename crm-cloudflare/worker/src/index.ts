@@ -1293,6 +1293,27 @@ addRoute(
 );
 
 addRoute(
+  'DELETE',
+  /^\/api\/interaction-types\/(\d+)$/,
+  withAuth(async (request, env, user) => {
+    if (!canManageReps(user.role)) return err('Forbidden', 403);
+    const match = request.url.match(/\/api\/interaction-types\/(\d+)$/);
+    const typeId = Number(match?.[1]);
+    if (!typeId) return err('interaction type id is required');
+    const current = await env.CRM_DB.prepare(`SELECT id, name FROM interaction_types WHERE id = ?1`)
+      .bind(typeId)
+      .first<{ id: number; name: string }>();
+    if (!current) return err('Interaction type not found', 404);
+    await env.CRM_DB.batch([
+      env.CRM_DB.prepare(`DELETE FROM interaction_types WHERE id = ?1`).bind(typeId),
+      env.CRM_DB.prepare(`UPDATE interactions SET interaction_type = NULL WHERE interaction_type = ?1`).bind(current.name)
+    ]);
+    await audit(env, user, 'delete', 'interaction_type', String(typeId), { name: current.name });
+    return json({ success: true });
+  }) as any
+);
+
+addRoute(
   'GET',
   /^\/api\/settings\/theme$/,
   async (_request, env) => {
