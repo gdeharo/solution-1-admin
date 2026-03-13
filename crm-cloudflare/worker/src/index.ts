@@ -399,6 +399,14 @@ function normalizedText(value: string | null | undefined): string {
   return String(value || '').trim();
 }
 
+function toProperCaseStored(value: string | null | undefined): string | null {
+  const normalized = normalizedText(value);
+  if (!normalized) return null;
+  return normalized
+    .toLowerCase()
+    .replace(/(^|[\s\-/'"(])([a-z])/g, (_match, prefix: string, char: string) => `${prefix}${char.toUpperCase()}`);
+}
+
 function companyMissingAddressSql(alias: string): string {
   return `(
     trim(coalesce(${alias}.address, '')) = ''
@@ -1390,6 +1398,36 @@ addRoute(
 
 addRoute(
   'POST',
+  /^\/api\/settings\/company\/normalize-company-case$/,
+  withAuth(async (_request, env, user) => {
+    if (user.role !== 'admin') return err('Forbidden', 403);
+    const rows = await env.CRM_DB.prepare(
+      `SELECT id, name, address, city
+       FROM companies
+       WHERE deleted_at IS NULL`
+    ).all<{ id: number; name: string | null; address: string | null; city: string | null }>();
+    let updated = 0;
+    for (const row of rows.results || []) {
+      const nextName = toProperCaseStored(row.name);
+      const nextAddress = toProperCaseStored(row.address);
+      const nextCity = toProperCaseStored(row.city);
+      if (nextName === row.name && nextAddress === row.address && nextCity === row.city) continue;
+      await env.CRM_DB.prepare(
+        `UPDATE companies
+         SET name = ?1, address = ?2, city = ?3, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?4`
+      )
+        .bind(nextName, nextAddress, nextCity, row.id)
+        .run();
+      updated += 1;
+    }
+    await audit(env, user, 'normalize_case', 'company', 'all', { updated });
+    return json({ success: true, updated });
+  }) as any
+);
+
+addRoute(
+  'POST',
   /^\/api\/settings\/company\/logo$/,
   withAuth(async (request, env, user) => {
     if (user.role !== 'admin') return err('Forbidden', 403);
@@ -1666,9 +1704,9 @@ addRoute(
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
     )
       .bind(
-        body.name,
-        body.address ?? null,
-        body.city ?? null,
+        toProperCaseStored(body.name),
+        toProperCaseStored(body.address),
+        toProperCaseStored(body.city),
         body.state ?? null,
         body.country ?? 'US',
         body.zip ?? null,
@@ -3204,9 +3242,9 @@ addRoute(
        WHERE id = ?12 AND deleted_at IS NULL`
     )
       .bind(
-        body.name,
-        body.address ?? null,
-        body.city ?? null,
+        toProperCaseStored(body.name),
+        toProperCaseStored(body.address),
+        toProperCaseStored(body.city),
         body.state ?? null,
         body.country ?? 'US',
         body.zip ?? null,

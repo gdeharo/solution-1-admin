@@ -2289,6 +2289,7 @@ async function renderRepsView() {
       <input name="featureNotificationEmail" placeholder="Feature Notification Email" type="email" value="${escapeHtml(state.companySettings?.featureNotificationEmail || '')}" />
       <input name="logoFile" type="file" accept="image/*" />
       ${state.companySettings?.logoKey ? `<button type="button" class="ghost" id="deleteCompanyLogoBtn">Delete Logo</button>` : ''}
+      <button type="button" class="ghost" id="normalizeCompanyCaseBtn">Normalize Existing Companies</button>
       <button type="submit">Save Company Settings</button>
     `;
   } else {
@@ -2377,6 +2378,20 @@ function bindRepsEvents() {
           applyHeaderBranding();
           await renderRepsView();
           showToast('Logo removed');
+        } catch (error) {
+          showToast(error.message, true);
+        }
+      };
+    }
+    const normalizeCompanyCaseBtn = document.getElementById('normalizeCompanyCaseBtn');
+    if (normalizeCompanyCaseBtn) {
+      normalizeCompanyCaseBtn.onclick = async () => {
+        if (!confirm('Normalize existing company name, address, and city values to proper case?')) return;
+        try {
+          const result = await api('/api/settings/company/normalize-company-case', { method: 'POST' });
+          showToast(`Normalized ${Number(result.updated || 0)} companies`);
+          if (state.currentCompany?.id) await openCompany(state.currentCompany.id, false);
+          else await loadCompanies();
         } catch (error) {
           showToast(error.message, true);
         }
