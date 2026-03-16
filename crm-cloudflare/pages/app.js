@@ -3392,8 +3392,21 @@ async function loadSession() {
     return;
   }
 
+  let me;
   try {
-    const me = await api('/api/auth/me');
+    me = await api('/api/auth/me');
+  } catch (error) {
+    if (error?.status === 401) {
+      localStorage.removeItem('crm_token');
+      state.token = null;
+      setView('authView', 'Sign in', false);
+      return;
+    }
+    showToast(error.message || 'Could not restore session', true);
+    return;
+  }
+
+  try {
     state.user = me.user;
     els.whoami.textContent = `${state.user.fullName} (${state.user.role})`;
     els.whoami.classList.remove('hidden');
@@ -3403,7 +3416,11 @@ async function loadSession() {
     els.feedbackBtn.classList.remove('hidden');
     document.getElementById('showCreateCompanyBtn').classList.toggle('hidden', !canWrite());
 
-    await Promise.all([loadCompanies(), loadReps(), loadMetadata(), loadTheme()]);
+    try {
+      await Promise.all([loadCompanies(), loadReps(), loadMetadata(), loadTheme()]);
+    } catch (error) {
+      showToast(error.message || 'Some data could not load', true);
+    }
     try {
       const companySettingsData = await api('/api/settings/company');
       state.companySettings = companySettingsData.settings || state.companySettings;
@@ -3411,10 +3428,8 @@ async function loadSession() {
     }
     applyHeaderBranding();
     setView('companyListView', 'Company list', false);
-  } catch {
-    localStorage.removeItem('crm_token');
-    state.token = null;
-    setView('authView', 'Sign in', false);
+  } catch (error) {
+    showToast(error.message || 'Could not finish loading the session', true);
   }
 }
 
