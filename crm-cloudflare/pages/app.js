@@ -746,12 +746,16 @@ async function loadTheme() {
 }
 
 function renderCreateCompanySelects() {
-  const segmentWrap = document.getElementById('createCompanySegmentWrap');
-  const typeWrap = document.getElementById('createCompanyTypeWrap');
-  if (!segmentWrap || !typeWrap) return;
+  const segmentSelect = document.getElementById('createCompanySegment');
+  const typeSelect = document.getElementById('createCompanyType');
+  if (!segmentSelect || !typeSelect) return;
 
-  segmentWrap.innerHTML = valueCheckboxGroupHtml('segment', state.segments, []);
-  typeWrap.innerHTML = valueCheckboxGroupHtml('customerType', state.customerTypes, []);
+  segmentSelect.innerHTML = `<option value="">Segment</option>${state.segments
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join('')}`;
+  typeSelect.innerHTML = `<option value="">Type</option>${state.customerTypes
+    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+    .join('')}`;
 
   const countrySelect = document.getElementById('createCompanyCountry');
   if (countrySelect) {
@@ -977,8 +981,22 @@ function renderCompanyDetail() {
   const displayCustomerType = properCaseJoined(c.customer_type);
   const companyPhoneHref = telHref(c.main_phone || '', c.country || 'US');
   const mapsUrl = companyMapUrl(c);
-  const selectedSegments = splitStoredValues(c.segment);
-  const selectedTypes = splitStoredValues(c.customer_type);
+  const selectedSegment = splitStoredValues(c.segment)[0] || '';
+  const selectedType = splitStoredValues(c.customer_type)[0] || '';
+  const segmentOptions = [`<option value="">Segment</option>`]
+    .concat(
+      state.segments.map(
+        (name) => `<option value="${escapeHtml(name)}" ${selectedSegment === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
+      )
+    )
+    .join('');
+  const typeOptions = [`<option value="">Type</option>`]
+    .concat(
+      state.customerTypes.map(
+        (name) => `<option value="${escapeHtml(name)}" ${selectedType === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
+      )
+    )
+    .join('');
 
   document.getElementById('companyEditForm').innerHTML = `
     <div class="company-top-row full">
@@ -1036,12 +1054,12 @@ function renderCompanyDetail() {
           }</label>
           <label><span class="sr-only">Segment</span>${
             isEditing
-              ? `<div class="row wrap">${valueCheckboxGroupHtml('segment', state.segments, selectedSegments)}</div>`
+              ? `<select name="segment" aria-label="Segment" ${readOnly}>${segmentOptions}</select>`
               : `<div class="readonly-value">${escapeHtml(displaySegment)}</div>`
           }</label>
           <label><span class="sr-only">Type</span>${
             isEditing
-              ? `<div class="row wrap">${valueCheckboxGroupHtml('customerType', state.customerTypes, selectedTypes)}</div>`
+              ? `<select name="customerType" aria-label="Type" ${readOnly}>${typeOptions}</select>`
               : `<div class="readonly-value">${escapeHtml(displayCustomerType)}</div>`
           }</label>
         </div>
@@ -1212,10 +1230,10 @@ function bindCompanyDetailEvents() {
       const country = String(fd.get('country') || 'US').toUpperCase();
       const mainPhoneError = validatePhoneByCountry(fd.get('mainPhone'), country, 'Main phone');
       if (mainPhoneError) throw new Error(mainPhoneError);
-      const selectedSegments = fd.getAll('segment').map((value) => String(value || '').trim()).filter(Boolean);
-      const selectedTypes = fd.getAll('customerType').map((value) => String(value || '').trim()).filter(Boolean);
-      if (!selectedSegments.length) throw new Error('Select at least one segment');
-      if (!selectedTypes.length) throw new Error('Select at least one type');
+      const selectedSegment = String(fd.get('segment') || '').trim();
+      const selectedType = String(fd.get('customerType') || '').trim();
+      if (!selectedSegment) throw new Error('Select a segment');
+      if (!selectedType) throw new Error('Select a type');
       await api(`/api/companies/${state.currentCompany.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -1227,8 +1245,8 @@ function bindCompanyDetailEvents() {
           country,
           zip: fd.get('zip'),
           url: fd.get('url'),
-          segment: selectedSegments,
-          customerType: selectedTypes,
+          segment: [selectedSegment],
+          customerType: [selectedType],
           notes: fd.get('notes')
         })
       });
@@ -3713,10 +3731,10 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
     const country = String(fd.get('country') || 'US').toUpperCase();
     const mainPhoneError = validatePhoneByCountry(fd.get('mainPhone'), country, 'Main phone');
     if (mainPhoneError) throw new Error(mainPhoneError);
-    const selectedSegments = fd.getAll('segment').map((value) => String(value || '').trim()).filter(Boolean);
-    const selectedTypes = fd.getAll('customerType').map((value) => String(value || '').trim()).filter(Boolean);
-    if (!selectedSegments.length) throw new Error('Select at least one segment');
-    if (!selectedTypes.length) throw new Error('Select at least one type');
+    const selectedSegment = String(fd.get('segment') || '').trim();
+    const selectedType = String(fd.get('customerType') || '').trim();
+    if (!selectedSegment) throw new Error('Select a segment');
+    if (!selectedType) throw new Error('Select a type');
     await api('/api/companies', {
       method: 'POST',
       body: JSON.stringify({
@@ -3728,8 +3746,8 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
         country,
         zip: fd.get('zip'),
         url: fd.get('url'),
-        segment: selectedSegments,
-        customerType: selectedTypes,
+        segment: [selectedSegment],
+        customerType: [selectedType],
         notes: fd.get('notes')
       })
     });
