@@ -1747,9 +1747,9 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
           <label><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" required>${escapeHtml(
             initial.meetingNotes
           )}</textarea></label>
-          <label><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(
+          <label><span class="sr-only">Next action</span><textarea name="nextAction" rows="4" placeholder="Next action" aria-label="Next action">${escapeHtml(
             initial.nextAction
-          )}" /></label>
+          )}</textarea></label>
           <label><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${escapeHtml(
             initial.nextActionAt
           )}" /></label>
@@ -1888,9 +1888,9 @@ async function openInteractionDetail(interactionId) {
           <label><span class="sr-only">Meeting notes</span><textarea name="meetingNotes" placeholder="Meeting notes" aria-label="Meeting notes" ${readOnly} required>${escapeHtml(
             interaction.meeting_notes || ''
           )}</textarea></label>
-          <label><span class="sr-only">Next action</span><input name="nextAction" placeholder="Next action" aria-label="Next action" value="${escapeHtml(
+          <label><span class="sr-only">Next action</span><textarea name="nextAction" rows="4" placeholder="Next action" aria-label="Next action" ${readOnly}>${escapeHtml(
             interaction.next_action || ''
-          )}" ${readOnly} /></label>
+          )}</textarea></label>
           <label><span class="sr-only">Next action date</span><input name="nextActionAt" type="date" aria-label="Next action date" value="${
             interaction.next_action_at ? new Date(interaction.next_action_at).toISOString().slice(0, 10) : ''
           }" ${readOnly} /></label>
