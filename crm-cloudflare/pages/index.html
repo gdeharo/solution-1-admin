@@ -143,16 +143,16 @@
           <h3>New Company</h3>
           <label><span class="sr-only">Name</span><input name="name" placeholder="Name" aria-label="Name" required /></label>
           <label><span class="sr-only">Main phone</span><input name="mainPhone" placeholder="Main phone" aria-label="Main phone" /></label>
-          <label class="full"><span class="sr-only">Street</span><textarea name="address" rows="1" class="street-field" placeholder="Street" aria-label="Street"></textarea></label>
-          <label><span class="sr-only">City</span><input name="city" placeholder="City" aria-label="City" /></label>
+          <label class="full"><span class="sr-only">Street</span><textarea name="address" rows="1" class="street-field" placeholder="Street" aria-label="Street" required></textarea></label>
+          <label><span class="sr-only">City</span><input name="city" placeholder="City" aria-label="City" required /></label>
           <div class="address-row full">
-            <label id="createCompanyStateWrap"><span class="sr-only">State/Province</span><input name="state" placeholder="State/Province" aria-label="State/Province" /></label>
-            <label><span class="sr-only">Postal Code</span><input name="zip" placeholder="Postal Code" aria-label="Postal Code" /></label>
+            <label id="createCompanyStateWrap"><span class="sr-only">State/Province</span><input name="state" placeholder="State/Province" aria-label="State/Province" required /></label>
+            <label><span class="sr-only">Postal Code</span><input name="zip" placeholder="Postal Code" aria-label="Postal Code" required /></label>
           </div>
           <label><span class="sr-only">Country</span><select name="country" id="createCompanyCountry" aria-label="Country"></select></label>
           <label><span class="sr-only">URL</span><input name="url" type="url" placeholder="URL" aria-label="URL" /></label>
-          <label><span class="sr-only">Segment</span><select name="segment" id="createCompanySegment" aria-label="Segment"></select></label>
-          <label><span class="sr-only">Type</span><select name="customerType" id="createCompanyType" aria-label="Type"></select></label>
+          <label><span class="sr-only">Segment</span><select name="segment" id="createCompanySegment" aria-label="Segment" required></select></label>
+          <label><span class="sr-only">Type</span><select name="customerType" id="createCompanyType" aria-label="Type" required></select></label>
           <label class="full"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" aria-label="Notes"></textarea></label>
           <div class="row wrap full">
             <button type="submit">Create</button>

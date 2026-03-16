@@ -558,15 +558,16 @@ function buildCountryOptions(selected = 'US') {
 function buildStateField(scope, country, currentState = '', disabled = false) {
   const wrapId = scope === 'create' ? 'createCompanyStateWrap' : 'companyStateWrap';
   const dis = disabled ? 'disabled' : '';
+  const req = scope === 'create' ? 'required' : '';
   const value = escapeHtml(currentState || '');
   let inner = '';
   if (country === 'US' || country === 'CA') {
     const options = (country === 'US' ? US_STATES : CA_PROVINCES)
       .map((code) => `<option value="${code}" ${code === currentState ? 'selected' : ''}>${code}</option>`)
       .join('');
-    inner = `<span class="sr-only">State/Province</span><select name="state" aria-label="State/Province" ${dis}><option value="">State/Province</option>${options}</select>`;
+    inner = `<span class="sr-only">State/Province</span><select name="state" aria-label="State/Province" ${dis} ${req}><option value="">State/Province</option>${options}</select>`;
   } else {
-    inner = `<span class="sr-only">State/Province</span><input name="state" value="${value}" ${dis} placeholder="State/Province" aria-label="State/Province" />`;
+    inner = `<span class="sr-only">State/Province</span><input name="state" value="${value}" ${dis} ${req} placeholder="State/Province" aria-label="State/Province" />`;
   }
   return { wrapId, inner };
 }

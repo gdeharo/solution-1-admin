@@ -1407,11 +1407,30 @@ addRoute(
        WHERE deleted_at IS NULL`
     ).all<{ id: number; name: string | null; address: string | null; city: string | null }>();
     let updated = 0;
+    let skipped = 0;
+    const skippedNames: string[] = [];
     for (const row of rows.results || []) {
-      const nextName = toProperCaseStored(row.name);
+      const nextName = toProperCaseStored(row.name) || normalizedText(row.name);
       const nextAddress = toProperCaseStored(row.address);
       const nextCity = toProperCaseStored(row.city);
       if (nextName === row.name && nextAddress === row.address && nextCity === row.city) continue;
+      if (nextName && nextName !== row.name) {
+        const conflict = await env.CRM_DB.prepare(
+          `SELECT id
+           FROM companies
+           WHERE deleted_at IS NULL
+             AND id != ?1
+             AND lower(name) = lower(?2)
+           LIMIT 1`
+        )
+          .bind(row.id, nextName)
+          .first<{ id: number }>();
+        if (conflict?.id) {
+          skipped += 1;
+          if (skippedNames.length < 10) skippedNames.push(nextName);
+          continue;
+        }
+      }
       await env.CRM_DB.prepare(
         `UPDATE companies
          SET name = ?1, address = ?2, city = ?3, updated_at = CURRENT_TIMESTAMP
@@ -1421,8 +1440,8 @@ addRoute(
         .run();
       updated += 1;
     }
-    await audit(env, user, 'normalize_case', 'company', 'all', { updated });
-    return json({ success: true, updated });
+    await audit(env, user, 'normalize_case', 'company', 'all', { updated, skipped, skippedNames });
+    return json({ success: true, updated, skipped, skippedNames });
   }) as any
 );
 
@@ -1683,16 +1702,30 @@ addRoute(
       repIds?: number[];
     }>(request);
 
-    if (!body?.name) return err('Company name is required');
+    const name = normalizedText(body?.name);
+    const address = normalizedText(body?.address);
+    const city = normalizedText(body?.city);
+    const stateCode = normalizedText(body?.state).toUpperCase();
+    const zip = normalizedText(body?.zip);
+    const segment = normalizedText(body?.segment);
+    const customerType = normalizedText(body?.customerType);
+
+    if (!name) return err('Company name is required');
+    if (!address) return err('Street address is required');
+    if (!city) return err('City is required');
+    if (!stateCode) return err('State/Province is required');
+    if (!zip) return err('Postal code is required');
+    if (!segment) return err('Segment is required');
+    if (!customerType) return err('Type is required');
     const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
     if (metadataError) return err(metadataError);
     if (user.role === 'rep') {
       const inScope = await repCanCreateCompanyInTerritory(env, user, {
-        city: body.city,
-        state: body.state,
-        zip: body.zip,
-        segment: body.segment,
-        customerType: body.customerType
+        city,
+        state: stateCode,
+        zip,
+        segment,
+        customerType
       });
       if (!inScope) {
         return err('This company is outside your assigned territory (state/city/zip and segment/type).', 403);
@@ -1704,27 +1737,27 @@ addRoute(
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
     )
       .bind(
-        toProperCaseStored(body.name),
-        toProperCaseStored(body.address),
-        toProperCaseStored(body.city),
-        body.state ?? null,
+        toProperCaseStored(name) || name,
+        toProperCaseStored(address),
+        toProperCaseStored(city),
+        stateCode,
         body.country ?? 'US',
-        body.zip ?? null,
+        zip,
         body.mainPhone ?? null,
         body.url ?? null,
-        body.segment ?? null,
-        body.customerType ?? null,
+        segment,
+        customerType,
         body.notes ?? null
       )
       .run();
 
     const companyId = Number(result.meta.last_row_id);
     const autoRepIds = await suggestedRepIdsForCompany(env, {
-      city: body.city ?? null,
-      state: body.state ?? null,
-      zip: body.zip ?? null,
-      segment: body.segment ?? null,
-      customerType: body.customerType ?? null
+      city,
+      state: stateCode,
+      zip,
+      segment,
+      customerType
     });
     const explicitRepIds = Array.isArray(body.repIds) ? body.repIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
     const repIdsToAssign = Array.from(new Set([...autoRepIds, ...explicitRepIds]));
@@ -3242,7 +3275,7 @@ addRoute(
        WHERE id = ?12 AND deleted_at IS NULL`
     )
       .bind(
-        toProperCaseStored(body.name),
+        toProperCaseStored(body.name) || normalizedText(body.name),
         toProperCaseStored(body.address),
         toProperCaseStored(body.city),
         body.state ?? null,
