@@ -151,8 +151,14 @@
           </div>
           <label><span class="sr-only">Country</span><select name="country" id="createCompanyCountry" aria-label="Country"></select></label>
           <label><span class="sr-only">URL</span><input name="url" type="url" placeholder="URL" aria-label="URL" /></label>
-          <label><span class="sr-only">Segment</span><select name="segment" id="createCompanySegment" aria-label="Segment" required></select></label>
-          <label><span class="sr-only">Type</span><select name="customerType" id="createCompanyType" aria-label="Type" required></select></label>
+          <div>
+            <span class="tiny">Segment</span>
+            <div id="createCompanySegmentWrap" class="row wrap"></div>
+          </div>
+          <div>
+            <span class="tiny">Type</span>
+            <div id="createCompanyTypeWrap" class="row wrap"></div>
+          </div>
           <label class="full"><span class="sr-only">Notes</span><textarea name="notes" placeholder="Notes" aria-label="Notes"></textarea></label>
           <div class="row wrap full">
             <button type="submit">Create</button>

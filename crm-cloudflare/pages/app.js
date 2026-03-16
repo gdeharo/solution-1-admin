@@ -380,10 +380,10 @@ function statesForZipToken(value) {
 }
 
 function territoryRuleMatchesCompany(rule, company) {
-  const companySegment = String(company.segment || '').trim();
-  const companyType = String(company.customer_type || '').trim();
-  if (rule.segment && rule.segment !== companySegment) return false;
-  if (rule.customer_type && rule.customer_type !== companyType) return false;
+  const companySegments = splitStoredValues(company.segment);
+  const companyTypes = splitStoredValues(company.customer_type);
+  if (rule.segment && !companySegments.includes(String(rule.segment || '').trim())) return false;
+  if (rule.customer_type && !companyTypes.includes(String(rule.customer_type || '').trim())) return false;
 
   const ruleType = String(rule.territory_type || '');
   const companyState = String(company.state || '').trim().toUpperCase();
@@ -746,16 +746,12 @@ async function loadTheme() {
 }
 
 function renderCreateCompanySelects() {
-  const segmentSelect = document.getElementById('createCompanySegment');
-  const typeSelect = document.getElementById('createCompanyType');
-  if (!segmentSelect || !typeSelect) return;
+  const segmentWrap = document.getElementById('createCompanySegmentWrap');
+  const typeWrap = document.getElementById('createCompanyTypeWrap');
+  if (!segmentWrap || !typeWrap) return;
 
-  segmentSelect.innerHTML = `<option value="">Segment</option>${state.segments
-    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
-    .join('')}`;
-  typeSelect.innerHTML = `<option value="">Type</option>${state.customerTypes
-    .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
-    .join('')}`;
+  segmentWrap.innerHTML = valueCheckboxGroupHtml('segment', state.segments, []);
+  typeWrap.innerHTML = valueCheckboxGroupHtml('customerType', state.customerTypes, []);
 
   const countrySelect = document.getElementById('createCompanyCountry');
   if (countrySelect) {
@@ -915,6 +911,30 @@ function repOptions(selectedIds = []) {
     .join('');
 }
 
+function splitStoredValues(value) {
+  return String(value || '')
+    .split(',')
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+}
+
+function properCaseJoined(value) {
+  const values = splitStoredValues(value).map((item) => toProperCaseDisplay(item));
+  return values.length ? values.join(', ') : '-';
+}
+
+function valueCheckboxGroupHtml(name, values, selectedValues) {
+  const selected = new Set((selectedValues || []).map((item) => String(item || '').trim()).filter(Boolean));
+  return values
+    .map(
+      (value) => `<label class="state-chip">
+        <input type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(value)}" ${selected.has(value) ? 'checked' : ''} />
+        <span>${escapeHtml(value)}</span>
+      </label>`
+    )
+    .join('');
+}
+
 function toProperCaseDisplay(value) {
   return String(value || '')
     .toLowerCase()
@@ -953,25 +973,12 @@ function renderCompanyDetail() {
   const displayName = c.name ? toProperCaseDisplay(c.name) : '-';
   const displayAddress = c.address ? toProperCaseDisplay(c.address) : '-';
   const displayCity = c.city ? toProperCaseDisplay(c.city) : '-';
-  const displaySegment = c.segment ? toProperCaseDisplay(c.segment) : '-';
-  const displayCustomerType = c.customer_type ? toProperCaseDisplay(c.customer_type) : '-';
+  const displaySegment = properCaseJoined(c.segment);
+  const displayCustomerType = properCaseJoined(c.customer_type);
   const companyPhoneHref = telHref(c.main_phone || '', c.country || 'US');
   const mapsUrl = companyMapUrl(c);
-  const segmentOptions = [`<option value="">Segment</option>`]
-    .concat(
-      state.segments.map(
-        (name) => `<option value="${escapeHtml(name)}" ${c.segment === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
-      )
-    )
-    .join('');
-  const typeOptions = [`<option value="">Type</option>`]
-    .concat(
-      state.customerTypes.map(
-        (name) =>
-          `<option value="${escapeHtml(name)}" ${c.customer_type === name ? 'selected' : ''}>${escapeHtml(name)}</option>`
-      )
-    )
-    .join('');
+  const selectedSegments = splitStoredValues(c.segment);
+  const selectedTypes = splitStoredValues(c.customer_type);
 
   document.getElementById('companyEditForm').innerHTML = `
     <div class="company-top-row full">
@@ -1029,12 +1036,12 @@ function renderCompanyDetail() {
           }</label>
           <label><span class="sr-only">Segment</span>${
             isEditing
-              ? `<select name="segment" aria-label="Segment" ${readOnly}>${segmentOptions}</select>`
+              ? `<div class="row wrap">${valueCheckboxGroupHtml('segment', state.segments, selectedSegments)}</div>`
               : `<div class="readonly-value">${escapeHtml(displaySegment)}</div>`
           }</label>
           <label><span class="sr-only">Type</span>${
             isEditing
-              ? `<select name="customerType" aria-label="Type" ${readOnly}>${typeOptions}</select>`
+              ? `<div class="row wrap">${valueCheckboxGroupHtml('customerType', state.customerTypes, selectedTypes)}</div>`
               : `<div class="readonly-value">${escapeHtml(displayCustomerType)}</div>`
           }</label>
         </div>
@@ -1205,6 +1212,10 @@ function bindCompanyDetailEvents() {
       const country = String(fd.get('country') || 'US').toUpperCase();
       const mainPhoneError = validatePhoneByCountry(fd.get('mainPhone'), country, 'Main phone');
       if (mainPhoneError) throw new Error(mainPhoneError);
+      const selectedSegments = fd.getAll('segment').map((value) => String(value || '').trim()).filter(Boolean);
+      const selectedTypes = fd.getAll('customerType').map((value) => String(value || '').trim()).filter(Boolean);
+      if (!selectedSegments.length) throw new Error('Select at least one segment');
+      if (!selectedTypes.length) throw new Error('Select at least one type');
       await api(`/api/companies/${state.currentCompany.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -1216,8 +1227,8 @@ function bindCompanyDetailEvents() {
           country,
           zip: fd.get('zip'),
           url: fd.get('url'),
-          segment: fd.get('segment'),
-          customerType: fd.get('customerType'),
+          segment: selectedSegments,
+          customerType: selectedTypes,
           notes: fd.get('notes')
         })
       });
@@ -3139,12 +3150,14 @@ function openRepAccounts(repId) {
     if (!companyId || companies.has(companyId)) continue;
     for (const rule of includeRules) {
       if (!geographyOnlyMatch(rule, company)) continue;
-      const companySegment = String(company.segment || '-');
-      const companyType = String(company.customer_type || '-');
+      const companySegments = splitStoredValues(company.segment);
+      const companyTypes = splitStoredValues(company.customer_type);
+      const companySegment = companySegments.length ? companySegments.join(', ') : '-';
+      const companyType = companyTypes.length ? companyTypes.join(', ') : '-';
       const ruleSegment = String(rule.segment || 'All Segments');
       const ruleType = String(rule.customer_type || 'All Types');
-      const segmentMismatch = rule.segment && rule.segment !== company.segment;
-      const typeMismatch = rule.customer_type && rule.customer_type !== company.customer_type;
+      const segmentMismatch = rule.segment && !companySegments.includes(rule.segment);
+      const typeMismatch = rule.customer_type && !companyTypes.includes(rule.customer_type);
       if (!segmentMismatch && !typeMismatch) continue;
       mismatchRows.push({
         companyId,
@@ -3700,6 +3713,10 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
     const country = String(fd.get('country') || 'US').toUpperCase();
     const mainPhoneError = validatePhoneByCountry(fd.get('mainPhone'), country, 'Main phone');
     if (mainPhoneError) throw new Error(mainPhoneError);
+    const selectedSegments = fd.getAll('segment').map((value) => String(value || '').trim()).filter(Boolean);
+    const selectedTypes = fd.getAll('customerType').map((value) => String(value || '').trim()).filter(Boolean);
+    if (!selectedSegments.length) throw new Error('Select at least one segment');
+    if (!selectedTypes.length) throw new Error('Select at least one type');
     await api('/api/companies', {
       method: 'POST',
       body: JSON.stringify({
@@ -3711,8 +3728,8 @@ document.getElementById('createCompanyForm').onsubmit = async (event) => {
         country,
         zip: fd.get('zip'),
         url: fd.get('url'),
-        segment: fd.get('segment'),
-        customerType: fd.get('customerType'),
+        segment: selectedSegments,
+        customerType: selectedTypes,
         notes: fd.get('notes')
       })
     });

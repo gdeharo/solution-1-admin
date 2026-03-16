@@ -407,6 +407,48 @@ function toProperCaseStored(value: string | null | undefined): string | null {
     .replace(/(^|[\s\-/'"(])([a-z])/g, (_match, prefix: string, char: string) => `${prefix}${char.toUpperCase()}`);
 }
 
+function splitStoredValues(value: string | null | undefined): string[] {
+  return String(value || '')
+    .split(',')
+    .map((part) => normalizedText(part))
+    .filter(Boolean);
+}
+
+function uniqueSortedValues(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => normalizedText(value)).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function joinStoredValues(values: Array<string | null | undefined>): string | null {
+  const normalized = uniqueSortedValues(values);
+  return normalized.length ? normalized.join(', ') : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => normalizedText(String(item))).filter(Boolean);
+  const single = normalizedText(value as string | null | undefined);
+  return single ? [single] : [];
+}
+
+function csvFieldContainsValueSql(fieldExpr: string, valueExpr: string): string {
+  return `instr(',' || lower(replace(coalesce(${fieldExpr}, ''), ', ', ',')) || ',', ',' || lower(trim(coalesce(${valueExpr}, ''))) || ',') > 0`;
+}
+
+function csvFieldFilterSql(fieldExpr: string, valueExpr: string): string {
+  return `(${valueExpr} = '' OR ${csvFieldContainsValueSql(fieldExpr, valueExpr)})`;
+}
+
+async function rewriteCompanyStoredValues(env: Env, column: 'segment' | 'customer_type', currentName: string, nextName: string | null): Promise<void> {
+  const rows = await env.CRM_DB.prepare(`SELECT id, ${column} AS value FROM companies WHERE deleted_at IS NULL`).all<{ id: number; value: string | null }>();
+  for (const row of rows.results || []) {
+    const existing = splitStoredValues(row.value);
+    if (!existing.includes(currentName)) continue;
+    const rewritten = existing.map((value) => (value === currentName ? nextName : value)).filter(Boolean) as string[];
+    await env.CRM_DB.prepare(`UPDATE companies SET ${column} = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2`)
+      .bind(joinStoredValues(rewritten), row.id)
+      .run();
+  }
+}
+
 function companyMissingAddressSql(alias: string): string {
   return `(
     trim(coalesce(${alias}.address, '')) = ''
@@ -593,8 +635,8 @@ function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: n
           AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
               (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
       )
-      AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ${companyAlias}.segment)
-      AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ${companyAlias}.customer_type)
+      AND (t.segment IS NULL OR trim(t.segment) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.segment`, 't.segment')})
+      AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.customer_type`, 't.customer_type')})
   )`;
   const excludeClause = `NOT EXISTS (
     SELECT 1
@@ -615,8 +657,8 @@ function repTerritoryCompanyScopeClause(companyAlias: string, emailParamIndex: n
           AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
               (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
       )
-      AND (tx.segment IS NULL OR trim(tx.segment) = '' OR tx.segment = ${companyAlias}.segment)
-      AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR tx.customer_type = ${companyAlias}.customer_type)
+      AND (tx.segment IS NULL OR trim(tx.segment) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.segment`, 'tx.segment')})
+      AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.customer_type`, 'tx.customer_type')})
   )`;
   return `(${includeClause} AND ${excludeClause})`;
 }
@@ -644,8 +686,8 @@ function repTerritoryCompanyScopeClauseForRepId(companyAlias: string, repIdExpr:
           AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
               (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
       )
-      AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ${companyAlias}.segment)
-      AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ${companyAlias}.customer_type)
+      AND (t.segment IS NULL OR trim(t.segment) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.segment`, 't.segment')})
+      AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.customer_type`, 't.customer_type')})
   )`;
   const excludeClause = `NOT EXISTS (
     SELECT 1
@@ -663,29 +705,35 @@ function repTerritoryCompanyScopeClauseForRepId(companyAlias: string, repIdExpr:
           AND replace(replace(upper(trim(coalesce(${companyAlias}.zip, ''))), '-', ''), ' ', '') LIKE
               (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
       )
-      AND (tx.segment IS NULL OR trim(tx.segment) = '' OR tx.segment = ${companyAlias}.segment)
-      AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR tx.customer_type = ${companyAlias}.customer_type)
+      AND (tx.segment IS NULL OR trim(tx.segment) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.segment`, 'tx.segment')})
+      AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR ${csvFieldContainsValueSql(`${companyAlias}.customer_type`, 'tx.customer_type')})
   )`;
   return `(${includeClause} AND ${excludeClause})`;
 }
 
 async function suggestedRepIdsForCompany(
   env: Env,
-  data: { city?: string | null; state?: string | null; zip?: string | null; segment?: string | null; customerType?: string | null }
+  data: { city?: string | null; state?: string | null; zip?: string | null; segments?: string[] | null; customerTypes?: string[] | null }
 ): Promise<number[]> {
   const city = normalizedText(data.city);
   const state = normalizedText(data.state).toUpperCase();
   const zip = normalizeZip(data.zip);
-  const segment = normalizedText(data.segment);
-  const customerType = normalizedText(data.customerType);
+  const segments = uniqueSortedValues(data.segments || []);
+  const customerTypes = uniqueSortedValues(data.customerTypes || []);
   if (!city && !state && !zip) return [];
-
   const rows = await env.CRM_DB.prepare(
-    `SELECT DISTINCT r.id
+    `SELECT DISTINCT r.id,
+            t.segment,
+            t.customer_type,
+            t.territory_type,
+            t.state,
+            t.city,
+            t.zip_prefix,
+            t.zip_exact,
+            t.is_exclusion
      FROM rep_territories t
      JOIN reps r ON r.id = t.rep_id
      WHERE r.deleted_at IS NULL
-       AND t.is_exclusion = 0
        AND (
          (t.territory_type = 'state'
            AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?1, ''))))
@@ -703,33 +751,33 @@ async function suggestedRepIdsForCompany(
            AND replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', '') LIKE
                (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
        )
-       AND (t.segment IS NULL OR t.segment = ?4)
-       AND (t.customer_type IS NULL OR t.customer_type = ?5)
-       AND NOT EXISTS (
-         SELECT 1
-         FROM rep_territories tx
-         WHERE tx.rep_id = t.rep_id
-           AND tx.is_exclusion = 1
-           AND tx.territory_type IN ('zip_prefix', 'zip_exact')
-           AND (
-             (tx.territory_type = 'zip_exact'
-               AND replace(replace(upper(trim(coalesce(tx.zip_exact, ''))), '-', ''), ' ', '') =
-                   replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', ''))
-             OR
-             (tx.territory_type = 'zip_prefix'
-               AND trim(coalesce(tx.zip_prefix, '')) <> ''
-               AND replace(replace(upper(trim(coalesce(?3, ''))), '-', ''), ' ', '') LIKE
-                   (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
-           )
-           AND (tx.segment IS NULL OR tx.segment = ?4)
-           AND (tx.customer_type IS NULL OR tx.customer_type = ?5)
-       )
      ORDER BY r.id ASC`
   )
-    .bind(state || null, city || null, zip || null, segment || null, customerType || null)
-    .all<{ id: number }>();
+    .bind(state || null, city || null, zip || null)
+    .all<{
+      id: number;
+      segment: string | null;
+      customer_type: string | null;
+      territory_type: string;
+      state: string | null;
+      city: string | null;
+      zip_prefix: string | null;
+      zip_exact: string | null;
+      is_exclusion: number;
+    }>();
 
-  return (rows.results || []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0);
+  const allowed = new Set<number>();
+  const excluded = new Set<number>();
+  for (const row of rows.results || []) {
+    const segmentOk = !row.segment || segments.length === 0 ? !row.segment : segments.includes(row.segment);
+    const typeOk = !row.customer_type || customerTypes.length === 0 ? !row.customer_type : customerTypes.includes(row.customer_type);
+    if (!segmentOk || !typeOk) continue;
+    const repId = Number(row.id);
+    if (!Number.isFinite(repId) || repId <= 0) continue;
+    if (Number(row.is_exclusion)) excluded.add(repId);
+    else allowed.add(repId);
+  }
+  return Array.from(allowed).filter((id) => !excluded.has(id)).sort((a, b) => a - b);
 }
 
 async function deleteAttachmentsForEntity(env: Env, entityType: 'company' | 'customer' | 'interaction', entityId: number): Promise<number> {
@@ -786,65 +834,19 @@ async function ensureRepCanAccessInteraction(env: Env, user: AuthedUser, interac
 async function repCanCreateCompanyInTerritory(
   env: Env,
   user: AuthedUser,
-  data: { city?: string; state?: string; zip?: string; segment?: string; customerType?: string }
+  data: { city?: string; state?: string; zip?: string; segments?: string[]; customerTypes?: string[] }
 ): Promise<boolean> {
-  const normalizedZip = normalizeZip(data.zip);
-  const row = await env.CRM_DB.prepare(
-    `SELECT 1 AS ok
-     WHERE EXISTS (
-       SELECT 1
-       FROM rep_territories t
-       JOIN reps r ON r.id = t.rep_id
-       WHERE r.deleted_at IS NULL
-         AND r.email IS NOT NULL
-         AND lower(r.email) = lower(?1)
-         AND t.is_exclusion = 0
-         AND (
-           (t.territory_type = 'state'
-             AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?2, ''))))
-           OR
-           (t.territory_type = 'city_state'
-             AND upper(trim(coalesce(t.state, ''))) = upper(trim(coalesce(?2, '')))
-             AND upper(trim(coalesce(t.city, ''))) = upper(trim(coalesce(?3, ''))))
-           OR
-           (t.territory_type = 'zip_exact'
-             AND replace(replace(upper(trim(coalesce(t.zip_exact, ''))), '-', ''), ' ', '') =
-                 replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', ''))
-           OR
-           (t.territory_type = 'zip_prefix'
-             AND trim(coalesce(t.zip_prefix, '')) <> ''
-             AND replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', '') LIKE
-                 (replace(replace(upper(trim(coalesce(t.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
-         )
-         AND (t.segment IS NULL OR trim(t.segment) = '' OR t.segment = ?5)
-         AND (t.customer_type IS NULL OR trim(t.customer_type) = '' OR t.customer_type = ?6)
-     )
-     AND NOT EXISTS (
-       SELECT 1
-       FROM rep_territories tx
-       JOIN reps rx ON rx.id = tx.rep_id
-       WHERE rx.deleted_at IS NULL
-         AND rx.email IS NOT NULL
-         AND lower(rx.email) = lower(?1)
-         AND tx.is_exclusion = 1
-         AND tx.territory_type IN ('zip_prefix', 'zip_exact')
-         AND (
-           (tx.territory_type = 'zip_exact'
-             AND replace(replace(upper(trim(coalesce(tx.zip_exact, ''))), '-', ''), ' ', '') =
-                 replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', ''))
-           OR
-           (tx.territory_type = 'zip_prefix'
-             AND trim(coalesce(tx.zip_prefix, '')) <> ''
-             AND replace(replace(upper(trim(coalesce(?4, ''))), '-', ''), ' ', '') LIKE
-                 (replace(replace(upper(trim(coalesce(tx.zip_prefix, ''))), '-', ''), ' ', '') || '%'))
-         )
-         AND (tx.segment IS NULL OR trim(tx.segment) = '' OR tx.segment = ?5)
-         AND (tx.customer_type IS NULL OR trim(tx.customer_type) = '' OR tx.customer_type = ?6)
-     )`
-  )
-    .bind(user.email, data.state ?? null, data.city ?? null, normalizedZip || null, data.segment ?? null, data.customerType ?? null)
-    .first<{ ok: number }>();
-  return !!row;
+  const repIds = await suggestedRepIdsForCompany(env, {
+    city: data.city ?? null,
+    state: data.state ?? null,
+    zip: data.zip ?? null,
+    segments: data.segments ?? [],
+    customerTypes: data.customerTypes ?? []
+  });
+  const repRow = await env.CRM_DB.prepare(`SELECT id FROM reps WHERE deleted_at IS NULL AND email IS NOT NULL AND lower(email) = lower(?1) LIMIT 1`)
+    .bind(user.email)
+    .first<{ id: number }>();
+  return !!repRow?.id && repIds.includes(Number(repRow.id));
 }
 
 async function audit(env: Env, user: AuthedUser | null, action: string, entityType: string, entityId: string, details?: unknown) {
@@ -1169,9 +1171,9 @@ addRoute(
       .first<{ id: number; name: string }>();
     if (!current) return err('Segment not found', 404);
     const nextName = body.name.trim();
+    await rewriteCompanyStoredValues(env, 'segment', current.name, nextName);
     await env.CRM_DB.batch([
       env.CRM_DB.prepare(`UPDATE company_segments SET name = ?1 WHERE id = ?2`).bind(nextName, segmentId),
-      env.CRM_DB.prepare(`UPDATE companies SET segment = ?1 WHERE segment = ?2`).bind(nextName, current.name),
       env.CRM_DB.prepare(`UPDATE reps SET segment = ?1 WHERE segment = ?2`).bind(nextName, current.name)
     ]);
     await audit(env, user, 'update', 'company_segment', String(segmentId), { from: current.name, to: nextName });
@@ -1191,9 +1193,9 @@ addRoute(
       .bind(segmentId)
       .first<{ id: number; name: string }>();
     if (!current) return err('Segment not found', 404);
+    await rewriteCompanyStoredValues(env, 'segment', current.name, null);
     await env.CRM_DB.batch([
       env.CRM_DB.prepare(`DELETE FROM company_segments WHERE id = ?1`).bind(segmentId),
-      env.CRM_DB.prepare(`UPDATE companies SET segment = NULL WHERE segment = ?1`).bind(current.name),
       env.CRM_DB.prepare(`UPDATE reps SET segment = NULL WHERE segment = ?1`).bind(current.name),
       env.CRM_DB.prepare(`UPDATE rep_territories SET segment = NULL WHERE segment = ?1`).bind(current.name)
     ]);
@@ -1230,9 +1232,9 @@ addRoute(
       .first<{ id: number; name: string }>();
     if (!current) return err('Type not found', 404);
     const nextName = body.name.trim();
+    await rewriteCompanyStoredValues(env, 'customer_type', current.name, nextName);
     await env.CRM_DB.batch([
       env.CRM_DB.prepare(`UPDATE company_types SET name = ?1 WHERE id = ?2`).bind(nextName, typeId),
-      env.CRM_DB.prepare(`UPDATE companies SET customer_type = ?1 WHERE customer_type = ?2`).bind(nextName, current.name),
       env.CRM_DB.prepare(`UPDATE reps SET customer_type = ?1 WHERE customer_type = ?2`).bind(nextName, current.name)
     ]);
     await audit(env, user, 'update', 'company_type', String(typeId), { from: current.name, to: nextName });
@@ -1252,9 +1254,9 @@ addRoute(
       .bind(typeId)
       .first<{ id: number; name: string }>();
     if (!current) return err('Type not found', 404);
+    await rewriteCompanyStoredValues(env, 'customer_type', current.name, null);
     await env.CRM_DB.batch([
       env.CRM_DB.prepare(`DELETE FROM company_types WHERE id = ?1`).bind(typeId),
-      env.CRM_DB.prepare(`UPDATE companies SET customer_type = NULL WHERE customer_type = ?1`).bind(current.name),
       env.CRM_DB.prepare(`UPDATE reps SET customer_type = NULL WHERE customer_type = ?1`).bind(current.name),
       env.CRM_DB.prepare(`UPDATE rep_territories SET customer_type = NULL WHERE customer_type = ?1`).bind(current.name)
     ]);
@@ -1696,8 +1698,8 @@ addRoute(
       zip?: string;
       mainPhone?: string;
       url?: string;
-      segment?: string;
-      customerType?: string;
+      segment?: string | string[];
+      customerType?: string | string[];
       notes?: string;
       repIds?: number[];
     }>(request);
@@ -1707,8 +1709,10 @@ addRoute(
     const city = normalizedText(body?.city);
     const stateCode = normalizedText(body?.state).toUpperCase();
     const zip = normalizedText(body?.zip);
-    const segment = normalizedText(body?.segment);
-    const customerType = normalizedText(body?.customerType);
+    const segments = uniqueSortedValues(asStringArray(body?.segment));
+    const customerTypes = uniqueSortedValues(asStringArray(body?.customerType));
+    const segment = joinStoredValues(segments);
+    const customerType = joinStoredValues(customerTypes);
 
     if (!name) return err('Company name is required');
     if (!address) return err('Street address is required');
@@ -1717,15 +1721,21 @@ addRoute(
     if (!zip) return err('Postal code is required');
     if (!segment) return err('Segment is required');
     if (!customerType) return err('Type is required');
-    const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
-    if (metadataError) return err(metadataError);
+    for (const segmentValue of segments) {
+      const metadataError = await ensureSegmentAndTypeExist(env, segmentValue, null);
+      if (metadataError) return err(metadataError);
+    }
+    for (const typeValue of customerTypes) {
+      const metadataError = await ensureSegmentAndTypeExist(env, null, typeValue);
+      if (metadataError) return err(metadataError);
+    }
     if (user.role === 'rep') {
       const inScope = await repCanCreateCompanyInTerritory(env, user, {
         city,
         state: stateCode,
         zip,
-        segment,
-        customerType
+        segments,
+        customerTypes
       });
       if (!inScope) {
         return err('This company is outside your assigned territory (state/city/zip and segment/type).', 403);
@@ -1756,8 +1766,8 @@ addRoute(
       city,
       state: stateCode,
       zip,
-      segment,
-      customerType
+      segments,
+      customerTypes
     });
     const explicitRepIds = Array.isArray(body.repIds) ? body.repIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0) : [];
     const repIdsToAssign = Array.from(new Set([...autoRepIds, ...explicitRepIds]));
@@ -1849,8 +1859,8 @@ addRoute(
       city: (company as any).city ?? null,
       state: (company as any).state ?? null,
       zip: (company as any).zip ?? null,
-      segment: (company as any).segment ?? null,
-      customerType: (company as any).customer_type ?? null
+      segments: splitStoredValues((company as any).segment ?? null),
+      customerTypes: splitStoredValues((company as any).customer_type ?? null)
     });
 
     const assignedRepsMap = new Map<number, { id: number; full_name: string }>();
@@ -3228,7 +3238,13 @@ addRoute(
     const zip = normalizeZip(url.searchParams.get('zip') || '');
     const segment = normalizedText(url.searchParams.get('segment'));
     const customerType = normalizedText(url.searchParams.get('customerType'));
-    const repIds = await suggestedRepIdsForCompany(env, { city, state, zip, segment, customerType });
+    const repIds = await suggestedRepIdsForCompany(env, {
+      city,
+      state,
+      zip,
+      segments: segment ? [segment] : [],
+      customerTypes: customerType ? [customerType] : []
+    });
     if (repIds.length === 0) return json({ suggestedReps: [] });
     const placeholders = repIds.map((_id, index) => `?${index + 1}`).join(', ');
     const reps = await env.CRM_DB.prepare(
@@ -3258,15 +3274,35 @@ addRoute(
       zip?: string;
       mainPhone?: string;
       url?: string;
-      segment?: string;
-      customerType?: string;
+      segment?: string | string[];
+      customerType?: string | string[];
       notes?: string;
     }>(request);
     if (!companyId || !body?.name) return err('company id and name are required');
     const repAccessError = await ensureRepCanAccessCompany(env, user, companyId);
     if (repAccessError) return repAccessError;
-    const metadataError = await ensureSegmentAndTypeExist(env, body.segment, body.customerType);
-    if (metadataError) return err(metadataError);
+    const segments = uniqueSortedValues(asStringArray(body?.segment));
+    const customerTypes = uniqueSortedValues(asStringArray(body?.customerType));
+    const name = normalizedText(body?.name);
+    const address = normalizedText(body?.address);
+    const city = normalizedText(body?.city);
+    const stateCode = normalizedText(body?.state).toUpperCase();
+    const zip = normalizedText(body?.zip);
+    if (!name) return err('Company name is required');
+    if (!address) return err('Street address is required');
+    if (!city) return err('City is required');
+    if (!stateCode) return err('State/Province is required');
+    if (!zip) return err('Postal code is required');
+    if (segments.length === 0) return err('Segment is required');
+    if (customerTypes.length === 0) return err('Type is required');
+    for (const segmentValue of segments) {
+      const metadataError = await ensureSegmentAndTypeExist(env, segmentValue, null);
+      if (metadataError) return err(metadataError);
+    }
+    for (const typeValue of customerTypes) {
+      const metadataError = await ensureSegmentAndTypeExist(env, null, typeValue);
+      if (metadataError) return err(metadataError);
+    }
 
     await env.CRM_DB.prepare(
       `UPDATE companies
@@ -3275,16 +3311,16 @@ addRoute(
        WHERE id = ?12 AND deleted_at IS NULL`
     )
       .bind(
-        toProperCaseStored(body.name) || normalizedText(body.name),
-        toProperCaseStored(body.address),
-        toProperCaseStored(body.city),
-        body.state ?? null,
+        toProperCaseStored(name) || name,
+        toProperCaseStored(address),
+        toProperCaseStored(city),
+        stateCode,
         body.country ?? 'US',
-        body.zip ?? null,
+        zip,
         body.mainPhone ?? null,
         body.url ?? null,
-        body.segment ?? null,
-        body.customerType ?? null,
+        joinStoredValues(segments),
+        joinStoredValues(customerTypes),
         body.notes ?? null,
         companyId
       )
@@ -3763,7 +3799,7 @@ addRoute(
 
     for (const rep of reps) {
       if (!rep.email) continue;
-      const baseFilters = `AND (?4 = '' OR c.segment = ?4) AND (?5 = '' OR c.customer_type = ?5)`;
+      const baseFilters = `AND ${csvFieldFilterSql('c.segment', '?4')} AND ${csvFieldFilterSql('c.customer_type', '?5')}`;
       const territoryScope = repTerritoryCompanyScopeClauseForRepId('c', '?6');
 
       const lastWeek = await env.CRM_DB.prepare(
@@ -3825,8 +3861,8 @@ addRoute(
            AND i.next_action_at IS NOT NULL
            AND date(i.next_action_at) >= date(?1)
            AND date(i.next_action_at) <= date(?2)
-           AND (?3 = '' OR c.segment = ?3)
-           AND (?4 = '' OR c.customer_type = ?4)
+           AND ${csvFieldFilterSql('c.segment', '?3')}
+           AND ${csvFieldFilterSql('c.customer_type', '?4')}
            AND ${repTerritoryCompanyScopeClauseForRepId('c', '?5')}
            AND date(i.next_action_at) = (
              SELECT MIN(date(ix.next_action_at))
