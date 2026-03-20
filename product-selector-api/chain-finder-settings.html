@@ -152,7 +152,7 @@
       <summary>Connection (advanced)</summary>
       <div class="card connection-card">
         <div class="row">
-          <input id="apiBase" value="https://api.rtf-cloud.com" />
+          <input id="apiBase" value="https://chain-api.rtf-cloud.com" />
           <input id="token" placeholder="Admin token" />
           <button id="saveConn">Save Connection</button>
           <button id="refreshAll" class="secondary">Refresh All</button>
@@ -491,8 +491,8 @@
     function restorePanelAccess() {
       try {
         const raw = localStorage.getItem(HUB_PANEL_SESSION_KEY);
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
+        const parsed = raw ? JSON.parse(raw) : panelSessionFromUrl();
+        if (!parsed) return;
         const panelId = String(parsed.panelId || "").trim();
         const panelRole = normalizePanelRole(parsed.panelRole);
         const hubRole = String(parsed.hubRole || "").trim().toLowerCase();
@@ -502,7 +502,30 @@
           hubRole,
           fromHub: true,
         };
+        localStorage.setItem(HUB_PANEL_SESSION_KEY, JSON.stringify({
+          username: String(parsed.username || parsed.hubUser || "").trim(),
+          panelId,
+          panelRole: panelRole || "none",
+          hubRole,
+        }));
       } catch {}
+    }
+
+    function panelSessionFromUrl() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const panelId = String(params.get("panelId") || "").trim();
+        if (!panelId) return null;
+        return {
+          username: String(params.get("hubUser") || "").trim(),
+          hubUser: String(params.get("hubUser") || "").trim(),
+          panelId,
+          panelRole: String(params.get("panelRole") || "").trim(),
+          hubRole: String(params.get("hubRole") || "").trim(),
+        };
+      } catch {
+        return null;
+      }
     }
 
     function normalizePanelRole(value) {

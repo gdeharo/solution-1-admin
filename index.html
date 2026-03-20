@@ -347,15 +347,30 @@
 
     function openPanel(url, panelId) {
       if (!url || url === "#") return;
-      localStorage.setItem(STORAGE_PANEL_SESSION_KEY, JSON.stringify({
+      const panelSession = {
         username: sessionUser.username,
         hubRole: sessionUser.global_role,
         panelId,
         panelRole: getPanelRole(sessionUser, panelId),
-      }));
-      window.location.href = url;
+      };
+      localStorage.setItem(STORAGE_PANEL_SESSION_KEY, JSON.stringify(panelSession));
+      const targetUrl = withPanelSessionParams(url, panelSession);
+      window.location.href = targetUrl;
     }
     window.openPanel = openPanel;
+
+    function withPanelSessionParams(url, panelSession) {
+      try {
+        const target = new URL(url, window.location.href);
+        target.searchParams.set("panelId", String(panelSession.panelId || ""));
+        target.searchParams.set("panelRole", String(panelSession.panelRole || ""));
+        target.searchParams.set("hubRole", String(panelSession.hubRole || ""));
+        target.searchParams.set("hubUser", String(panelSession.username || ""));
+        return target.toString();
+      } catch {
+        return url;
+      }
+    }
 
     async function loadUsers() {
       const data = accessMode === "owner"
