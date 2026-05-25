@@ -1808,8 +1808,16 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
 
   form.onsubmit = async (event) => {
     event.preventDefault();
+    if (form.dataset.submitting === '1') return;
     const fd = new FormData(form);
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalLabel = submitBtn?.textContent || 'Create Interaction';
     try {
+      form.dataset.submitting = '1';
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
       const created = await api('/api/interactions', {
         method: 'POST',
         body: JSON.stringify({
@@ -1838,9 +1846,15 @@ async function openInteractionCreate(companyId, draft = null, selectedContactId 
         await api('/api/files/upload', { method: 'POST', body: formData, headers: {} });
       }
       await openInteractionDetail(created.id);
-      showToast('Interaction created');
+      showToast(created.duplicatePrevented ? 'Existing interaction reopened' : 'Interaction created');
     } catch (error) {
       showToast(error.message, true);
+    } finally {
+      delete form.dataset.submitting;
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+      }
     }
   };
 

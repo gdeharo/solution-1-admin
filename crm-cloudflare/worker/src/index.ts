@@ -2211,6 +2211,43 @@ addRoute(
     const repAccessError = await ensureRepCanAccessCompany(env, user, body.companyId);
     if (repAccessError) return repAccessError;
 
+    const normalizedInteractionType = normalizedText(body.interactionType) || null;
+    const normalizedMeetingNotes = normalizedText(body.meetingNotes);
+    const normalizedInteractionAt = normalizedText(body.interactionAt) || new Date().toISOString();
+    const normalizedNextAction = normalizedText(body.nextAction) || null;
+    const normalizedNextActionAt = normalizedText(body.nextActionAt) || null;
+
+    const existing = await env.CRM_DB.prepare(
+      `SELECT id
+       FROM interactions
+       WHERE deleted_at IS NULL
+         AND company_id = ?1
+         AND coalesce(customer_id, 0) = coalesce(?2, 0)
+         AND created_by_user_id = ?3
+         AND coalesce(interaction_type, '') = coalesce(?4, '')
+         AND trim(coalesce(meeting_notes, '')) = trim(coalesce(?5, ''))
+         AND coalesce(interaction_at, '') = coalesce(?6, '')
+         AND coalesce(next_action, '') = coalesce(?7, '')
+         AND coalesce(next_action_at, '') = coalesce(?8, '')
+         AND datetime(created_at) >= datetime('now', '-10 minutes')
+       ORDER BY id DESC
+       LIMIT 1`
+    )
+      .bind(
+        body.companyId,
+        body.customerId ?? null,
+        user.id,
+        normalizedInteractionType,
+        normalizedMeetingNotes,
+        normalizedInteractionAt,
+        normalizedNextAction,
+        normalizedNextActionAt
+      )
+      .first<{ id: number }>();
+    if (existing?.id) {
+      return json({ id: Number(existing.id), duplicatePrevented: true });
+    }
+
     const result = await env.CRM_DB.prepare(
       `INSERT INTO interactions (company_id, customer_id, rep_id, interaction_type, meeting_notes, interaction_at, next_action, next_action_at, created_by_user_id)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
@@ -2219,11 +2256,11 @@ addRoute(
         body.companyId,
         body.customerId ?? null,
         body.repId ?? null,
-        body.interactionType ?? null,
-        body.meetingNotes,
-        body.interactionAt ?? new Date().toISOString(),
-        body.nextAction ?? null,
-        body.nextActionAt ?? null,
+        normalizedInteractionType,
+        normalizedMeetingNotes,
+        normalizedInteractionAt,
+        normalizedNextAction,
+        normalizedNextActionAt,
         user.id
       )
       .run();
@@ -2242,7 +2279,7 @@ addRoute(
     }
 
     await audit(env, user, 'create', 'interaction', String(interactionId), body);
-    return json({ id: interactionId }, 201);
+    return json({ id: interactionId, duplicatePrevented: false }, 201);
   }) as any
 );
 
