@@ -65,6 +65,7 @@ const els = {
   pageHint: document.getElementById('pageHint'),
   headerLogo: document.getElementById('headerLogo'),
   backBtn: document.getElementById('backBtn'),
+  homeBtn: document.getElementById('homeBtn'),
   weeklyReportBtn: document.getElementById('weeklyReportBtn'),
   manageRepsBtn: document.getElementById('manageRepsBtn'),
   feedbackBtn: document.getElementById('feedbackBtn'),
@@ -655,6 +656,7 @@ function setView(viewId, hint, pushHistory = true) {
   applyHeaderBranding();
   els.pageHint.textContent = hint;
   els.backBtn.classList.toggle('hidden', viewId === 'companyListView' || viewId === 'authView');
+  els.homeBtn.classList.toggle('hidden', viewId === 'companyListView' || viewId === 'authView');
 }
 
 function companyLogoUrl() {
@@ -3649,6 +3651,15 @@ els.backBtn.onclick = async () => {
     return;
   }
   setView(previous, els.pageHint.textContent, false);
+};
+
+els.homeBtn.onclick = async () => {
+  state.history = [];
+  state.companyEditMode = false;
+  state.contactEditMode = false;
+  state.currentContactId = null;
+  await loadCompanies();
+  setView('companyListView', 'Company list', false);
 };
 
 els.manageRepsBtn.onclick = async () => {
