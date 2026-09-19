@@ -819,6 +819,10 @@
           const sel = document.getElementById(fieldInputId("bar-lengths", field));
           if (sel) sel.addEventListener("change", () => handleBarLookupChange(field, sel));
         }
+        const pitchEl = document.getElementById(fieldInputId("bar-lengths", "Pitch"));
+        if (pitchEl) {
+          pitchEl.addEventListener("change", () => handleKmcLookupChange("Pitch", pitchEl, "bar-lengths"));
+        }
         const modelEl = document.getElementById(fieldInputId("bar-lengths", "Chainsaw Model"));
         if (modelEl) modelEl.addEventListener("change", applyBarModelDefaultsFromSelection);
       }
@@ -1351,7 +1355,7 @@
             items.unshift({ value: prev, sort_order: -1, active: 1 });
           }
 
-          const addNew = slug === "kmc-chains";
+          const addNew = slug === "kmc-chains" || (slug === "bar-lengths" && field === "Pitch");
           select.innerHTML =
             `<option value="">Select ${escapeHtml(field)}</option>` +
             items.map((i) => `<option value="${escapeHtml(i.value)}">${escapeHtml(i.value)}</option>`).join("") +
@@ -1362,20 +1366,20 @@
       }
     }
 
-    async function handleKmcLookupChange(field, select) {
+    async function handleKmcLookupChange(field, select, slug = "kmc-chains") {
       if (!select || select.value !== "__add_new__") {
-        renderEntityTable("kmc-chains");
+        renderEntityTable(slug);
         return;
       }
       if (!assertCanWrite("add lookup values")) {
         select.value = "";
-        renderEntityTable("kmc-chains");
+        renderEntityTable(slug);
         return;
       }
       const newValue = await promptLookupValue(field);
       if (!newValue || !newValue.trim()) {
         select.value = "";
-        renderEntityTable("kmc-chains");
+        renderEntityTable(slug);
         return;
       }
 
@@ -1392,14 +1396,14 @@
           sort_order: maxSort + 10,
         });
         await loadLookups();
-        const target = document.getElementById(fieldInputId("kmc-chains", field));
-        if (target) target.value = cleanValue;
+        const target = document.getElementById(fieldInputId(slug, field));
+        if (target) setSelectValueWithOption(target, cleanValue);
         setStatus(`Added new lookup value for ${field}.`, true);
       } catch (err) {
         setStatus(err.message, false);
         select.value = "";
       }
-      renderEntityTable("kmc-chains");
+      renderEntityTable(slug);
     }
 
     function populateBarLengthLookupOptions() {
