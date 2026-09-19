@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-02-22-d1-runtime-v2";
+const WORKER_BUILD = "2026-09-19-search-location-v1";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -272,8 +272,7 @@ export default {
             barLength,
             matchKeys: uniqueKeys,
             chains: uniqueResults,
-            userAgent: request.headers.get("user-agent") || "",
-            clientIp: request.headers.get("cf-connecting-ip") || "",
+            ...getSearchRequestMetadata(request),
           });
           payload.logged = true;
         }
@@ -300,8 +299,7 @@ export default {
           barLength,
           matchKeys,
           chains,
-          userAgent: request.headers.get("user-agent") || "",
-          clientIp: request.headers.get("cf-connecting-ip") || "",
+          ...getSearchRequestMetadata(request),
         });
 
         return json({ ok: true });
@@ -467,15 +465,27 @@ export default {
 
         if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "search-summary" && request.method === "GET") {
           await ensureD1CatalogTables(env);
+          await backfillSearchSourceIds(env);
           const days = Math.max(1, Number(url.searchParams.get("days") || 30));
           const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
           const totals = await env.DB.prepare(
             `SELECT
                 COUNT(*) AS searches,
                 SUM(CASE WHEN match_count > 0 THEN 1 ELSE 0 END) AS successful_searches,
-                SUM(match_count) AS total_matches
+                SUM(match_count) AS total_matches,
+                COUNT(DISTINCT NULLIF(source_id, '')) AS unique_sources
              FROM search_log
              WHERE timestamp_iso >= ?`
+          ).bind(sinceIso).first();
+          const repeated = await env.DB.prepare(
+            `SELECT COUNT(*) AS repeated_sources
+             FROM (
+               SELECT source_id
+               FROM search_log
+               WHERE timestamp_iso >= ? AND source_id IS NOT NULL AND source_id <> ''
+               GROUP BY source_id
+               HAVING COUNT(*) > 1
+             )`
           ).bind(sinceIso).first();
           return json({
             ok: true,
@@ -484,6 +494,8 @@ export default {
               searches: Number((totals && totals.searches) || 0),
               successful_searches: Number((totals && totals.successful_searches) || 0),
               total_matches: Number((totals && totals.total_matches) || 0),
+              unique_sources: Number((totals && totals.unique_sources) || 0),
+              repeated_sources: Number((repeated && repeated.repeated_sources) || 0),
             },
           });
         }
@@ -515,8 +527,42 @@ export default {
           });
         }
 
+        if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "search-sources" && request.method === "GET") {
+          await ensureD1CatalogTables(env);
+          await backfillSearchSourceIds(env);
+          const days = Math.max(1, Number(url.searchParams.get("days") || 30));
+          const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 20)));
+          const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+          const rows = await env.DB.prepare(
+            `SELECT source_id, city, region, country,
+                    COUNT(*) AS searches,
+                    COUNT(DISTINCT brand || '|' || model || '|' || bar_length) AS distinct_searches,
+                    MAX(timestamp_iso) AS last_seen
+             FROM search_log
+             WHERE timestamp_iso >= ? AND source_id IS NOT NULL AND source_id <> ''
+             GROUP BY source_id, city, region, country
+             ORDER BY searches DESC, last_seen DESC
+             LIMIT ?`
+          ).bind(sinceIso, limit).all();
+          return json({
+            ok: true,
+            days,
+            limit,
+            rows: (rows.results || []).map((r) => ({
+              source: formatSearchSourceLabel(r.source_id),
+              city: toStr(r.city),
+              region: toStr(r.region),
+              country: toStr(r.country),
+              searches: Number(r.searches || 0),
+              distinct_searches: Number(r.distinct_searches || 0),
+              last_seen: toStr(r.last_seen),
+            })),
+          });
+        }
+
         if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "search-log" && request.method === "GET") {
           await ensureD1CatalogTables(env);
+          await backfillSearchSourceIds(env);
           const days = Math.max(1, Number(url.searchParams.get("days") || 30));
           const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") || 100)));
           const brand = toStr(url.searchParams.get("brand")).trim();
@@ -542,7 +588,8 @@ export default {
 
           const rows = await env.DB.prepare(
             `SELECT id, timestamp_iso, brand, model, bar_length, match_count,
-                    matched_part_references, matched_urls, chain_type_codes, drive_links
+                    matched_part_references, matched_urls, chain_type_codes, drive_links,
+                    source_id, city, region, country
              FROM search_log
              WHERE ${where.join(" AND ")}
              ORDER BY timestamp_iso DESC, id DESC
@@ -565,6 +612,10 @@ export default {
               matched_urls: toStr(r.matched_urls),
               chain_type_codes: toStr(r.chain_type_codes),
               drive_links: toStr(r.drive_links),
+              source: formatSearchSourceLabel(r.source_id),
+              city: toStr(r.city),
+              region: toStr(r.region),
+              country: toStr(r.country),
             })),
           });
         }
@@ -986,6 +1037,7 @@ async function parseJson(request) {
 async function appendSearchLog(env, data) {
   await ensureD1CatalogTables(env);
   const nowIso = new Date().toISOString();
+  const sourceId = await hashSearchSource(env, data.clientIp);
   const matchKeys = (data.matchKeys || []).map((k) => `${toStr(k.pitch)}/${toStr(k.gauge)}:${toStr(k.driveLinks)}`).join(" | ");
   const chainTypeCodes = (data.matchKeys || []).map((k) => toStr(k.chainTypeCode)).filter(Boolean).join(",");
   const driveLinks = (data.matchKeys || []).map((k) => toStr(k.driveLinks)).filter(Boolean).join(",");
@@ -1000,8 +1052,9 @@ async function appendSearchLog(env, data) {
   await env.DB.prepare(
     `INSERT INTO search_log (
       timestamp_iso, brand, model, bar_length, match_keys, chain_type_codes, drive_links,
-      match_count, matched_part_references, matched_urls, client_ip, user_agent
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      match_count, matched_part_references, matched_urls, client_ip, user_agent,
+      source_id, city, region, country, timezone
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       nowIso,
@@ -1014,10 +1067,67 @@ async function appendSearchLog(env, data) {
       matchCount,
       matchedPartRefs,
       matchedUrls,
-      toStr(data.clientIp),
-      toStr(data.userAgent)
+      "",
+      toStr(data.userAgent),
+      sourceId,
+      toStr(data.city),
+      toStr(data.region),
+      toStr(data.country),
+      toStr(data.timezone)
     )
     .run();
+}
+
+function getSearchRequestMetadata(request) {
+  const cf = request && request.cf ? request.cf : {};
+  return {
+    userAgent: request.headers.get("user-agent") || "",
+    clientIp: request.headers.get("cf-connecting-ip") || "",
+    city: toStr(cf.city),
+    region: toStr(cf.region),
+    country: toStr(cf.country),
+    timezone: toStr(cf.timezone),
+  };
+}
+
+async function hashSearchSource(env, clientIp) {
+  const ip = toStr(clientIp).trim();
+  const secret = toStr(env.SEARCH_LOG_HASH_SALT || env.ADMIN_TOKEN).trim();
+  if (!ip || !secret) return "";
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(ip));
+  return Array.from(new Uint8Array(signature))
+    .slice(0, 8)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function backfillSearchSourceIds(env) {
+  const rows = await env.DB.prepare(
+    `SELECT id, client_ip
+     FROM search_log
+     WHERE (source_id IS NULL OR source_id = '') AND client_ip IS NOT NULL AND client_ip <> ''
+     LIMIT 500`
+  ).all();
+  for (const row of rows.results || []) {
+    const sourceId = await hashSearchSource(env, row.client_ip);
+    if (!sourceId) continue;
+    await env.DB.prepare(
+      `UPDATE search_log SET source_id = ?, client_ip = '' WHERE id = ?`
+    ).bind(sourceId, Number(row.id || 0)).run();
+  }
+}
+
+function formatSearchSourceLabel(sourceId) {
+  const value = toStr(sourceId).trim().toUpperCase();
+  return value ? `Source ${value.slice(0, 8)}` : "Unknown";
 }
 
 async function ensureLogHeader(env, tab) {
@@ -1222,15 +1332,46 @@ async function ensureD1CatalogTables(env) {
       matched_urls TEXT,
       client_ip TEXT,
       user_agent TEXT,
+      source_id TEXT,
+      city TEXT,
+      region TEXT,
+      country TEXT,
+      timezone TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     )`
   ).run();
+  await ensureD1Columns(env, "search_log", {
+    source_id: "TEXT",
+    city: "TEXT",
+    region: "TEXT",
+    country: "TEXT",
+    timezone: "TEXT",
+  });
   await env.DB.prepare(
     `CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log(created_at DESC)`
   ).run();
   await env.DB.prepare(
     `CREATE INDEX IF NOT EXISTS idx_search_log_brand_model_bar ON search_log(brand, model, bar_length)`
   ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_search_log_source ON search_log(source_id, created_at DESC)`
+  ).run();
+}
+
+async function ensureD1Columns(env, table, columns) {
+  const tableName = toStr(table).trim();
+  if (!/^[a-z_][a-z0-9_]*$/i.test(tableName)) throw new Error("Invalid D1 table name");
+  const existing = await env.DB.prepare(`PRAGMA table_info(${tableName})`).all();
+  const existingNames = new Set((existing.results || []).map((row) => toStr(row.name).toLowerCase()));
+  for (const [name, definition] of Object.entries(columns || {})) {
+    if (existingNames.has(name.toLowerCase())) continue;
+    if (!/^[a-z_][a-z0-9_]*$/i.test(name)) throw new Error("Invalid D1 column name");
+    try {
+      await env.DB.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${name} ${definition}`).run();
+    } catch (err) {
+      if (!toStr(err && err.message).toLowerCase().includes("duplicate column")) throw err;
+    }
+  }
 }
 
 async function getD1CatalogCounts(env) {

@@ -58,7 +58,7 @@
       gap: 8px;
       margin-top: 10px;
     }
-    .analytics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0 14px; }
+    .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 10px 0 14px; }
     .analytics-card { border: 1px solid #dbe7ff; border-radius: 8px; padding: 10px; background: #f4f8ff; }
     .analytics-card .label { font-size: 12px; color: #445; }
     .analytics-card .value { font-size: 22px; font-weight: 700; color: #146ff8; margin-top: 4px; }
@@ -224,9 +224,14 @@
         <div class="analytics-card"><div class="label">Searches</div><div class="value" id="sumSearches">0</div></div>
         <div class="analytics-card"><div class="label">Successful</div><div class="value" id="sumSuccessful">0</div></div>
         <div class="analytics-card"><div class="label">Total Matches</div><div class="value" id="sumMatches">0</div></div>
+        <div class="analytics-card"><div class="label">Likely Unique Sources</div><div class="value" id="sumUniqueSources">0</div></div>
+        <div class="analytics-card"><div class="label">Repeated Sources</div><div class="value" id="sumRepeatedSources">0</div></div>
       </div>
       <h3>Top Searches</h3>
       <table id="table-top-searches"></table>
+      <h3 style="margin-top:14px;">Source Activity</h3>
+      <p class="muted">Anonymous source labels group searches from the same IP without displaying or retaining the raw address.</p>
+      <table id="table-search-sources"></table>
       <h3 style="margin-top:14px;">Recent Searches</h3>
       <table id="table-search-log"></table>
     </section>
@@ -403,7 +408,10 @@
       sumSearches: document.getElementById("sumSearches"),
       sumSuccessful: document.getElementById("sumSuccessful"),
       sumMatches: document.getElementById("sumMatches"),
+      sumUniqueSources: document.getElementById("sumUniqueSources"),
+      sumRepeatedSources: document.getElementById("sumRepeatedSources"),
       tableTopSearches: document.getElementById("table-top-searches"),
+      tableSearchSources: document.getElementById("table-search-sources"),
       tableSearchLog: document.getElementById("table-search-log"),
     };
 
@@ -1014,6 +1022,7 @@
 
       const summary = await api(`/admin/analytics/search-summary?days=${days}`, "GET");
       const top = await api(`/admin/analytics/top-searches?days=${days}&limit=10`, "GET");
+      const sources = await api(`/admin/analytics/search-sources?days=${days}&limit=20`, "GET");
       const rows = await api(
         `/admin/analytics/search-log?days=${days}&limit=${limit}` +
           `&brand=${encodeURIComponent(brand)}` +
@@ -1026,6 +1035,8 @@
       ui.sumSearches.textContent = String(Number(s.searches || 0));
       ui.sumSuccessful.textContent = String(Number(s.successful_searches || 0));
       ui.sumMatches.textContent = String(Number(s.total_matches || 0));
+      ui.sumUniqueSources.textContent = String(Number(s.unique_sources || 0));
+      ui.sumRepeatedSources.textContent = String(Number(s.repeated_sources || 0));
 
       const topRows = Array.isArray(top.rows) ? top.rows : [];
       const topHead = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Searches</th><th>Total Matches</th></tr>";
@@ -1038,10 +1049,23 @@
       </tr>`).join("");
       ui.tableTopSearches.innerHTML = topHead + topBody;
 
+      const sourceRows = Array.isArray(sources.rows) ? sources.rows : [];
+      const sourceHead = "<tr><th>Anonymous Source</th><th>General Location</th><th>Searches</th><th>Distinct Searches</th><th>Last Seen</th></tr>";
+      const sourceBody = sourceRows.map((r) => `<tr>
+        <td>${escapeHtml(r.source)}</td>
+        <td>${escapeHtml(formatSearchLocation(r))}</td>
+        <td>${escapeHtml(r.searches)}</td>
+        <td>${escapeHtml(r.distinct_searches)}</td>
+        <td>${escapeHtml(formatIsoLocal(r.last_seen))}</td>
+      </tr>`).join("");
+      ui.tableSearchSources.innerHTML = sourceHead + sourceBody;
+
       const logRows = Array.isArray(rows.rows) ? rows.rows : [];
-      const logHead = "<tr><th>When</th><th>Brand</th><th>Model</th><th>Bar Length</th><th>Matches</th><th>Part References</th></tr>";
+      const logHead = "<tr><th>When</th><th>Source</th><th>Location</th><th>Brand</th><th>Model</th><th>Bar Length</th><th>Matches</th><th>Part References</th></tr>";
       const logBody = logRows.map((r) => `<tr>
         <td>${escapeHtml(formatIsoLocal(r.timestamp_iso))}</td>
+        <td>${escapeHtml(r.source)}</td>
+        <td>${escapeHtml(formatSearchLocation(r))}</td>
         <td>${escapeHtml(r.brand)}</td>
         <td>${escapeHtml(r.model)}</td>
         <td>${escapeHtml(r.bar_length)}</td>
@@ -1051,6 +1075,13 @@
       ui.tableSearchLog.innerHTML = logHead + logBody;
 
       if (showToast) setStatus("Search log refreshed.", true);
+    }
+
+    function formatSearchLocation(row) {
+      return [row && row.city, row && row.region, row && row.country]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .join(", ") || "Unknown";
     }
 
     function renderEntityTable(slug) {

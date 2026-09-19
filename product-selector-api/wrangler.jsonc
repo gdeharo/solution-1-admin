@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "product-selector-api",
+  "main": "worker-with-admin.js",
+  "compatibility_date": "2026-02-19",
+  "keep_vars": true,
+  "routes": [
+    {
+      "pattern": "chain-api.rtf-cloud.com",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "product_selector_db",
+      "database_id": "303b5b52-3ac4-486a-b9ea-a2a037826eb6"
+    }
+  ],
+  "vars": {
+    "GOOGLE_SHEET_ID": "1KrlUQnoNWsL6-kKDdmXQXcDvEXG0Ta1t677QeJieQ7s",
+    "SEARCH_LOG_TAB": "Search Log"
+  },
+  "secrets": {
+    "required": [
+      "ADMIN_TOKEN",
+      "GOOGLE_SERVICE_ACCOUNT_JSON"
+    ]
+  }
+}
