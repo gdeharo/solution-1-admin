@@ -1092,16 +1092,29 @@ function getSearchRequestMetadata(request) {
 
 async function hashSearchSource(env, clientIp) {
   const ip = toStr(clientIp).trim();
+  if (!ip) return "";
+  const key = await getSearchSourceHmacKey(env);
+  if (!key) return "";
+  return hashSearchSourceWithKey(key, ip);
+}
+
+async function getSearchSourceHmacKey(env) {
   const secret = toStr(env.SEARCH_LOG_HASH_SALT || env.ADMIN_TOKEN).trim();
-  if (!ip || !secret) return "";
+  if (!secret) return null;
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
+  return crypto.subtle.importKey(
     "raw",
     encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
   );
+}
+
+async function hashSearchSourceWithKey(key, clientIp) {
+  const encoder = new TextEncoder();
+  const ip = toStr(clientIp).trim();
+  if (!key || !ip) return "";
   const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(ip));
   return Array.from(new Uint8Array(signature))
     .slice(0, 8)
@@ -1114,14 +1127,23 @@ async function backfillSearchSourceIds(env) {
     `SELECT id, client_ip
      FROM search_log
      WHERE (source_id IS NULL OR source_id = '') AND client_ip IS NOT NULL AND client_ip <> ''
-     LIMIT 500`
+     LIMIT 2000`
   ).all();
-  for (const row of rows.results || []) {
-    const sourceId = await hashSearchSource(env, row.client_ip);
-    if (!sourceId) continue;
-    await env.DB.prepare(
+  const pending = rows.results || [];
+  if (!pending.length) return;
+  const key = await getSearchSourceHmacKey(env);
+  if (!key) return;
+  const updates = await Promise.all(pending.map(async (row) => ({
+    id: Number(row.id || 0),
+    sourceId: await hashSearchSourceWithKey(key, row.client_ip),
+  })));
+  const statements = updates
+    .filter((row) => row.id > 0 && row.sourceId)
+    .map((row) => env.DB.prepare(
       `UPDATE search_log SET source_id = ?, client_ip = '' WHERE id = ?`
-    ).bind(sourceId, Number(row.id || 0)).run();
+    ).bind(row.sourceId, row.id));
+  for (let i = 0; i < statements.length; i += 100) {
+    await env.DB.batch(statements.slice(i, i + 100));
   }
 }
 
