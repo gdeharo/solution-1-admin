@@ -97,6 +97,16 @@
       font-size: 14px;
       line-height: 1.2;
     }
+    .no-match-message { margin: 0 0 12px; line-height: 1.4; }
+    .spec-title { margin: 0 0 8px; font-size: 13px; }
+    .spec-list { display: grid; gap: 8px; }
+    .spec-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 14px;
+      padding-top: 8px;
+      border-top: 1px solid color-mix(in srgb, var(--accent-color, rgb(20, 111, 248)) 35%, transparent);
+    }
     .error { color: #b00020; }
     .hint {
       margin-top: 12px;
@@ -225,7 +235,7 @@
           const chains = data.chains || [];
 
           if (!chains.length) {
-            results.innerHTML = `<div class='card'>${escapeHtml(config.no_result_message || defaults.no_result_message)}</div>`;
+            results.innerHTML = renderNoMatchCard(data.match_keys || []);
           } else {
             results.innerHTML = chains.map((c) => `
               ${c.url ? `
@@ -275,6 +285,37 @@
           .replaceAll(">", "&gt;")
           .replaceAll('"', "&quot;")
           .replaceAll("'", "&#39;");
+      }
+
+      function renderNoMatchCard(matchKeys) {
+        const unique = [];
+        const seen = new Set();
+        for (const key of Array.isArray(matchKeys) ? matchKeys : []) {
+          const pitch = String(key && key.pitch || "").trim();
+          const gauge = String(key && key.gauge || "").trim();
+          const links = String(key && key.driveLinks || "").trim();
+          const signature = `${pitch}|${gauge}|${links}`;
+          if ((!pitch && !gauge && !links) || seen.has(signature)) continue;
+          seen.add(signature);
+          unique.push({ pitch, gauge, links });
+        }
+
+        const specification = unique.length
+          ? `<div class="spec-title"><strong>Required chain specification</strong></div>
+             <div class="spec-list">
+               ${unique.map((key) => `
+                 <div class="spec-grid">
+                   <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(key.pitch || "N/A")}</span></div>
+                   <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(key.gauge || "N/A")}</span></div>
+                   <div class="card-row"><strong>Link Count</strong><span>${escapeHtml(key.links || "N/A")}</span></div>
+                 </div>`).join("")}
+             </div>`
+          : "";
+
+        return `<div class="card">
+          <p class="no-match-message">${escapeHtml(config.no_result_message || defaults.no_result_message)}</p>
+          ${specification}
+        </div>`;
       }
 
       function normalizeTintPercent(value) {
