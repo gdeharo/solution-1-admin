@@ -2163,43 +2163,68 @@
     function downloadImportTemplate(type) {
       const templates = {
         "bar-lengths": {
-          filename: "chainsaw-fitments-template.csv",
-          rows: [
-            ["Chainsaw Brand", "Chainsaw Model", "Bar Length", "Gauge", "Pitch", "Drive Links"],
-            ["Stihl", "MS 250", "16", ".050\"", ".325\"", "62"],
+          filename: "chainsaw-fitments-template.xlsx",
+          fields: [
+            ["Chainsaw Brand", "Yes", "Existing canonical brand", "Case and spacing are normalized; unknown brands require review.", "Stihl"],
+            ["Chainsaw Model", "Yes", "Text", "Punctuation and spacing are normalized for duplicate checks.", "MS 250"],
+            ["Bar Length", "Yes", "Positive number", "Use inches without adding a duplicate unit column.", "16"],
+            ["Gauge", "Yes", "Existing gauge", "Examples: .043\", .050\", .058\", .063\".", ".050\""],
+            ["Pitch", "Yes", "Existing pitch", "Examples: 3/8\" LP, 3/8\", .325\", .404\".", ".325\""],
+            ["Drive Links", "Yes", "Positive whole number", "Also accepted as DL or Links during column mapping.", "62"],
           ],
         },
         "kmc-chains": {
-          filename: "kmc-chains-template.csv",
-          rows: [
-            ["Gauge", "Pitch", "Chisel Style", "ANSI Low Kickback", "Profile Class", "Kerf Type", "Sequence Type", "Links", "Part Reference", "UPC", "URL"],
-            [".050\"", "3/8\" LP", "Semi", "Yes", "Low Height", "Narrow", "Full Comp", "55", "SC850555", "766759850555", "https://example.com/product"],
+          filename: "kmc-chains-template.xlsx",
+          fields: [
+            ["Gauge", "Yes", "Existing gauge", "Must match a canonical lookup value.", ".050\""],
+            ["Pitch", "Yes", "Existing pitch", "Must match a canonical lookup value.", "3/8\" LP"],
+            ["Chisel Style", "Yes", "Existing lookup value", "Example: Semi or Full.", "Semi"],
+            ["ANSI Low Kickback", "Yes", "Existing lookup value", "Example: Yes or No.", "Yes"],
+            ["Profile Class", "Yes", "Existing lookup value", "Example: Low Height.", "Low Height"],
+            ["Kerf Type", "Yes", "Existing lookup value", "Example: Narrow or Standard.", "Narrow"],
+            ["Sequence Type", "Yes", "Existing lookup value", "Example: Full Comp.", "Full Comp"],
+            ["Links", "Yes", "Positive whole number", "Drive-link count for this product.", "55"],
+            ["Part Reference", "Yes", "Unique text", "Duplicates are blocked.", "SC850555"],
+            ["UPC", "Yes", "Valid 12-digit UPC-A", "Spaces are removed and the check digit is validated.", "766759850555"],
+            ["URL", "Yes", "Full https URL", "Product destination URL.", "https://example.com/product"],
           ],
         },
         "combined-fitments": {
-          filename: "combined-fitments-template.csv",
-          rows: [
-            ["Chainsaw Brand", "Model/Parts#", "Bar Length", "Cutter Type", "Pitch", "Gauge", "DL", "KMC Part#", "UPC Code", "Original/OEM", "URL"],
-            ["Stihl", "MS 250", "16", "SEMI", ".325\"", ".050\"", "62", "SC250622", "", "Original", ""],
+          filename: "combined-fitments-template.xlsx",
+          fields: [
+            ["Chainsaw Brand", "Conditional", "Existing canonical brand", "May be omitted when Default Brand is entered before analysis.", "Stihl"],
+            ["Model/Parts#", "Yes", "Text", "Imported as Chainsaw Model.", "MS 250"],
+            ["Bar Length", "Yes", "Positive number", "Bar length in inches.", "16"],
+            ["Cutter Type", "No", "Text", "Used for review only; does not overwrite KMC product data.", "SEMI"],
+            ["Pitch", "Yes", "Existing pitch", "Spacing and common decimal forms are normalized.", ".325\""],
+            ["Gauge", "Yes", "Existing gauge", "Metric text such as .050 (1.3mm) is normalized.", ".050 (1.3mm)"],
+            ["DL", "Yes", "Positive whole number", "Imported as Drive Links.", "62"],
+            ["KMC Part#", "No", "Existing part or availability status", "N/A and No pre-cut are treated as statuses, not products.", "N/A"],
+            ["UPC Code", "No", "12-digit UPC-A", "Validation reference only in combined imports.", ""],
+            ["Original/OEM", "No", "Text", "Retained in the source file but not imported into Chainsaw List.", "Original"],
+            ["URL", "No", "Full https URL", "Existing KMC product URLs remain authoritative.", ""],
           ],
         },
       };
       const template = templates[type];
       if (!template) return;
-      const csv = template.rows.map((row) => row.map(csvEscape).join(",")).join("\r\n") + "\r\n";
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = template.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(link.href);
-    }
-
-    function csvEscape(value) {
-      const text = String(value == null ? "" : value);
-      return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+      if (typeof XLSX === "undefined") {
+        showErrorModal("Template generator could not load. Reload the page and try again.");
+        return;
+      }
+      const headers = template.fields.map((field) => field[0]);
+      const examples = template.fields.map((field) => field[4]);
+      const workbook = XLSX.utils.book_new();
+      const dataSheet = XLSX.utils.aoa_to_sheet([headers, examples]);
+      const instructionsSheet = XLSX.utils.aoa_to_sheet([
+        ["Field", "Required", "Accepted Format", "Import Notes"],
+        ...template.fields.map((field) => field.slice(0, 4)),
+      ]);
+      dataSheet["!cols"] = headers.map(() => ({ wch: 20 }));
+      instructionsSheet["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 24 }, { wch: 64 }];
+      XLSX.utils.book_append_sheet(workbook, dataSheet, "Data");
+      XLSX.utils.book_append_sheet(workbook, instructionsSheet, "Instructions");
+      XLSX.writeFile(workbook, template.filename, { compression: true });
     }
 
     function importTypeLabel(type) {
