@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-09-19-search-location-v1";
+const WORKER_BUILD = "2026-10-05-catalog-imports-v1";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -684,6 +684,48 @@ export default {
           return json({ ok: true, row_number: rowNumber });
         }
 
+        if (route.length >= 2 && route[0] === "admin" && route[1] === "imports") {
+          const importAuthError = await validateImportManager(request, env);
+          if (importAuthError) return importAuthError;
+
+          if (route.length === 3 && route[2] === "preview" && request.method === "POST") {
+            const body = await parseJson(request);
+            const result = await previewCatalogImport(env, body || {});
+            return json(result);
+          }
+
+          if (route.length === 3 && route[2] === "start" && request.method === "POST") {
+            const body = await parseJson(request);
+            const actor = await getImportActor(request, env);
+            const result = await startCatalogImport(env, body || {}, actor);
+            return json(result);
+          }
+
+          if (route.length === 2 && request.method === "GET") {
+            const rows = await listCatalogImports(env);
+            return json({ ok: true, imports: rows });
+          }
+
+          if (route.length === 4 && route[3] === "rows" && request.method === "POST") {
+            const batchId = Number(route[2] || 0);
+            const body = await parseJson(request);
+            const result = await appendCatalogImportRows(env, batchId, body || {});
+            return json(result);
+          }
+
+          if (route.length === 4 && route[3] === "complete" && request.method === "POST") {
+            const batchId = Number(route[2] || 0);
+            const result = await completeCatalogImport(env, batchId);
+            return json(result);
+          }
+
+          if (route.length === 4 && route[3] === "undo" && request.method === "POST") {
+            const batchId = Number(route[2] || 0);
+            const result = await undoCatalogImport(env, batchId);
+            return json(result);
+          }
+        }
+
         if (
           route.length === 3 &&
           route[0] === "admin" &&
@@ -987,6 +1029,16 @@ export default {
         low.includes("header mismatch") ||
         low.includes("missing required") ||
         low.includes("invalid ") ||
+        low.includes("unknown import") ||
+        low.includes("contains no data") ||
+        low.includes("import files are limited") ||
+        low.includes("no ready rows") ||
+        low.includes("import batch") ||
+        low.includes("import is no longer") ||
+        low.includes("not all ready rows") ||
+        low.includes("only completed imports") ||
+        low.includes("prepared fitment") ||
+        low.includes("prepared kmc") ||
         low.includes("user not found") ||
         low.includes("already exists") ||
         low.includes("cannot remove") ||
@@ -1026,6 +1078,28 @@ async function validateAdmin(request, env) {
     return json({ error: "Forbidden" }, 403);
   }
   return null;
+}
+
+async function validateImportManager(request, env) {
+  const adminToken = toStr(env.ADMIN_TOKEN);
+  const providedAdminToken = toStr(request.headers.get("x-admin-token"));
+  if (adminToken && providedAdminToken && providedAdminToken === adminToken) return null;
+
+  const hubSession = await requireHubSession(request, env);
+  if (!hubSession.ok) return json({ error: "Unauthorized" }, 401);
+  if (normalizeHubGlobalRole(hubSession.user.global_role) === "owner") return null;
+  if (getUserPanelRole(hubSession.user, HUB_ADMIN_PANEL_ID) !== "manager") {
+    return json({ error: "Manager access is required for imports." }, 403);
+  }
+  return null;
+}
+
+async function getImportActor(request, env) {
+  const adminToken = toStr(env.ADMIN_TOKEN);
+  const providedAdminToken = toStr(request.headers.get("x-admin-token"));
+  if (adminToken && providedAdminToken && providedAdminToken === adminToken) return "standalone-admin";
+  const hubSession = await requireHubSession(request, env);
+  return hubSession.ok ? toStr(hubSession.user.username).trim() : "unknown";
 }
 
 async function parseJson(request) {
@@ -1378,6 +1452,38 @@ async function ensureD1CatalogTables(env) {
   await env.DB.prepare(
     `CREATE INDEX IF NOT EXISTS idx_search_log_source ON search_log(source_id, created_at DESC)`
   ).run();
+
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS import_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      import_type TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      default_brand TEXT,
+      status TEXT NOT NULL DEFAULT 'in_progress',
+      total_rows INTEGER NOT NULL DEFAULT 0,
+      ready_rows INTEGER NOT NULL DEFAULT 0,
+      processed_rows INTEGER NOT NULL DEFAULT 0,
+      imported_rows INTEGER NOT NULL DEFAULT 0,
+      skipped_rows INTEGER NOT NULL DEFAULT 0,
+      blocked_rows INTEGER NOT NULL DEFAULT 0,
+      created_by TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      completed_at INTEGER,
+      undone_at INTEGER
+    )`
+  ).run();
+  await ensureD1Columns(env, "import_batches", { processed_rows: "INTEGER NOT NULL DEFAULT 0" });
+  await ensureD1Columns(env, "kmc_chains", { import_batch_id: "INTEGER" });
+  await ensureD1Columns(env, "bar_lengths", { import_batch_id: "INTEGER" });
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_kmc_chains_import_batch ON kmc_chains(import_batch_id)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_bar_lengths_import_batch ON bar_lengths(import_batch_id)`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_import_batches_completed ON import_batches(completed_at DESC, id DESC)`
+  ).run();
 }
 
 async function ensureD1Columns(env, table, columns) {
@@ -1404,6 +1510,489 @@ async function getD1CatalogCounts(env) {
     out[t] = Number((row && row.c) || 0);
   }
   return out;
+}
+
+const IMPORT_TYPES = new Set(["combined-fitments", "bar-lengths", "kmc-chains"]);
+const IMPORT_MAX_ROWS = 5000;
+const IMPORT_CHUNK_MAX = 50;
+
+async function previewCatalogImport(env, input) {
+  await ensureD1CatalogTables(env);
+  const importType = normalizeImportType(input.import_type);
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  const defaultBrand = toStr(input.default_brand).trim();
+  if (!IMPORT_TYPES.has(importType)) throw new Error("Unknown import type");
+  if (!rows.length) throw new Error("The selected file contains no data rows.");
+  if (rows.length > IMPORT_MAX_ROWS) throw new Error(`Import files are limited to ${IMPORT_MAX_ROWS} rows.`);
+
+  const [barRes, kmcRes, lookupRes] = await Promise.all([
+    env.DB.prepare(
+      `SELECT chainsaw_brand, chainsaw_model, bar_length, gauge, pitch, drive_links
+       FROM bar_lengths WHERE is_active = 1`
+    ).all(),
+    env.DB.prepare(
+      `SELECT gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type,
+              sequence_type, links, part_reference, upc, url
+       FROM kmc_chains WHERE is_active = 1`
+    ).all(),
+    env.DB.prepare(
+      `SELECT group_name, field_name, value FROM lookup_values WHERE is_active = 1`
+    ).all(),
+  ]);
+
+  const context = buildImportContext(barRes.results || [], kmcRes.results || [], lookupRes.results || []);
+  const seenFitments = new Set();
+  const seenParts = new Set();
+  const seenUpcs = new Set();
+  const reviewedRows = rows.map((row, index) =>
+    reviewCatalogImportRow(importType, row, index + 2, defaultBrand, context, {
+      seenFitments,
+      seenParts,
+      seenUpcs,
+    })
+  );
+  const counts = { total: reviewedRows.length, ready: 0, duplicate_existing: 0, duplicate_file: 0, blocked: 0 };
+  for (const row of reviewedRows) {
+    if (Object.prototype.hasOwnProperty.call(counts, row.status)) counts[row.status] += 1;
+    else counts.blocked += 1;
+  }
+  return { ok: true, import_type: importType, counts, rows: reviewedRows };
+}
+
+function buildImportContext(barRows, kmcRows, lookupRows) {
+  const lookupByField = new Map();
+  for (const row of lookupRows) {
+    const field = toStr(row.field_name).trim();
+    const value = toStr(row.value).trim();
+    if (!field || !value) continue;
+    if (!lookupByField.has(field)) lookupByField.set(field, []);
+    lookupByField.get(field).push(value);
+  }
+
+  const canonical = (field, extraValues = []) => {
+    const out = new Map();
+    for (const value of [...(lookupByField.get(field) || []), ...extraValues]) {
+      const clean = toStr(value).trim();
+      if (clean) out.set(importComparable(field, clean), clean);
+    }
+    return out;
+  };
+
+  const brands = canonical("Chainsaw Brand", barRows.map((r) => r.chainsaw_brand));
+  const gauges = canonical("Gauge", [...barRows.map((r) => r.gauge), ...kmcRows.map((r) => r.gauge)]);
+  const pitches = canonical("Pitch", [...barRows.map((r) => r.pitch), ...kmcRows.map((r) => r.pitch)]);
+  const chainFields = {
+    "Chisel Style": canonical("Chisel Style", kmcRows.map((r) => r.chisel_style)),
+    "ANSI Low Kickback": canonical("ANSI Low Kickback", kmcRows.map((r) => r.ansi_low_kickback)),
+    "Profile Class": canonical("Profile Class", kmcRows.map((r) => r.profile_class)),
+    "Kerf Type": canonical("Kerf Type", kmcRows.map((r) => r.kerf_type)),
+    "Sequence Type": canonical("Sequence Type", kmcRows.map((r) => r.sequence_type)),
+  };
+  const modelByBrand = new Map();
+  const existingFitments = new Set();
+  for (const row of barRows) {
+    const brand = toStr(row.chainsaw_brand).trim();
+    const model = toStr(row.chainsaw_model).trim();
+    const brandKey = importComparable("Chainsaw Brand", brand);
+    if (!modelByBrand.has(brandKey)) modelByBrand.set(brandKey, new Map());
+    modelByBrand.get(brandKey).set(importModelKey(model), model);
+    existingFitments.add(importFitmentKey(brand, model, row.bar_length, row.drive_links));
+  }
+  const kmcByPart = new Map();
+  const existingParts = new Set();
+  const existingUpcs = new Set();
+  const existingKmcSignatures = new Set();
+  for (const row of kmcRows) {
+    const part = toStr(row.part_reference).trim();
+    const upc = normalizeUpc(row.upc);
+    if (part) {
+      existingParts.add(norm(part));
+      kmcByPart.set(norm(part), row);
+    }
+    if (upc) existingUpcs.add(upc);
+    existingKmcSignatures.add(importKmcSignature(row));
+  }
+  return {
+    brands, gauges, pitches, chainFields, modelByBrand, existingFitments,
+    kmcByPart, existingParts, existingUpcs, existingKmcSignatures,
+  };
+}
+
+function reviewCatalogImportRow(importType, sourceRow, sourceRowNumber, defaultBrand, context, seen) {
+  const row = sourceRow && typeof sourceRow === "object" ? sourceRow : {};
+  if (importType === "kmc-chains") {
+    return reviewKmcImportRow(row, sourceRowNumber, context, seen);
+  }
+  return reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, context, seen);
+}
+
+function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, context, seen) {
+  const brandInput = importCell(row, ["Chainsaw Brand", "Brand"]) || defaultBrand;
+  const modelInput = importCell(row, ["Chainsaw Model", "Model", "Model/Parts#", "Model Parts"]);
+  const barInput = importCell(row, ["Bar Length", "Bar", "Length"]);
+  const gaugeInput = importCell(row, ["Gauge"]);
+  const pitchInput = importCell(row, ["Pitch"]);
+  const linksInput = importCell(row, ["Drive Links", "DL", "Links", "Link Count"]);
+  const partInput = importCell(row, ["KMC Part#", "KMC Part", "Part Reference"]);
+  const urlInput = importCell(row, ["KMC Chain URL", "URL", "Column1"]);
+  const missing = [];
+  if (!brandInput) missing.push("Chainsaw Brand");
+  if (!modelInput) missing.push("Chainsaw Model");
+  if (!barInput) missing.push("Bar Length");
+  if (!gaugeInput) missing.push("Gauge");
+  if (!pitchInput) missing.push("Pitch");
+  if (!linksInput) missing.push("Drive Links");
+  if (missing.length) return importReviewResult(sourceRowNumber, "blocked", `Missing required fields: ${missing.join(", ")}`, null, row);
+
+  const brand = context.brands.get(importComparable("Chainsaw Brand", brandInput));
+  if (!brand) return importReviewResult(sourceRowNumber, "blocked", `Unknown brand: ${brandInput}`, null, row);
+  const gauge = context.gauges.get(importComparable("Gauge", gaugeInput));
+  if (!gauge) return importReviewResult(sourceRowNumber, "blocked", `Unknown gauge: ${gaugeInput}`, null, row);
+  const pitch = context.pitches.get(importComparable("Pitch", pitchInput));
+  if (!pitch) return importReviewResult(sourceRowNumber, "blocked", `Unknown pitch: ${pitchInput}`, null, row);
+  const barLength = normalizeImportNumber(barInput);
+  const driveLinks = normalizeImportInteger(linksInput);
+  if (!barLength) return importReviewResult(sourceRowNumber, "blocked", `Invalid bar length: ${barInput}`, null, row);
+  if (!driveLinks) return importReviewResult(sourceRowNumber, "blocked", `Invalid drive-link count: ${linksInput}`, null, row);
+
+  const brandModels = context.modelByBrand.get(importComparable("Chainsaw Brand", brand)) || new Map();
+  const modelKey = importModelKey(modelInput);
+  let model = brandModels.get(modelKey) || toStr(modelInput).trim();
+  if (!brandModels.has(modelKey)) {
+    const suggestion = closestImportModel(modelKey, brandModels);
+    if (suggestion) {
+      return importReviewResult(sourceRowNumber, "blocked", `Possible existing model: ${suggestion}`, null, row);
+    }
+  }
+
+  const fitmentKey = importFitmentKey(brand, model, barLength, driveLinks);
+  const normalized = {
+    chainsaw_brand: brand,
+    chainsaw_model: model,
+    bar_length: barLength,
+    gauge,
+    pitch,
+    drive_links: driveLinks,
+    name: `${model} - ${barLength}`,
+    kmc_chain_url: "",
+  };
+  const partStatus = norm(partInput);
+  if (partStatus && partStatus !== "n/a" && partStatus !== "no pre-cut") {
+    const product = context.kmcByPart.get(partStatus);
+    normalized.kmc_chain_url = product ? toStr(product.url).trim() : toStr(urlInput).trim();
+  }
+  if (context.existingFitments.has(fitmentKey)) {
+    return importReviewResult(sourceRowNumber, "duplicate_existing", "Fitment already exists", normalized, row);
+  }
+  if (seen.seenFitments.has(fitmentKey)) {
+    return importReviewResult(sourceRowNumber, "duplicate_file", "Duplicate fitment within this file", normalized, row);
+  }
+  seen.seenFitments.add(fitmentKey);
+  return importReviewResult(sourceRowNumber, "ready", importType === "combined-fitments" ? "Ready as Chainsaw List fitment" : "Ready", normalized, row);
+}
+
+function reviewKmcImportRow(row, sourceRowNumber, context, seen) {
+  const fields = {
+    gauge: ["Gauge"], pitch: ["Pitch"], chisel_style: ["Chisel Style", "Cutter Type"],
+    ansi_low_kickback: ["ANSI Low Kickback"], profile_class: ["Profile Class"],
+    kerf_type: ["Kerf Type"], sequence_type: ["Sequence Type"], links: ["Links", "DL", "Drive Links"],
+    part_reference: ["Part Reference", "KMC Part#", "KMC Part"], upc: ["UPC", "UPC Code"], url: ["URL", "Column1"],
+  };
+  const raw = {};
+  for (const [key, aliases] of Object.entries(fields)) raw[key] = importCell(row, aliases);
+  const missing = Object.entries(raw).filter(([, value]) => !value).map(([key]) => key.replaceAll("_", " "));
+  if (missing.length) return importReviewResult(sourceRowNumber, "blocked", `Missing required fields: ${missing.join(", ")}`, null, row);
+
+  const normalized = {
+    gauge: context.gauges.get(importComparable("Gauge", raw.gauge)) || "",
+    pitch: context.pitches.get(importComparable("Pitch", raw.pitch)) || "",
+    chisel_style: canonicalImportChainValue(context, "Chisel Style", raw.chisel_style),
+    ansi_low_kickback: canonicalImportChainValue(context, "ANSI Low Kickback", raw.ansi_low_kickback),
+    profile_class: canonicalImportChainValue(context, "Profile Class", raw.profile_class),
+    kerf_type: canonicalImportChainValue(context, "Kerf Type", raw.kerf_type),
+    sequence_type: canonicalImportChainValue(context, "Sequence Type", raw.sequence_type),
+    links: normalizeImportInteger(raw.links),
+    part_reference: toStr(raw.part_reference).trim().toUpperCase(),
+    upc: normalizeUpc(raw.upc),
+    url: toStr(raw.url).trim(),
+  };
+  const unknown = [];
+  if (!normalized.gauge) unknown.push(`gauge: ${raw.gauge}`);
+  if (!normalized.pitch) unknown.push(`pitch: ${raw.pitch}`);
+  for (const [key, label] of [["chisel_style","chisel style"],["ansi_low_kickback","ANSI low kickback"],["profile_class","profile class"],["kerf_type","kerf type"],["sequence_type","sequence type"]]) {
+    if (!normalized[key]) unknown.push(`${label}: ${raw[key]}`);
+  }
+  if (unknown.length) return importReviewResult(sourceRowNumber, "blocked", `Unknown lookup value (${unknown.join("; ")})`, normalized, row);
+  if (!normalized.links) return importReviewResult(sourceRowNumber, "blocked", `Invalid link count: ${raw.links}`, normalized, row);
+  if (!isValidUpcA(normalized.upc)) return importReviewResult(sourceRowNumber, "blocked", "Invalid UPC-A code", normalized, row);
+
+  const partKey = norm(normalized.part_reference);
+  const sig = importKmcSignature(normalized);
+  if (context.existingParts.has(partKey) || context.existingUpcs.has(normalized.upc) || context.existingKmcSignatures.has(sig)) {
+    return importReviewResult(sourceRowNumber, "duplicate_existing", "KMC product already exists", normalized, row);
+  }
+  if (seen.seenParts.has(partKey) || seen.seenUpcs.has(normalized.upc)) {
+    return importReviewResult(sourceRowNumber, "duplicate_file", "Duplicate part reference or UPC within this file", normalized, row);
+  }
+  seen.seenParts.add(partKey);
+  seen.seenUpcs.add(normalized.upc);
+  return importReviewResult(sourceRowNumber, "ready", "Ready", normalized, row);
+}
+
+function importReviewResult(sourceRow, status, message, normalized, source) {
+  return { source_row: sourceRow, status, message, normalized, source };
+}
+
+function importCell(row, aliases) {
+  const byKey = new Map();
+  for (const [key, value] of Object.entries(row || {})) byKey.set(importHeaderKey(key), toStr(value).trim());
+  for (const alias of aliases) {
+    const value = byKey.get(importHeaderKey(alias));
+    if (value) return value;
+  }
+  return "";
+}
+
+function importHeaderKey(value) {
+  return toStr(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function importComparable(field, value) {
+  let clean = toStr(value).trim().toLowerCase().replace(/[”“]/g, '"');
+  if (field === "Gauge") {
+    const match = clean.match(/(?:0?\.)?(043|050|058|063)/);
+    return match ? `.${match[1]}` : clean.replace(/[^a-z0-9.]+/g, "");
+  }
+  if (field === "Pitch") {
+    clean = clean.replace("low profile", "lp").replace(/\s+/g, "");
+    if (clean.includes("3/8") && clean.includes("lp")) return "3/8lp";
+    if (clean.includes("3/8")) return "3/8";
+    if (clean.includes(".325") || clean.includes("0.325")) return ".325";
+    if (clean.includes(".404") || clean.includes("0.404")) return ".404";
+    if (clean.includes("1/4") && clean.includes("lp")) return "1/4lp";
+    if (clean.includes("1/4")) return "1/4";
+  }
+  return clean.replace(/[^a-z0-9]+/g, "");
+}
+
+function importModelKey(value) {
+  return toStr(value).trim().toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function normalizeImportNumber(value) {
+  const match = toStr(value).trim().match(/\d+(?:\.\d+)?/);
+  if (!match) return "";
+  const number = Number(match[0]);
+  return Number.isFinite(number) && number > 0 ? String(number) : "";
+}
+
+function normalizeImportInteger(value) {
+  const clean = toStr(value).trim();
+  if (!/^\d+$/.test(clean)) return "";
+  const number = Number(clean);
+  return Number.isInteger(number) && number > 0 ? String(number) : "";
+}
+
+function importFitmentKey(brand, model, barLength, driveLinks) {
+  return `${importComparable("Chainsaw Brand", brand)}|${importModelKey(model)}|${normalizeImportNumber(barLength)}|${normalizeImportInteger(driveLinks)}`;
+}
+
+function importKmcSignature(row) {
+  return [row.gauge, row.pitch, row.chisel_style, row.ansi_low_kickback, row.profile_class, row.kerf_type, row.sequence_type, row.links]
+    .map((value) => norm(value)).join("|");
+}
+
+function canonicalImportChainValue(context, field, value) {
+  const map = context.chainFields[field] || new Map();
+  return map.get(importComparable(field, value)) || "";
+}
+
+function closestImportModel(incomingKey, modelMap) {
+  if (!incomingKey || incomingKey.length < 5 || !modelMap.size) return "";
+  const incomingDigits = (incomingKey.match(/\d+/g) || []).join("|");
+  let best = "";
+  let bestDistance = 3;
+  for (const [key, display] of modelMap.entries()) {
+    const candidateDigits = (key.match(/\d+/g) || []).join("|");
+    if (!incomingDigits || candidateDigits !== incomingDigits) continue;
+    if (Math.abs(key.length - incomingKey.length) > 2) continue;
+    const distance = importEditDistance(incomingKey, key, 2);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = display;
+    }
+  }
+  return bestDistance <= 1 ? best : "";
+}
+
+function importEditDistance(a, b, maxDistance) {
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+      rowMin = Math.min(rowMin, current[j]);
+    }
+    if (rowMin > maxDistance) return maxDistance + 1;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+function normalizeImportType(value) {
+  return toStr(value).trim().toLowerCase();
+}
+
+async function startCatalogImport(env, input, actor) {
+  await ensureD1CatalogTables(env);
+  const importType = normalizeImportType(input.import_type);
+  const filename = toStr(input.filename).trim();
+  const readyRows = Number(input.ready_rows || 0);
+  const totalRows = Number(input.total_rows || 0);
+  const blockedRows = Number(input.blocked_rows || 0);
+  const skippedRows = Number(input.skipped_rows || 0);
+  if (!IMPORT_TYPES.has(importType)) throw new Error("Unknown import type");
+  if (!filename) throw new Error("Filename is required");
+  if (!Number.isInteger(readyRows) || readyRows < 1) throw new Error("There are no ready rows to import.");
+  const result = await env.DB.prepare(
+    `INSERT INTO import_batches (
+      import_type, filename, default_brand, status, total_rows, ready_rows,
+      processed_rows, imported_rows, skipped_rows, blocked_rows, created_by, created_at
+    ) VALUES (?, ?, ?, 'in_progress', ?, ?, 0, 0, ?, ?, ?, unixepoch())`
+  ).bind(
+    importType,
+    filename,
+    toStr(input.default_brand).trim(),
+    totalRows,
+    readyRows,
+    skippedRows,
+    blockedRows,
+    toStr(actor).trim()
+  ).run();
+  return { ok: true, batch_id: Number(result.meta && result.meta.last_row_id) };
+}
+
+async function appendCatalogImportRows(env, batchId, input) {
+  await ensureD1CatalogTables(env);
+  if (!Number.isInteger(batchId) || batchId < 1) throw new Error("Invalid import batch");
+  const batch = await env.DB.prepare(
+    `SELECT id, import_type, status FROM import_batches WHERE id = ?`
+  ).bind(batchId).first();
+  if (!batch) throw new Error("Import batch not found");
+  if (toStr(batch.status) !== "in_progress") throw new Error("This import is no longer in progress.");
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  if (!rows.length || rows.length > IMPORT_CHUNK_MAX) throw new Error(`Send between 1 and ${IMPORT_CHUNK_MAX} rows per import request.`);
+  const importType = normalizeImportType(batch.import_type);
+  const nowTs = Math.floor(Date.now() / 1000);
+  const statements = [];
+  for (const row of rows) {
+    if (importType === "kmc-chains") {
+      validatePreparedKmcImportRow(row);
+      statements.push(env.DB.prepare(
+        `INSERT OR IGNORE INTO kmc_chains (
+          gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+          links, part_reference, upc, url, is_active, created_at, updated_at, import_batch_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+      ).bind(
+        row.gauge, row.pitch, row.chisel_style, row.ansi_low_kickback, row.profile_class,
+        row.kerf_type, row.sequence_type, row.links, row.part_reference, normalizeUpc(row.upc),
+        row.url, nowTs, nowTs, batchId
+      ));
+    } else {
+      validatePreparedFitmentImportRow(row);
+      statements.push(env.DB.prepare(
+        `INSERT OR IGNORE INTO bar_lengths (
+          chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links,
+          name, kmc_chain_url, is_active, created_at, updated_at, import_batch_id
+        ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+      ).bind(
+        row.chainsaw_brand, row.chainsaw_model, row.gauge, row.pitch, row.bar_length,
+        row.drive_links, row.name, toStr(row.kmc_chain_url).trim(), nowTs, nowTs, batchId
+      ));
+    }
+  }
+  const results = await env.DB.batch(statements);
+  const imported = results.reduce((sum, result) => sum + Number((result.meta && result.meta.changes) || 0), 0);
+  const skipped = rows.length - imported;
+  await env.DB.prepare(
+    `UPDATE import_batches
+     SET processed_rows = processed_rows + ?, imported_rows = imported_rows + ?, skipped_rows = skipped_rows + ?
+     WHERE id = ? AND status = 'in_progress'`
+  ).bind(rows.length, imported, skipped, batchId).run();
+  return { ok: true, batch_id: batchId, processed: rows.length, imported, skipped };
+}
+
+function validatePreparedFitmentImportRow(row) {
+  const required = ["chainsaw_brand", "chainsaw_model", "bar_length", "gauge", "pitch", "drive_links", "name"];
+  const missing = required.filter((field) => !toStr(row && row[field]).trim());
+  if (missing.length) throw new Error(`Prepared fitment is missing: ${missing.join(", ")}`);
+}
+
+function validatePreparedKmcImportRow(row) {
+  const required = ["gauge", "pitch", "chisel_style", "ansi_low_kickback", "profile_class", "kerf_type", "sequence_type", "links", "part_reference", "upc", "url"];
+  const missing = required.filter((field) => !toStr(row && row[field]).trim());
+  if (missing.length) throw new Error(`Prepared KMC product is missing: ${missing.join(", ")}`);
+  if (!isValidUpcA(normalizeUpc(row.upc))) throw new Error("Prepared KMC product has an invalid UPC-A code.");
+}
+
+async function completeCatalogImport(env, batchId) {
+  await ensureD1CatalogTables(env);
+  if (!Number.isInteger(batchId) || batchId < 1) throw new Error("Invalid import batch");
+  const batch = await env.DB.prepare(
+    `SELECT id, status, ready_rows, processed_rows, imported_rows, skipped_rows FROM import_batches WHERE id = ?`
+  ).bind(batchId).first();
+  if (!batch) throw new Error("Import batch not found");
+  if (toStr(batch.status) !== "in_progress") throw new Error("This import is no longer in progress.");
+  const processed = Number(batch.processed_rows || 0);
+  if (processed < Number(batch.ready_rows || 0)) throw new Error("Not all ready rows have been processed.");
+  await env.DB.prepare(
+    `UPDATE import_batches SET status = 'completed', completed_at = unixepoch() WHERE id = ? AND status = 'in_progress'`
+  ).bind(batchId).run();
+  return { ok: true, batch_id: batchId, imported_rows: Number(batch.imported_rows || 0), skipped_rows: Number(batch.skipped_rows || 0) };
+}
+
+async function listCatalogImports(env) {
+  await ensureD1CatalogTables(env);
+  const result = await env.DB.prepare(
+    `SELECT id, import_type, filename, default_brand, status, total_rows, ready_rows,
+            processed_rows, imported_rows, skipped_rows, blocked_rows, created_by,
+            datetime(created_at, 'unixepoch') AS created_at,
+            CASE WHEN completed_at IS NULL THEN NULL ELSE datetime(completed_at, 'unixepoch') END AS completed_at,
+            CASE WHEN undone_at IS NULL THEN NULL ELSE datetime(undone_at, 'unixepoch') END AS undone_at
+     FROM import_batches
+     WHERE status IN ('completed', 'undone')
+     ORDER BY COALESCE(completed_at, created_at) DESC, id DESC
+     LIMIT 100`
+  ).all();
+  return result.results || [];
+}
+
+async function undoCatalogImport(env, batchId) {
+  await ensureD1CatalogTables(env);
+  if (!Number.isInteger(batchId) || batchId < 1) throw new Error("Invalid import batch");
+  const batch = await env.DB.prepare(
+    `SELECT id, status, filename FROM import_batches WHERE id = ?`
+  ).bind(batchId).first();
+  if (!batch) throw new Error("Import batch not found");
+  if (toStr(batch.status) !== "completed") throw new Error("Only completed imports can be undone.");
+  const [kmcCount, barCount] = await Promise.all([
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM kmc_chains WHERE import_batch_id = ?`).bind(batchId).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS count FROM bar_lengths WHERE import_batch_id = ?`).bind(batchId).first(),
+  ]);
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM kmc_chains WHERE import_batch_id = ?`).bind(batchId),
+    env.DB.prepare(`DELETE FROM bar_lengths WHERE import_batch_id = ?`).bind(batchId),
+    env.DB.prepare(
+      `UPDATE import_batches SET status = 'undone', undone_at = unixepoch() WHERE id = ? AND status = 'completed'`
+    ).bind(batchId),
+  ]);
+  return {
+    ok: true,
+    batch_id: batchId,
+    deleted_rows: Number((kmcCount && kmcCount.count) || 0) + Number((barCount && barCount.count) || 0),
+  };
 }
 
 async function getLookupValuesFromD1(env, opts = {}) {

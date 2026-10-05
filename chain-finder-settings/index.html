@@ -63,6 +63,14 @@
     .analytics-card .label { font-size: 12px; color: #445; }
     .analytics-card .value { font-size: 22px; font-weight: 700; color: #146ff8; margin-top: 4px; }
     .filters-grid { display: grid; grid-template-columns: 90px 90px 1fr 1fr 110px auto; gap: 8px; margin: 8px 0 12px; align-items: center; }
+    .import-grid { display: grid; grid-template-columns: 1.2fr 1fr 1.6fr; gap: 8px; margin: 10px 0; }
+    .import-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+    .import-actions button { width: auto; }
+    .status-ready { color: #067647; font-weight: 700; }
+    .status-blocked { color: #b42318; font-weight: 700; }
+    .status-duplicate { color: #815000; font-weight: 700; }
+    .progress-line { height: 8px; border-radius: 999px; overflow: hidden; background: #e7ecf3; margin: 8px 0; }
+    .progress-line > span { display: block; height: 100%; width: 0; background: #146ff8; transition: width .2s ease; }
 
     .modal-backdrop {
       position: fixed;
@@ -99,6 +107,7 @@
       .toolbar { flex-wrap: wrap; }
       .analytics-grid { grid-template-columns: 1fr; }
       .filters-grid { grid-template-columns: 1fr; }
+      .import-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -124,6 +133,11 @@
           <h3>Chainsaw List</h3>
           <p>Brand/model/bar-length fitment rows.</p>
           <button data-nav="bar-lengths">Open Chainsaw List</button>
+        </div>
+        <div class="menu-item" data-menu-key="imports">
+          <h3>Import Data</h3>
+          <p>Validate and import XLSX or CSV product lists with rollback history.</p>
+          <button data-nav="imports">Open Import Data</button>
         </div>
         <div class="menu-item" data-menu-key="search-log">
           <h3>Search Log</h3>
@@ -235,6 +249,52 @@
       <h3 style="margin-top:14px;">Recent Searches</h3>
       <table id="table-search-log"></table>
     </section>
+
+    <section id="view-imports" class="view card hidden">
+      <div class="toolbar">
+        <button class="secondary" data-nav="home">Back To Menu</button>
+        <button id="btnRefreshImports" class="secondary">Refresh History</button>
+      </div>
+      <h2>Import Data</h2>
+      <p class="muted">Analyze first. No database records are changed until Import Ready Rows is selected.</p>
+      <h3>Templates</h3>
+      <div class="import-actions">
+        <button class="secondary" data-template="bar-lengths">Chainsaw Fitments Template</button>
+        <button class="secondary" data-template="kmc-chains">KMC Chains Template</button>
+        <button class="secondary" data-template="combined-fitments">Combined Fitment Template</button>
+      </div>
+      <div class="import-grid">
+        <select id="importType">
+          <option value="combined-fitments">Combined Fitment File</option>
+          <option value="bar-lengths">Chainsaw Fitments</option>
+          <option value="kmc-chains">KMC Chains</option>
+        </select>
+        <input id="importDefaultBrand" placeholder="Default brand if file has none" value="Stihl" />
+        <input id="importFile" type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      </div>
+      <div class="import-actions">
+        <button id="btnAnalyzeImport">Analyze File</button>
+        <button id="btnCommitImport" class="secondary" disabled>Import Ready Rows</button>
+        <button id="btnClearImport" class="secondary">Clear</button>
+      </div>
+      <div id="importProgressWrap" class="hidden">
+        <div class="progress-line"><span id="importProgressBar"></span></div>
+        <div id="importProgressText" class="muted"></div>
+      </div>
+      <div class="analytics-grid">
+        <div class="analytics-card"><div class="label">Rows</div><div class="value" id="importCountTotal">0</div></div>
+        <div class="analytics-card"><div class="label">Ready</div><div class="value" id="importCountReady">0</div></div>
+        <div class="analytics-card"><div class="label">Existing</div><div class="value" id="importCountExisting">0</div></div>
+        <div class="analytics-card"><div class="label">File Duplicates</div><div class="value" id="importCountFileDuplicates">0</div></div>
+        <div class="analytics-card"><div class="label">Blocked</div><div class="value" id="importCountBlocked">0</div></div>
+      </div>
+      <h3>Review</h3>
+      <p id="importReviewNote" class="muted">Select a file and analyze it.</p>
+      <div style="overflow:auto;"><table id="table-import-review"></table></div>
+      <h3 style="margin-top:18px;">Completed Import History</h3>
+      <p class="muted">Undo removes only records created by the selected import. Pre-existing records are preserved.</p>
+      <div style="overflow:auto;"><table id="table-import-history"></table></div>
+    </section>
   </div>
 
     <div id="errorModalBackdrop" class="modal-backdrop" aria-hidden="true">
@@ -270,6 +330,19 @@
       </div>
     </div>
 
+    <div id="undoImportModalBackdrop" class="modal-backdrop" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="undoImportModalTitle">
+        <h3 id="undoImportModalTitle">Undo Completed Import</h3>
+        <p id="undoImportModalMessage"></p>
+        <p class="muted">This removes records created by this import. This action cannot be reversed.</p>
+        <div class="actions">
+          <button id="undoImportCancel" class="secondary">Cancel</button>
+          <button id="undoImportConfirm" class="danger">Undo Import</button>
+        </div>
+      </div>
+    </div>
+
+  <script src="/vendor/xlsx.full.min.js"></script>
   <script>
     const HUB_PANEL_SESSION_KEY = "admin_hub_panel_session_v1";
     const PANEL_ID = "kmc-chain-finder-admin";
@@ -334,6 +407,7 @@
         "kmc-chains": false,
         "bar-lengths": false,
         "search-log": false,
+        imports: false,
         settings: false,
         lookups: false,
       },
@@ -360,6 +434,9 @@
       lookupPrompt: {
         resolver: null,
       },
+      importPreview: null,
+      importFilename: "",
+      undoImportBatchId: 0,
     };
     const SETTINGS_DEFAULTS = {
       form_title: "KMC Chainsaw Chain Finder",
@@ -386,6 +463,7 @@
         "kmc-chains": document.getElementById("view-kmc-chains"),
         "bar-lengths": document.getElementById("view-bar-lengths"),
         "search-log": document.getElementById("view-search-log"),
+        imports: document.getElementById("view-imports"),
       },
       errorModalBackdrop: document.getElementById("errorModalBackdrop"),
       errorModalMessage: document.getElementById("errorModalMessage"),
@@ -413,6 +491,28 @@
       tableTopSearches: document.getElementById("table-top-searches"),
       tableSearchSources: document.getElementById("table-search-sources"),
       tableSearchLog: document.getElementById("table-search-log"),
+      importType: document.getElementById("importType"),
+      importDefaultBrand: document.getElementById("importDefaultBrand"),
+      importFile: document.getElementById("importFile"),
+      btnAnalyzeImport: document.getElementById("btnAnalyzeImport"),
+      btnCommitImport: document.getElementById("btnCommitImport"),
+      btnClearImport: document.getElementById("btnClearImport"),
+      btnRefreshImports: document.getElementById("btnRefreshImports"),
+      importProgressWrap: document.getElementById("importProgressWrap"),
+      importProgressBar: document.getElementById("importProgressBar"),
+      importProgressText: document.getElementById("importProgressText"),
+      importCountTotal: document.getElementById("importCountTotal"),
+      importCountReady: document.getElementById("importCountReady"),
+      importCountExisting: document.getElementById("importCountExisting"),
+      importCountFileDuplicates: document.getElementById("importCountFileDuplicates"),
+      importCountBlocked: document.getElementById("importCountBlocked"),
+      importReviewNote: document.getElementById("importReviewNote"),
+      tableImportReview: document.getElementById("table-import-review"),
+      tableImportHistory: document.getElementById("table-import-history"),
+      undoImportModalBackdrop: document.getElementById("undoImportModalBackdrop"),
+      undoImportModalMessage: document.getElementById("undoImportModalMessage"),
+      undoImportCancel: document.getElementById("undoImportCancel"),
+      undoImportConfirm: document.getElementById("undoImportConfirm"),
     };
 
     if (ui.btnMainAdmin) {
@@ -473,6 +573,20 @@
       });
     }
     if (ui.btnLoadSearchLog) ui.btnLoadSearchLog.addEventListener("click", () => loadSearchLogView(true));
+    if (ui.btnAnalyzeImport) ui.btnAnalyzeImport.addEventListener("click", analyzeImportFile);
+    if (ui.btnCommitImport) ui.btnCommitImport.addEventListener("click", commitImportRows);
+    if (ui.btnClearImport) ui.btnClearImport.addEventListener("click", clearImportWorkspace);
+    if (ui.btnRefreshImports) ui.btnRefreshImports.addEventListener("click", loadImportHistory);
+    if (ui.undoImportCancel) ui.undoImportCancel.addEventListener("click", hideUndoImportModal);
+    if (ui.undoImportConfirm) ui.undoImportConfirm.addEventListener("click", undoSelectedImport);
+    if (ui.undoImportModalBackdrop) {
+      ui.undoImportModalBackdrop.addEventListener("click", (e) => {
+        if (e.target === ui.undoImportModalBackdrop) hideUndoImportModal();
+      });
+    }
+    document.querySelectorAll("[data-template]").forEach((btn) => {
+      btn.addEventListener("click", () => downloadImportTemplate(btn.getAttribute("data-template")));
+    });
 
     for (const slug of Object.keys(ENTITIES)) {
       renderEntityScaffold(slug);
@@ -551,7 +665,7 @@
     }
 
     function applyMenuVisibilityByRole() {
-      const all = ["kmc-chains", "bar-lengths", "search-log", "settings", "selector-preview", "embed-snippets"];
+      const all = ["kmc-chains", "bar-lengths", "imports", "search-log", "settings", "selector-preview", "embed-snippets"];
       const editor = new Set(["kmc-chains", "bar-lengths"]);
       const role = state.access.fromHub ? (state.access.panelRole || "none") : "manager";
       const allowed = role === "manager" ? new Set(all) : editor;
@@ -755,6 +869,10 @@
         if (viewName === "search-log" && !state.loaded["search-log"]) {
           await loadSearchLogView(false);
           state.loaded["search-log"] = true;
+        }
+        if (viewName === "imports" && !state.loaded.imports) {
+          await loadImportHistory();
+          state.loaded.imports = true;
         }
 
         if (viewName === "kmc-chains") {
@@ -1756,6 +1874,344 @@
         el.classList.remove("field-empty", "field-filled");
         el.classList.add(filled ? "field-filled" : "field-empty");
       }
+    }
+
+    async function analyzeImportFile() {
+      if (!assertCanWrite("analyze imports")) return;
+      if (state.access.fromHub && state.access.panelRole !== "manager") {
+        showErrorModal("Manager access is required for imports.");
+        return;
+      }
+      const file = ui.importFile && ui.importFile.files ? ui.importFile.files[0] : null;
+      if (!file) {
+        showErrorModal("Select an XLSX or CSV file first.");
+        return;
+      }
+      try {
+        setImportBusy(true, "Reading file...");
+        const rows = await readImportFile(file);
+        if (!rows.length) throw new Error("The selected file contains no data rows.");
+        setImportProgress(20, `Analyzing ${rows.length} rows...`);
+        const preview = await api("/admin/imports/preview", "POST", {
+          import_type: ui.importType.value,
+          default_brand: ui.importDefaultBrand.value.trim(),
+          filename: file.name,
+          rows,
+        });
+        state.importPreview = preview;
+        state.importFilename = file.name;
+        renderImportPreview(preview);
+        ui.btnCommitImport.disabled = !preview.counts || Number(preview.counts.ready || 0) < 1;
+        setImportProgress(100, "Analysis complete.");
+        setStatus(`Import analysis complete: ${Number(preview.counts.ready || 0)} rows ready.`, true);
+      } catch (err) {
+        state.importPreview = null;
+        ui.btnCommitImport.disabled = true;
+        showErrorModal(err.message || "Unable to analyze the file.");
+        setStatus(err.message || "Import analysis failed.", false);
+      } finally {
+        setImportBusy(false);
+      }
+    }
+
+    async function readImportFile(file) {
+      const name = String(file.name || "").toLowerCase();
+      if (name.endsWith(".csv")) return parseCsvRecords(await file.text());
+      if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) throw new Error("Use an XLSX or CSV file.");
+      if (typeof XLSX === "undefined") throw new Error("XLSX reader could not load. Check the internet connection and reload the page.");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) return [];
+      return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "", raw: false });
+    }
+
+    function parseCsvRecords(text) {
+      const rows = [];
+      let row = [];
+      let value = "";
+      let quoted = false;
+      const input = String(text || "").replace(/^\uFEFF/, "");
+      for (let i = 0; i < input.length; i += 1) {
+        const char = input[i];
+        if (quoted) {
+          if (char === '"' && input[i + 1] === '"') {
+            value += '"';
+            i += 1;
+          } else if (char === '"') {
+            quoted = false;
+          } else {
+            value += char;
+          }
+        } else if (char === '"') {
+          quoted = true;
+        } else if (char === ",") {
+          row.push(value);
+          value = "";
+        } else if (char === "\n") {
+          row.push(value.replace(/\r$/, ""));
+          rows.push(row);
+          row = [];
+          value = "";
+        } else {
+          value += char;
+        }
+      }
+      if (value || row.length) {
+        row.push(value.replace(/\r$/, ""));
+        rows.push(row);
+      }
+      const headers = (rows.shift() || []).map((header) => String(header || "").trim());
+      return rows
+        .filter((values) => values.some((item) => String(item || "").trim()))
+        .map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] == null ? "" : values[index]])));
+    }
+
+    function renderImportPreview(preview) {
+      const counts = preview.counts || {};
+      ui.importCountTotal.textContent = Number(counts.total || 0).toLocaleString();
+      ui.importCountReady.textContent = Number(counts.ready || 0).toLocaleString();
+      ui.importCountExisting.textContent = Number(counts.duplicate_existing || 0).toLocaleString();
+      ui.importCountFileDuplicates.textContent = Number(counts.duplicate_file || 0).toLocaleString();
+      ui.importCountBlocked.textContent = Number(counts.blocked || 0).toLocaleString();
+      const rows = Array.isArray(preview.rows) ? preview.rows : [];
+      const displayRows = rows.slice(0, 500);
+      ui.importReviewNote.textContent = rows.length > displayRows.length
+        ? `Showing the first ${displayRows.length} of ${rows.length} reviewed rows.`
+        : `Showing ${rows.length} reviewed rows.`;
+      ui.tableImportReview.innerHTML = `
+        <thead><tr><th>Source Row</th><th>Status</th><th>Message</th><th>Normalized Record</th></tr></thead>
+        <tbody>${displayRows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.source_row)}</td>
+            <td class="${importStatusClass(row.status)}">${escapeHtml(importStatusLabel(row.status))}</td>
+            <td>${escapeHtml(row.message || "")}</td>
+            <td>${escapeHtml(formatImportRecord(row.normalized))}</td>
+          </tr>`).join("")}</tbody>`;
+    }
+
+    function importStatusClass(status) {
+      if (status === "ready") return "status-ready";
+      if (status === "blocked") return "status-blocked";
+      return "status-duplicate";
+    }
+
+    function importStatusLabel(status) {
+      return {
+        ready: "Ready",
+        blocked: "Needs Review",
+        duplicate_existing: "Already Exists",
+        duplicate_file: "File Duplicate",
+      }[status] || String(status || "");
+    }
+
+    function formatImportRecord(record) {
+      if (!record) return "";
+      const labels = {
+        chainsaw_brand: "Brand", chainsaw_model: "Model", bar_length: "Bar", gauge: "Gauge", pitch: "Pitch",
+        drive_links: "DL", part_reference: "Part", upc: "UPC", links: "Links",
+      };
+      return Object.entries(record)
+        .filter(([key, value]) => labels[key] && String(value || "").trim())
+        .map(([key, value]) => `${labels[key]}: ${value}`)
+        .join(" | ");
+    }
+
+    async function commitImportRows() {
+      if (!assertCanWrite("import rows")) return;
+      if (state.access.fromHub && state.access.panelRole !== "manager") {
+        showErrorModal("Manager access is required for imports.");
+        return;
+      }
+      const preview = state.importPreview;
+      const ready = preview && Array.isArray(preview.rows) ? preview.rows.filter((row) => row.status === "ready" && row.normalized) : [];
+      if (!ready.length) {
+        showErrorModal("There are no ready rows to import.");
+        return;
+      }
+      ui.btnCommitImport.disabled = true;
+      try {
+        setImportBusy(true, "Starting import...");
+        const counts = preview.counts || {};
+        const started = await api("/admin/imports/start", "POST", {
+          import_type: preview.import_type,
+          filename: state.importFilename || "uploaded-file",
+          default_brand: ui.importDefaultBrand.value.trim(),
+          total_rows: Number(counts.total || ready.length),
+          ready_rows: ready.length,
+          skipped_rows: Number(counts.duplicate_existing || 0) + Number(counts.duplicate_file || 0),
+          blocked_rows: Number(counts.blocked || 0),
+        });
+        const batchId = Number(started.batch_id || 0);
+        const chunkSize = 25;
+        let processed = 0;
+        let imported = 0;
+        let skipped = 0;
+        for (let i = 0; i < ready.length; i += chunkSize) {
+          const chunk = ready.slice(i, i + chunkSize).map((row) => row.normalized);
+          const result = await api(`/admin/imports/${batchId}/rows`, "POST", { rows: chunk });
+          processed += chunk.length;
+          imported += Number(result.imported || 0);
+          skipped += Number(result.skipped || 0);
+          setImportProgress(Math.round((processed / ready.length) * 90), `Imported ${processed} of ${ready.length} ready rows...`);
+        }
+        await api(`/admin/imports/${batchId}/complete`, "POST", {});
+        setImportProgress(100, `Completed: ${imported} imported, ${skipped} skipped.`);
+        state.importPreview = null;
+        state.loaded["bar-lengths"] = false;
+        state.loaded["kmc-chains"] = false;
+        await loadImportHistory();
+        setStatus(`Import completed: ${imported} records added.`, true);
+      } catch (err) {
+        showErrorModal(`${err.message || "Import failed."} Any rows already added remain grouped in the incomplete batch for administrator recovery.`);
+        setStatus(err.message || "Import failed.", false);
+      } finally {
+        setImportBusy(false);
+      }
+    }
+
+    async function loadImportHistory() {
+      const data = await api("/admin/imports", "GET");
+      const imports = Array.isArray(data.imports) ? data.imports : [];
+      ui.tableImportHistory.innerHTML = `
+        <thead><tr><th>Completed</th><th>File</th><th>Type</th><th>Imported</th><th>Skipped</th><th>By</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>${imports.map((item) => `
+          <tr>
+            <td>${escapeHtml(formatImportDate(item.completed_at || item.created_at))}</td>
+            <td>${escapeHtml(item.filename || "")}</td>
+            <td>${escapeHtml(importTypeLabel(item.import_type))}</td>
+            <td>${escapeHtml(item.imported_rows || 0)}</td>
+            <td>${escapeHtml(item.skipped_rows || 0)}</td>
+            <td>${escapeHtml(item.created_by || "")}</td>
+            <td>${escapeHtml(item.status === "undone" ? `Undone ${formatImportDate(item.undone_at)}` : "Completed")}</td>
+            <td>${item.status === "completed" ? `<button class="danger" data-undo-import="${Number(item.id)}">Undo</button>` : ""}</td>
+          </tr>`).join("")}</tbody>`;
+      if (!imports.length) ui.tableImportHistory.innerHTML += `<tbody><tr><td colspan="8" class="muted">No completed imports yet.</td></tr></tbody>`;
+      ui.tableImportHistory.querySelectorAll("[data-undo-import]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const item = imports.find((row) => Number(row.id) === Number(button.getAttribute("data-undo-import")));
+          if (item) confirmUndoImport(Number(item.id), item.filename || "", formatImportDate(item.completed_at));
+        });
+      });
+    }
+
+    function confirmUndoImport(batchId, filename, completedAt) {
+      if (!assertCanWrite("undo imports")) return;
+      state.undoImportBatchId = Number(batchId || 0);
+      ui.undoImportModalMessage.textContent = `Undo ${filename} completed ${completedAt}?`;
+      ui.undoImportModalBackdrop.style.display = "flex";
+      ui.undoImportModalBackdrop.setAttribute("aria-hidden", "false");
+      ui.undoImportConfirm.focus();
+    }
+
+    function hideUndoImportModal() {
+      state.undoImportBatchId = 0;
+      ui.undoImportModalBackdrop.style.display = "none";
+      ui.undoImportModalBackdrop.setAttribute("aria-hidden", "true");
+    }
+
+    async function undoSelectedImport() {
+      const batchId = Number(state.undoImportBatchId || 0);
+      if (!batchId) return;
+      try {
+        ui.undoImportConfirm.disabled = true;
+        const result = await api(`/admin/imports/${batchId}/undo`, "POST", {});
+        hideUndoImportModal();
+        state.loaded["bar-lengths"] = false;
+        state.loaded["kmc-chains"] = false;
+        await loadImportHistory();
+        setStatus(`Import undone: ${Number(result.deleted_rows || 0)} records removed.`, true);
+      } catch (err) {
+        hideUndoImportModal();
+        showErrorModal(err.message || "Unable to undo import.");
+      } finally {
+        ui.undoImportConfirm.disabled = false;
+      }
+    }
+
+    function clearImportWorkspace() {
+      state.importPreview = null;
+      state.importFilename = "";
+      if (ui.importFile) ui.importFile.value = "";
+      if (ui.btnCommitImport) ui.btnCommitImport.disabled = true;
+      [ui.importCountTotal, ui.importCountReady, ui.importCountExisting, ui.importCountFileDuplicates, ui.importCountBlocked].forEach((el) => {
+        if (el) el.textContent = "0";
+      });
+      ui.importReviewNote.textContent = "Select a file and analyze it.";
+      ui.tableImportReview.innerHTML = "";
+      ui.importProgressWrap.classList.add("hidden");
+      setStatus("Import workspace cleared.", true);
+    }
+
+    function setImportBusy(busy, message = "") {
+      ui.btnAnalyzeImport.disabled = busy;
+      ui.btnClearImport.disabled = busy;
+      ui.importType.disabled = busy;
+      ui.importDefaultBrand.disabled = busy;
+      ui.importFile.disabled = busy;
+      if (message) {
+        ui.importProgressWrap.classList.remove("hidden");
+        ui.importProgressText.textContent = message;
+      }
+    }
+
+    function setImportProgress(percent, message) {
+      ui.importProgressWrap.classList.remove("hidden");
+      ui.importProgressBar.style.width = `${Math.max(0, Math.min(100, Number(percent || 0)))}%`;
+      ui.importProgressText.textContent = message || "";
+    }
+
+    function downloadImportTemplate(type) {
+      const templates = {
+        "bar-lengths": {
+          filename: "chainsaw-fitments-template.csv",
+          rows: [
+            ["Chainsaw Brand", "Chainsaw Model", "Bar Length", "Gauge", "Pitch", "Drive Links"],
+            ["Stihl", "MS 250", "16", ".050\"", ".325\"", "62"],
+          ],
+        },
+        "kmc-chains": {
+          filename: "kmc-chains-template.csv",
+          rows: [
+            ["Gauge", "Pitch", "Chisel Style", "ANSI Low Kickback", "Profile Class", "Kerf Type", "Sequence Type", "Links", "Part Reference", "UPC", "URL"],
+            [".050\"", "3/8\" LP", "Semi", "Yes", "Low Height", "Narrow", "Full Comp", "55", "SC850555", "766759850555", "https://example.com/product"],
+          ],
+        },
+        "combined-fitments": {
+          filename: "combined-fitments-template.csv",
+          rows: [
+            ["Chainsaw Brand", "Model/Parts#", "Bar Length", "Cutter Type", "Pitch", "Gauge", "DL", "KMC Part#", "UPC Code", "Original/OEM", "URL"],
+            ["Stihl", "MS 250", "16", "SEMI", ".325\"", ".050\"", "62", "SC250622", "", "Original", ""],
+          ],
+        },
+      };
+      const template = templates[type];
+      if (!template) return;
+      const csv = template.rows.map((row) => row.map(csvEscape).join(",")).join("\r\n") + "\r\n";
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = template.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    }
+
+    function csvEscape(value) {
+      const text = String(value == null ? "" : value);
+      return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    }
+
+    function importTypeLabel(type) {
+      return { "combined-fitments": "Combined Fitments", "bar-lengths": "Chainsaw Fitments", "kmc-chains": "KMC Chains" }[type] || type;
+    }
+
+    function formatImportDate(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      const iso = /Z$|[+-]\d\d:\d\d$/.test(text) ? text : `${text.replace(" ", "T")}Z`;
+      const date = new Date(iso);
+      return Number.isNaN(date.getTime()) ? text : date.toLocaleString();
     }
 
     function val(id) {
