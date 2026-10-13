@@ -62,6 +62,29 @@
     .analytics-card { border: 1px solid #dbe7ff; border-radius: 8px; padding: 10px; background: #f4f8ff; }
     .analytics-card .label { font-size: 12px; color: #445; }
     .analytics-card .value { font-size: 22px; font-weight: 700; color: #146ff8; margin-top: 4px; }
+    .dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0 16px; }
+    .dashboard-panel { border: 1px solid #dce3ee; border-radius: 10px; padding: 12px; background: #fff; overflow: hidden; }
+    .dashboard-panel.wide { grid-column: 1 / -1; }
+    .dashboard-panel h3 { margin-bottom: 4px; }
+    .chart-note { color: #667085; font-size: 11px; margin-bottom: 10px; }
+    .trend-chart { width: 100%; min-height: 230px; display: block; }
+    .chart-empty { display: grid; place-items: center; min-height: 180px; color: #667085; font-size: 13px; }
+    .outcome-wrap { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 18px; min-height: 190px; }
+    .outcome-donut { width: 142px; aspect-ratio: 1; border-radius: 50%; position: relative; }
+    .outcome-donut::after { content: ""; position: absolute; inset: 28px; border-radius: 50%; background: #fff; }
+    .outcome-center { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; text-align: center; font-size: 12px; color: #667085; }
+    .outcome-center strong { color: #172033; font-size: 22px; }
+    .chart-legend { display: grid; gap: 10px; }
+    .legend-row { display: grid; grid-template-columns: 10px 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .bar-chart { display: grid; gap: 10px; }
+    .bar-row { display: grid; grid-template-columns: minmax(95px, 1fr) 2fr auto; gap: 8px; align-items: center; font-size: 12px; }
+    .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-track { height: 10px; border-radius: 999px; background: #edf1f6; overflow: hidden; }
+    .bar-fill { height: 100%; min-width: 2px; border-radius: inherit; background: #146ff8; }
+    .bar-value { min-width: 28px; text-align: right; font-weight: 700; }
+    .dashboard-table { margin-top: 6px; }
+    .rate-pill { display: inline-block; min-width: 48px; padding: 2px 6px; border-radius: 999px; background: #e8f7ef; color: #067647; font-weight: 700; text-align: center; }
     .filters-grid { display: grid; grid-template-columns: 90px 90px 1fr 1fr 110px auto; gap: 8px; margin: 8px 0 12px; align-items: center; }
     .import-grid { display: grid; grid-template-columns: 1.2fr 1fr 1.6fr; gap: 8px; margin: 10px 0; }
     .import-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
@@ -106,6 +129,11 @@
       .settings-actions { grid-template-columns: 1fr; }
       .toolbar { flex-wrap: wrap; }
       .analytics-grid { grid-template-columns: 1fr; }
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .dashboard-panel.wide { grid-column: auto; }
+      .outcome-wrap { grid-template-columns: 1fr; justify-items: center; }
+      .chart-legend { width: 100%; }
+      .bar-row { grid-template-columns: minmax(88px, 1fr) 1.6fr auto; }
       .filters-grid { grid-template-columns: 1fr; }
       .import-grid { grid-template-columns: 1fr; }
     }
@@ -140,9 +168,9 @@
           <button data-nav="imports">Open Import Data</button>
         </div>
         <div class="menu-item" data-menu-key="search-log">
-          <h3>Search Log</h3>
-          <p>Review search activity and top requested combinations.</p>
-          <button data-nav="search-log">Open Search Log</button>
+          <h3>Search Analytics</h3>
+          <p>Explore demand, match rates, product gaps, locations, and detailed search activity.</p>
+          <button data-nav="search-log">Open Dashboard</button>
         </div>
         <div class="menu-item" data-menu-key="settings">
           <h3>Settings</h3>
@@ -225,7 +253,7 @@
       <div class="toolbar">
         <button class="secondary" data-nav="home">Back To Menu</button>
       </div>
-      <h2>Search Log</h2>
+      <h2>Search Analytics</h2>
       <div class="filters-grid">
         <input id="logDays" type="number" min="1" value="30" placeholder="Days" />
         <input id="logLimit" type="number" min="1" max="500" value="100" placeholder="Rows" />
@@ -236,10 +264,43 @@
       </div>
       <div class="analytics-grid">
         <div class="analytics-card"><div class="label">Searches</div><div class="value" id="sumSearches">0</div></div>
-        <div class="analytics-card"><div class="label">Successful</div><div class="value" id="sumSuccessful">0</div></div>
+        <div class="analytics-card"><div class="label">Match Rate</div><div class="value" id="sumMatchRate">0%</div></div>
+        <div class="analytics-card"><div class="label">Product Gaps</div><div class="value" id="sumGaps">0</div></div>
         <div class="analytics-card"><div class="label">Total Matches</div><div class="value" id="sumMatches">0</div></div>
         <div class="analytics-card"><div class="label">Likely Unique Sources</div><div class="value" id="sumUniqueSources">0</div></div>
         <div class="analytics-card"><div class="label">Repeated Sources</div><div class="value" id="sumRepeatedSources">0</div></div>
+      </div>
+      <div class="dashboard-grid">
+        <div class="dashboard-panel wide">
+          <h3>Search Activity</h3>
+          <div class="chart-note">Daily searches and successful searches for the selected period.</div>
+          <div id="chartDailyTrend" class="chart-empty">Loading chart...</div>
+        </div>
+        <div class="dashboard-panel">
+          <h3>Match Outcomes</h3>
+          <div class="chart-note">Share of searches that found at least one KMC chain.</div>
+          <div id="chartOutcomes" class="chart-empty">Loading chart...</div>
+        </div>
+        <div class="dashboard-panel">
+          <h3>Brand Demand</h3>
+          <div class="chart-note">Search volume by chainsaw brand.</div>
+          <div id="chartBrands" class="chart-empty">Loading chart...</div>
+        </div>
+        <div class="dashboard-panel">
+          <h3>Geographic Demand</h3>
+          <div class="chart-note">Leading regions based on general location data.</div>
+          <div id="chartLocations" class="chart-empty">Loading chart...</div>
+        </div>
+        <div class="dashboard-panel">
+          <h3>Repeat Activity</h3>
+          <div class="chart-note">Anonymous sources grouped by number of searches.</div>
+          <div id="chartSourceBands" class="chart-empty">Loading chart...</div>
+        </div>
+        <div class="dashboard-panel wide">
+          <h3>Top Product Gaps</h3>
+          <div class="chart-note">Most-requested combinations that did not return a matching chain.</div>
+          <table id="table-product-gaps" class="dashboard-table"></table>
+        </div>
       </div>
       <h3>Top Searches</h3>
       <table id="table-top-searches"></table>
@@ -484,10 +545,17 @@
       logBarLength: document.getElementById("logBarLength"),
       btnLoadSearchLog: document.getElementById("btnLoadSearchLog"),
       sumSearches: document.getElementById("sumSearches"),
-      sumSuccessful: document.getElementById("sumSuccessful"),
+      sumMatchRate: document.getElementById("sumMatchRate"),
+      sumGaps: document.getElementById("sumGaps"),
       sumMatches: document.getElementById("sumMatches"),
       sumUniqueSources: document.getElementById("sumUniqueSources"),
       sumRepeatedSources: document.getElementById("sumRepeatedSources"),
+      chartDailyTrend: document.getElementById("chartDailyTrend"),
+      chartOutcomes: document.getElementById("chartOutcomes"),
+      chartBrands: document.getElementById("chartBrands"),
+      chartLocations: document.getElementById("chartLocations"),
+      chartSourceBands: document.getElementById("chartSourceBands"),
+      tableProductGaps: document.getElementById("table-product-gaps"),
       tableTopSearches: document.getElementById("table-top-searches"),
       tableSearchSources: document.getElementById("table-search-sources"),
       tableSearchLog: document.getElementById("table-search-log"),
@@ -1138,23 +1206,30 @@
       const model = String(ui.logModel.value || "").trim();
       const barLength = String(ui.logBarLength.value || "").trim();
 
-      const summary = await api(`/admin/analytics/search-summary?days=${days}`, "GET");
-      const top = await api(`/admin/analytics/top-searches?days=${days}&limit=10`, "GET");
-      const sources = await api(`/admin/analytics/search-sources?days=${days}&limit=20`, "GET");
-      const rows = await api(
-        `/admin/analytics/search-log?days=${days}&limit=${limit}` +
-          `&brand=${encodeURIComponent(brand)}` +
-          `&model=${encodeURIComponent(model)}` +
-          `&barLength=${encodeURIComponent(barLength)}`,
-        "GET"
-      );
+      const [summary, dashboard, top, sources, rows] = await Promise.all([
+        api(`/admin/analytics/search-summary?days=${days}`, "GET"),
+        api(`/admin/analytics/dashboard?days=${days}`, "GET"),
+        api(`/admin/analytics/top-searches?days=${days}&limit=10`, "GET"),
+        api(`/admin/analytics/search-sources?days=${days}&limit=20`, "GET"),
+        api(
+          `/admin/analytics/search-log?days=${days}&limit=${limit}` +
+            `&brand=${encodeURIComponent(brand)}` +
+            `&model=${encodeURIComponent(model)}` +
+            `&barLength=${encodeURIComponent(barLength)}`,
+          "GET"
+        ),
+      ]);
 
       const s = summary.summary || {};
-      ui.sumSearches.textContent = String(Number(s.searches || 0));
-      ui.sumSuccessful.textContent = String(Number(s.successful_searches || 0));
+      const searches = Number(s.searches || 0);
+      const successful = Number(s.successful_searches || 0);
+      ui.sumSearches.textContent = String(searches);
+      ui.sumMatchRate.textContent = formatPercent(successful, searches);
+      ui.sumGaps.textContent = String(Math.max(0, searches - successful));
       ui.sumMatches.textContent = String(Number(s.total_matches || 0));
       ui.sumUniqueSources.textContent = String(Number(s.unique_sources || 0));
       ui.sumRepeatedSources.textContent = String(Number(s.repeated_sources || 0));
+      renderAnalyticsDashboard(dashboard, { searches, successful });
 
       const topRows = Array.isArray(top.rows) ? top.rows : [];
       const topHead = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Searches</th><th>Total Matches</th></tr>";
@@ -1193,6 +1268,132 @@
       ui.tableSearchLog.innerHTML = logHead + logBody;
 
       if (showToast) setStatus("Search log refreshed.", true);
+    }
+
+    function formatPercent(value, total) {
+      const denominator = Number(total || 0);
+      if (!denominator) return "0%";
+      return `${(Number(value || 0) * 100 / denominator).toFixed(1)}%`;
+    }
+
+    function renderAnalyticsDashboard(data, totals) {
+      renderDailyTrend(Array.isArray(data.daily) ? data.daily : []);
+      renderOutcomes(totals.successful, totals.searches);
+      renderBarChart(
+        ui.chartBrands,
+        Array.isArray(data.brands) ? data.brands : [],
+        (row) => row.brand,
+        (row) => Number(row.searches || 0),
+        (row) => `${Number(row.searches || 0)} · ${formatPercent(row.successful, row.searches)} match`,
+        "#146ff8"
+      );
+      renderBarChart(
+        ui.chartLocations,
+        Array.isArray(data.locations) ? data.locations : [],
+        (row) => [row.region, row.country].filter(Boolean).join(", "),
+        (row) => Number(row.searches || 0),
+        (row) => `${Number(row.searches || 0)} · ${Number(row.sources || 0)} sources`,
+        "#f59e0b"
+      );
+      renderBarChart(
+        ui.chartSourceBands,
+        Array.isArray(data.source_bands) ? data.source_bands : [],
+        (row) => row.label,
+        (row) => Number(row.sources || 0),
+        (row) => `${Number(row.sources || 0)} sources`,
+        "#12b76a"
+      );
+      renderProductGaps(Array.isArray(data.gaps) ? data.gaps : []);
+    }
+
+    function renderDailyTrend(rows) {
+      if (!rows.length) {
+        ui.chartDailyTrend.className = "chart-empty";
+        ui.chartDailyTrend.textContent = "No search activity for this period.";
+        return;
+      }
+
+      const width = 860;
+      const height = 230;
+      const pad = { top: 18, right: 22, bottom: 38, left: 42 };
+      const plotWidth = width - pad.left - pad.right;
+      const plotHeight = height - pad.top - pad.bottom;
+      const maximum = Math.max(1, ...rows.map((row) => Number(row.searches || 0)));
+      const x = (index) => pad.left + (rows.length === 1 ? plotWidth / 2 : index * plotWidth / (rows.length - 1));
+      const y = (value) => pad.top + plotHeight - (Number(value || 0) / maximum) * plotHeight;
+      const searches = rows.map((row, index) => `${x(index).toFixed(1)},${y(row.searches).toFixed(1)}`).join(" ");
+      const successful = rows.map((row, index) => `${x(index).toFixed(1)},${y(row.successful).toFixed(1)}`).join(" ");
+      const grid = [0, .25, .5, .75, 1].map((ratio) => {
+        const gy = pad.top + plotHeight * ratio;
+        const label = Math.round(maximum * (1 - ratio));
+        return `<line x1="${pad.left}" y1="${gy}" x2="${width - pad.right}" y2="${gy}" stroke="#e7ebf1" />
+          <text x="${pad.left - 8}" y="${gy + 4}" text-anchor="end" fill="#667085" font-size="11">${label}</text>`;
+      }).join("");
+      const labelIndexes = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
+      const labels = labelIndexes.map((index) => `<text x="${x(index)}" y="${height - 10}" text-anchor="middle" fill="#667085" font-size="11">${escapeHtml(String(rows[index].day || "").slice(5))}</text>`).join("");
+
+      ui.chartDailyTrend.className = "";
+      ui.chartDailyTrend.innerHTML = `<svg class="trend-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Daily search activity chart">
+        ${grid}
+        <polyline points="${searches}" fill="none" stroke="#146ff8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        <polyline points="${successful}" fill="none" stroke="#12b76a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        ${rows.map((row, index) => `<circle cx="${x(index)}" cy="${y(row.searches)}" r="3" fill="#146ff8"><title>${escapeHtml(row.day)}: ${Number(row.searches || 0)} searches</title></circle>`).join("")}
+        ${labels}
+      </svg>
+      <div class="chart-legend" style="grid-template-columns:repeat(2,minmax(0,150px));justify-content:center;">
+        <div class="legend-row"><span class="legend-dot" style="background:#146ff8"></span><span>Searches</span><span></span></div>
+        <div class="legend-row"><span class="legend-dot" style="background:#12b76a"></span><span>Successful</span><span></span></div>
+      </div>`;
+    }
+
+    function renderOutcomes(successful, searches) {
+      const total = Number(searches || 0);
+      const matched = Number(successful || 0);
+      const gaps = Math.max(0, total - matched);
+      const matchedPercent = total ? matched * 100 / total : 0;
+      ui.chartOutcomes.className = "";
+      ui.chartOutcomes.innerHTML = `<div class="outcome-wrap">
+        <div class="outcome-donut" style="background:conic-gradient(#12b76a 0 ${matchedPercent}%, #f04438 ${matchedPercent}% 100%);">
+          <div class="outcome-center"><strong>${escapeHtml(formatPercent(matched, total))}</strong><span>match rate</span></div>
+        </div>
+        <div class="chart-legend">
+          <div class="legend-row"><span class="legend-dot" style="background:#12b76a"></span><span>Matched</span><strong>${matched}</strong></div>
+          <div class="legend-row"><span class="legend-dot" style="background:#f04438"></span><span>No match</span><strong>${gaps}</strong></div>
+        </div>
+      </div>`;
+    }
+
+    function renderBarChart(host, rows, getLabel, getValue, getDisplay, color) {
+      if (!rows.length) {
+        host.className = "chart-empty";
+        host.textContent = "No data for this period.";
+        return;
+      }
+      const maximum = Math.max(1, ...rows.map(getValue));
+      host.className = "bar-chart";
+      host.innerHTML = rows.map((row) => {
+        const value = getValue(row);
+        const percent = Math.max(1, value * 100 / maximum);
+        const label = String(getLabel(row) || "Unknown");
+        return `<div class="bar-row" title="${escapeHtml(label)}">
+          <div class="bar-label">${escapeHtml(label)}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${percent.toFixed(1)}%;background:${color}"></div></div>
+          <div class="bar-value">${escapeHtml(getDisplay(row))}</div>
+        </div>`;
+      }).join("");
+    }
+
+    function renderProductGaps(rows) {
+      const head = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Unmatched Searches</th></tr>";
+      const body = rows.length
+        ? rows.map((row) => `<tr>
+            <td>${escapeHtml(row.brand)}</td>
+            <td>${escapeHtml(row.model)}</td>
+            <td>${escapeHtml(row.bar_length)}</td>
+            <td><strong>${escapeHtml(row.searches)}</strong></td>
+          </tr>`).join("")
+        : '<tr><td colspan="4" class="muted">No unmatched searches for this period.</td></tr>';
+      ui.tableProductGaps.innerHTML = head + body;
     }
 
     function formatSearchLocation(row) {

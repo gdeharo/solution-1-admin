@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-10-05-catalog-imports-v1";
+const WORKER_BUILD = "2026-10-13-search-dashboard-v1";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -497,6 +497,117 @@ export default {
               unique_sources: Number((totals && totals.unique_sources) || 0),
               repeated_sources: Number((repeated && repeated.repeated_sources) || 0),
             },
+          });
+        }
+
+        if (route.length === 3 && route[0] === "admin" && route[1] === "analytics" && route[2] === "dashboard" && request.method === "GET") {
+          await ensureD1CatalogTables(env);
+          await backfillSearchSourceIds(env);
+          const days = Math.min(365, Math.max(1, Number(url.searchParams.get("days") || 30)));
+          const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+          const [daily, brands, gaps, locations, sourceBands] = await Promise.all([
+            env.DB.prepare(
+              `SELECT substr(timestamp_iso, 1, 10) AS day,
+                      COUNT(*) AS searches,
+                      SUM(CASE WHEN match_count > 0 THEN 1 ELSE 0 END) AS successful,
+                      COUNT(DISTINCT NULLIF(source_id, '')) AS sources
+               FROM search_log
+               WHERE timestamp_iso >= ?
+               GROUP BY day
+               ORDER BY day`
+            ).bind(sinceIso).all(),
+            env.DB.prepare(
+              `SELECT brand,
+                      COUNT(*) AS searches,
+                      SUM(CASE WHEN match_count > 0 THEN 1 ELSE 0 END) AS successful,
+                      SUM(CASE WHEN match_count = 0 THEN 1 ELSE 0 END) AS gaps
+               FROM search_log
+               WHERE timestamp_iso >= ?
+               GROUP BY brand
+               ORDER BY searches DESC, brand
+               LIMIT 10`
+            ).bind(sinceIso).all(),
+            env.DB.prepare(
+              `SELECT brand, model, bar_length, COUNT(*) AS searches
+               FROM search_log
+               WHERE timestamp_iso >= ? AND match_count = 0
+               GROUP BY brand, model, bar_length
+               ORDER BY searches DESC, brand, model, bar_length
+               LIMIT 10`
+            ).bind(sinceIso).all(),
+            env.DB.prepare(
+              `SELECT COALESCE(NULLIF(region, ''), 'Unknown') AS region,
+                      COALESCE(NULLIF(country, ''), 'Unknown') AS country,
+                      COUNT(*) AS searches,
+                      COUNT(DISTINCT NULLIF(source_id, '')) AS sources
+               FROM search_log
+               WHERE timestamp_iso >= ?
+               GROUP BY region, country
+               ORDER BY searches DESC, sources DESC
+               LIMIT 10`
+            ).bind(sinceIso).all(),
+            env.DB.prepare(
+              `WITH source_counts AS (
+                 SELECT source_id, COUNT(*) AS search_count
+                 FROM search_log
+                 WHERE timestamp_iso >= ? AND source_id IS NOT NULL AND source_id <> ''
+                 GROUP BY source_id
+               ), bands AS (
+                 SELECT CASE
+                          WHEN search_count = 1 THEN 'One search'
+                          WHEN search_count BETWEEN 2 AND 4 THEN '2-4 searches'
+                          WHEN search_count BETWEEN 5 AND 9 THEN '5-9 searches'
+                          ELSE '10+ searches'
+                        END AS label,
+                        CASE
+                          WHEN search_count = 1 THEN 1
+                          WHEN search_count BETWEEN 2 AND 4 THEN 2
+                          WHEN search_count BETWEEN 5 AND 9 THEN 3
+                          ELSE 4
+                        END AS sort_order,
+                        search_count
+                 FROM source_counts
+               )
+               SELECT label, COUNT(*) AS sources, SUM(search_count) AS searches
+               FROM bands
+               GROUP BY label, sort_order
+               ORDER BY sort_order`
+            ).bind(sinceIso).all(),
+          ]);
+
+          return json({
+            ok: true,
+            days,
+            daily: (daily.results || []).map((r) => ({
+              day: toStr(r.day),
+              searches: Number(r.searches || 0),
+              successful: Number(r.successful || 0),
+              sources: Number(r.sources || 0),
+            })),
+            brands: (brands.results || []).map((r) => ({
+              brand: toStr(r.brand) || "Unknown",
+              searches: Number(r.searches || 0),
+              successful: Number(r.successful || 0),
+              gaps: Number(r.gaps || 0),
+            })),
+            gaps: (gaps.results || []).map((r) => ({
+              brand: toStr(r.brand),
+              model: toStr(r.model),
+              bar_length: toStr(r.bar_length),
+              searches: Number(r.searches || 0),
+            })),
+            locations: (locations.results || []).map((r) => ({
+              region: toStr(r.region),
+              country: toStr(r.country),
+              searches: Number(r.searches || 0),
+              sources: Number(r.sources || 0),
+            })),
+            source_bands: (sourceBands.results || []).map((r) => ({
+              label: toStr(r.label),
+              sources: Number(r.sources || 0),
+              searches: Number(r.searches || 0),
+            })),
           });
         }
 
