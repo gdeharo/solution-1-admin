@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-10-13-import-spec-search-v3";
+const WORKER_BUILD = "2026-10-13-multi-cutter-search-v4";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -199,7 +199,10 @@ export default {
         const pitch = (url.searchParams.get("pitch") || "").trim();
         const gauge = (url.searchParams.get("gauge") || "").trim();
         const links = (url.searchParams.get("links") || "").trim();
-        const chiselStyle = (url.searchParams.get("chiselStyle") || "").trim();
+        const chiselStyles = url.searchParams.getAll("chiselStyle")
+          .flatMap((value) => value.split(","))
+          .map((value) => value.trim())
+          .filter(Boolean);
         const shouldLog = (url.searchParams.get("log") || "1") !== "0";
         if (!pitch || !gauge || !links) {
           return json({ error: "Missing required params: pitch, gauge, links" }, 400);
@@ -214,9 +217,9 @@ export default {
            WHERE is_active = 1`
         ).all();
         const matchKeys = [{ chainTypeCode: "", pitch, gauge, driveLinks: links }];
-        const chains = buildKmcChainResults(kmcRes.results || [], matchKeys, chainBrandFallback, chiselStyle);
+        const chains = buildKmcChainResults(kmcRes.results || [], matchKeys, chainBrandFallback, chiselStyles);
         const payload = {
-          query: { mode: "specification", pitch, gauge, links, chisel_style: chiselStyle },
+          query: { mode: "specification", pitch, gauge, links, chisel_styles: chiselStyles },
           match_keys: matchKeys,
           result_count: chains.length,
           chains,
@@ -232,7 +235,7 @@ export default {
             queryPitch: pitch,
             queryGauge: gauge,
             queryLinks: links,
-            queryChiselStyle: chiselStyle,
+            queryChiselStyle: chiselStyles.join(", "),
             ...getSearchRequestMetadata(request),
           });
           payload.logged = true;
@@ -4134,14 +4137,17 @@ function dedupePathKeys(keys) {
   return dedupeByKey(keys, (k) => `${norm(k.pitch)}|${norm(k.gauge)}|${norm(k.driveLinks)}`);
 }
 
-function buildKmcChainResults(kmcRows, matchKeys, chainBrandFallback, chiselStyleFilter = "") {
+function buildKmcChainResults(kmcRows, matchKeys, chainBrandFallback, chiselStyleFilters = []) {
+  const allowedChiselStyles = (Array.isArray(chiselStyleFilters) ? chiselStyleFilters : [chiselStyleFilters])
+    .map((value) => norm(value))
+    .filter(Boolean);
   const results = [];
   for (const key of matchKeys || []) {
     for (const kmc of kmcRows || []) {
       if (!eqNorm(kmc.pitch, key.pitch)) continue;
       if (!eqNorm(kmc.gauge, key.gauge)) continue;
       if (!sameDriveLinks(kmc.links, key.driveLinks)) continue;
-      if (chiselStyleFilter && !eqNorm(kmc.chisel_style, chiselStyleFilter)) continue;
+      if (allowedChiselStyles.length && !allowedChiselStyles.includes(norm(kmc.chisel_style))) continue;
       const pitch = toStr(kmc.pitch);
       const gauge = toStr(kmc.gauge);
       const chiselStyle = toStr(kmc.chisel_style);

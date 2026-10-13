@@ -53,6 +53,16 @@
     .search-panel.hidden { display: none; }
     .form-note { margin: -2px 0 10px; color: #667085; font-size: 12px; line-height: 1.4; }
     .row { margin-bottom: 10px; }
+    .cutter-options {
+      margin: 0;
+      padding: 10px 12px 12px;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+    }
+    .cutter-options legend { padding: 0 5px; color: #344054; font-size: 13px; font-weight: 700; }
+    .cutter-checks { display: flex; gap: 18px; flex-wrap: wrap; }
+    .cutter-checks label { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; cursor: pointer; }
+    .cutter-checks input { width: 17px; height: 17px; accent-color: var(--accent-color, rgb(20, 111, 248)); }
     select, button {
       width: 100%;
       padding: 10px;
@@ -157,7 +167,12 @@
         <div class="row"><select id="specPitch"><option value="">Select Pitch</option></select></div>
         <div class="row"><select id="specGauge" disabled><option value="">Select Gauge</option></select></div>
         <div class="row"><select id="specLinks" disabled><option value="">Select Drive Links</option></select></div>
-        <div class="row"><select id="specCutter" disabled><option value="">Any Cutter Style</option></select></div>
+        <div class="row">
+          <fieldset id="specCutterGroup" class="cutter-options" disabled>
+            <legend>Cutter Style</legend>
+            <div id="specCutterChecks" class="cutter-checks"><span class="form-note">Select pitch, gauge, and drive links first.</span></div>
+          </fieldset>
+        </div>
         <div class="row"><button id="findSpecBtn" disabled>Find Chains</button></div>
       </div>
       <div id="results" class="results"></div>
@@ -179,7 +194,8 @@
       const specPitch = document.getElementById("specPitch");
       const specGauge = document.getElementById("specGauge");
       const specLinks = document.getElementById("specLinks");
-      const specCutter = document.getElementById("specCutter");
+      const specCutterGroup = document.getElementById("specCutterGroup");
+      const specCutterChecks = document.getElementById("specCutterChecks");
       const findSpecBtn = document.getElementById("findSpecBtn");
       const results = document.getElementById("results");
       const formTitle = document.getElementById("formTitle");
@@ -196,6 +212,32 @@
         select.innerHTML = `<option value="">${placeholder}</option>` +
           values.map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
         select.disabled = values.length === 0;
+      }
+
+      function setCutterOptions(values) {
+        const styles = Array.from(new Set((values || []).filter(Boolean)));
+        specCutterChecks.innerHTML = styles.length
+          ? styles.map((style) => `<label><input type="checkbox" name="specCutter" value="${escapeHtml(style)}" checked> ${escapeHtml(style)}</label>`).join("")
+          : '<span class="form-note">No cutter styles available.</span>';
+        specCutterGroup.disabled = styles.length === 0;
+        updateSpecFindButton();
+      }
+
+      function clearCutterOptions() {
+        specCutterChecks.innerHTML = '<span class="form-note">Select pitch, gauge, and drive links first.</span>';
+        specCutterGroup.disabled = true;
+        updateSpecFindButton();
+      }
+
+      function selectedCutterStyles() {
+        return Array.from(specCutterChecks.querySelectorAll('input[name="specCutter"]:checked'))
+          .map((input) => input.value);
+      }
+
+      function updateSpecFindButton() {
+        const hasRequiredSpecs = Boolean(specPitch.value && specGauge.value && specLinks.value);
+        const hasCutterSelection = specCutterGroup.disabled || selectedCutterStyles().length > 0;
+        findSpecBtn.disabled = !(hasRequiredSpecs && hasCutterSelection);
       }
 
       function resetFrom(level) {
@@ -261,29 +303,29 @@
           setOptions(specPitch, data.pitches || [], "Select Pitch");
           setOptions(specGauge, [], "Select Gauge");
           setOptions(specLinks, [], "Select Drive Links");
-          setOptions(specCutter, [], "Any Cutter Style");
+          clearCutterOptions();
         } else if (level === 2) {
           setOptions(specGauge, data.gauges || [], "Select Gauge");
           setOptions(specLinks, [], "Select Drive Links");
-          setOptions(specCutter, [], "Any Cutter Style");
+          clearCutterOptions();
         } else if (level === 3) {
           setOptions(specLinks, data.links || [], "Select Drive Links");
-          setOptions(specCutter, [], "Any Cutter Style");
+          clearCutterOptions();
         } else {
-          setOptions(specCutter, data.chisel_styles || [], "Any Cutter Style");
-          specCutter.disabled = !(data.chisel_styles || []).length;
+          setCutterOptions(data.chisel_styles || []);
         }
-        findSpecBtn.disabled = !(specPitch.value && specGauge.value && specLinks.value);
+        updateSpecFindButton();
       }
 
       modeFitment.addEventListener("click", () => setSearchMode("fitment"));
       modeSpecs.addEventListener("click", () => setSearchMode("specifications"));
+      specCutterChecks.addEventListener("change", updateSpecFindButton);
 
       specPitch.addEventListener("change", async function () {
         results.innerHTML = "";
         setOptions(specGauge, [], "Select Gauge");
         setOptions(specLinks, [], "Select Drive Links");
-        setOptions(specCutter, [], "Any Cutter Style");
+        clearCutterOptions();
         findSpecBtn.disabled = true;
         if (!specPitch.value) return;
         try { await loadSpecOptions(2); } catch (err) { showSearchError(err); }
@@ -292,7 +334,7 @@
       specGauge.addEventListener("change", async function () {
         results.innerHTML = "";
         setOptions(specLinks, [], "Select Drive Links");
-        setOptions(specCutter, [], "Any Cutter Style");
+        clearCutterOptions();
         findSpecBtn.disabled = true;
         if (!specPitch.value || !specGauge.value) return;
         try { await loadSpecOptions(3); } catch (err) { showSearchError(err); }
@@ -300,8 +342,8 @@
 
       specLinks.addEventListener("change", async function () {
         results.innerHTML = "";
-        setOptions(specCutter, [], "Any Cutter Style");
-        findSpecBtn.disabled = !(specPitch.value && specGauge.value && specLinks.value);
+        clearCutterOptions();
+        updateSpecFindButton();
         if (findSpecBtn.disabled) return;
         try { await loadSpecOptions(4); } catch (err) { showSearchError(err); }
       });
@@ -362,7 +404,7 @@
           url.searchParams.set("pitch", specPitch.value);
           url.searchParams.set("gauge", specGauge.value);
           url.searchParams.set("links", specLinks.value);
-          if (specCutter.value) url.searchParams.set("chiselStyle", specCutter.value);
+          selectedCutterStyles().forEach((style) => url.searchParams.append("chiselStyle", style));
           renderSearchResults(await getJson(url.toString()));
         } catch (err) {
           showSearchError(err);
