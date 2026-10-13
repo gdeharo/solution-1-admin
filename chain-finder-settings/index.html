@@ -84,6 +84,9 @@
     .bar-fill { height: 100%; min-width: 2px; border-radius: inherit; background: #146ff8; }
     .bar-value { min-width: 28px; text-align: right; font-weight: 700; }
     .dashboard-table { margin-top: 6px; }
+    .analytics-detail-table { table-layout: fixed; }
+    .analytics-detail-table th, .analytics-detail-table td { overflow-wrap: anywhere; }
+    .analytics-detail-table .numeric { text-align: right; }
     .rate-pill { display: inline-block; min-width: 48px; padding: 2px 6px; border-radius: 999px; background: #e8f7ef; color: #067647; font-weight: 700; text-align: center; }
     .filters-grid { display: grid; grid-template-columns: 90px 90px 1fr 1fr 110px auto; gap: 8px; margin: 8px 0 12px; align-items: center; }
     .import-grid { display: grid; grid-template-columns: 1.2fr 1fr 1.6fr; gap: 8px; margin: 10px 0; }
@@ -299,11 +302,11 @@
         <div class="dashboard-panel wide">
           <h3>Top Product Gaps</h3>
           <div class="chart-note">Most-requested combinations that did not return a matching chain.</div>
-          <table id="table-product-gaps" class="dashboard-table"></table>
+          <table id="table-product-gaps" class="dashboard-table analytics-detail-table"></table>
         </div>
       </div>
       <h3>Top Searches</h3>
-      <table id="table-top-searches"></table>
+      <table id="table-top-searches" class="analytics-detail-table"></table>
       <h3 style="margin-top:14px;">Source Activity</h3>
       <p class="muted">Anonymous source labels group searches from the same IP without displaying or retaining the raw address.</p>
       <table id="table-search-sources"></table>
@@ -1232,13 +1235,15 @@
       renderAnalyticsDashboard(dashboard, { searches, successful });
 
       const topRows = Array.isArray(top.rows) ? top.rows : [];
-      const topHead = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Searches</th><th>Total Matches</th></tr>";
+      const topHead = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Pitch</th><th>Gauge</th><th class='numeric'>Searches</th><th class='numeric'>Total Matches</th></tr>";
       const topBody = topRows.map((r) => `<tr>
         <td>${escapeHtml(r.brand)}</td>
         <td>${escapeHtml(r.model)}</td>
         <td>${escapeHtml(r.bar_length)}</td>
-        <td>${escapeHtml(r.searches)}</td>
-        <td>${escapeHtml(r.total_matches)}</td>
+        <td>${escapeHtml(formatSpecificationValues(r.pitch))}</td>
+        <td>${escapeHtml(formatSpecificationValues(r.gauge))}</td>
+        <td class="numeric">${escapeHtml(r.searches)}</td>
+        <td class="numeric">${escapeHtml(r.total_matches)}</td>
       </tr>`).join("");
       ui.tableTopSearches.innerHTML = topHead + topBody;
 
@@ -1274,6 +1279,14 @@
       const denominator = Number(total || 0);
       if (!denominator) return "0%";
       return `${(Number(value || 0) * 100 / denominator).toFixed(1)}%`;
+    }
+
+    function formatSpecificationValues(value) {
+      return String(value || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(" / ") || "-";
     }
 
     function renderAnalyticsDashboard(data, totals) {
@@ -1384,15 +1397,17 @@
     }
 
     function renderProductGaps(rows) {
-      const head = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Unmatched Searches</th></tr>";
+      const head = "<tr><th>Brand</th><th>Model</th><th>Bar Length</th><th>Pitch</th><th>Gauge</th><th class='numeric'>Unmatched Searches</th></tr>";
       const body = rows.length
         ? rows.map((row) => `<tr>
             <td>${escapeHtml(row.brand)}</td>
             <td>${escapeHtml(row.model)}</td>
             <td>${escapeHtml(row.bar_length)}</td>
-            <td><strong>${escapeHtml(row.searches)}</strong></td>
+            <td>${escapeHtml(formatSpecificationValues(row.pitch))}</td>
+            <td>${escapeHtml(formatSpecificationValues(row.gauge))}</td>
+            <td class="numeric"><strong>${escapeHtml(row.searches)}</strong></td>
           </tr>`).join("")
-        : '<tr><td colspan="4" class="muted">No unmatched searches for this period.</td></tr>';
+        : '<tr><td colspan="6" class="muted">No unmatched searches for this period.</td></tr>';
       ui.tableProductGaps.innerHTML = head + body;
     }
 

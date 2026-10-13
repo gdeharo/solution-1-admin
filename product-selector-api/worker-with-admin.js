@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-10-13-search-dashboard-v1";
+const WORKER_BUILD = "2026-10-13-search-dashboard-specs-v2";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -529,11 +529,27 @@ export default {
                LIMIT 10`
             ).bind(sinceIso).all(),
             env.DB.prepare(
-              `SELECT brand, model, bar_length, COUNT(*) AS searches
-               FROM search_log
-               WHERE timestamp_iso >= ? AND match_count = 0
-               GROUP BY brand, model, bar_length
-               ORDER BY searches DESC, brand, model, bar_length
+              `SELECT log.brand, log.model, log.bar_length, COUNT(*) AS searches,
+                      COALESCE((
+                        SELECT GROUP_CONCAT(DISTINCT fit.pitch)
+                        FROM bar_lengths fit
+                        WHERE fit.is_active = 1
+                          AND lower(trim(fit.chainsaw_brand)) = lower(trim(log.brand))
+                          AND lower(trim(fit.chainsaw_model)) = lower(trim(log.model))
+                          AND lower(trim(fit.bar_length)) = lower(trim(log.bar_length))
+                      ), '') AS pitch,
+                      COALESCE((
+                        SELECT GROUP_CONCAT(DISTINCT fit.gauge)
+                        FROM bar_lengths fit
+                        WHERE fit.is_active = 1
+                          AND lower(trim(fit.chainsaw_brand)) = lower(trim(log.brand))
+                          AND lower(trim(fit.chainsaw_model)) = lower(trim(log.model))
+                          AND lower(trim(fit.bar_length)) = lower(trim(log.bar_length))
+                      ), '') AS gauge
+               FROM search_log log
+               WHERE log.timestamp_iso >= ? AND log.match_count = 0
+               GROUP BY log.brand, log.model, log.bar_length
+               ORDER BY searches DESC, log.brand, log.model, log.bar_length
                LIMIT 10`
             ).bind(sinceIso).all(),
             env.DB.prepare(
@@ -595,6 +611,8 @@ export default {
               brand: toStr(r.brand),
               model: toStr(r.model),
               bar_length: toStr(r.bar_length),
+              pitch: toStr(r.pitch),
+              gauge: toStr(r.gauge),
               searches: Number(r.searches || 0),
             })),
             locations: (locations.results || []).map((r) => ({
@@ -617,11 +635,28 @@ export default {
           const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 20)));
           const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
           const rows = await env.DB.prepare(
-            `SELECT brand, model, bar_length, COUNT(*) AS searches, SUM(match_count) AS total_matches
-             FROM search_log
-             WHERE timestamp_iso >= ?
-             GROUP BY brand, model, bar_length
-             ORDER BY searches DESC, total_matches DESC, brand, model, bar_length
+            `SELECT log.brand, log.model, log.bar_length,
+                    COUNT(*) AS searches, SUM(log.match_count) AS total_matches,
+                    COALESCE((
+                      SELECT GROUP_CONCAT(DISTINCT fit.pitch)
+                      FROM bar_lengths fit
+                      WHERE fit.is_active = 1
+                        AND lower(trim(fit.chainsaw_brand)) = lower(trim(log.brand))
+                        AND lower(trim(fit.chainsaw_model)) = lower(trim(log.model))
+                        AND lower(trim(fit.bar_length)) = lower(trim(log.bar_length))
+                    ), '') AS pitch,
+                    COALESCE((
+                      SELECT GROUP_CONCAT(DISTINCT fit.gauge)
+                      FROM bar_lengths fit
+                      WHERE fit.is_active = 1
+                        AND lower(trim(fit.chainsaw_brand)) = lower(trim(log.brand))
+                        AND lower(trim(fit.chainsaw_model)) = lower(trim(log.model))
+                        AND lower(trim(fit.bar_length)) = lower(trim(log.bar_length))
+                    ), '') AS gauge
+             FROM search_log log
+             WHERE log.timestamp_iso >= ?
+             GROUP BY log.brand, log.model, log.bar_length
+             ORDER BY searches DESC, total_matches DESC, log.brand, log.model, log.bar_length
              LIMIT ?`
           ).bind(sinceIso, limit).all();
           return json({
@@ -632,6 +667,8 @@ export default {
               brand: toStr(r.brand),
               model: toStr(r.model),
               bar_length: toStr(r.bar_length),
+              pitch: toStr(r.pitch),
+              gauge: toStr(r.gauge),
               searches: Number(r.searches || 0),
               total_matches: Number(r.total_matches || 0),
             })),
