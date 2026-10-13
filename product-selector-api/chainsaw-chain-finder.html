@@ -30,6 +30,28 @@
       font-size: 22px;
       color: var(--accent-color, rgb(20, 111, 248));
     }
+    .mode-switch {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 14px 0;
+      padding: 4px;
+      border-radius: 8px;
+      background: #eef2f7;
+    }
+    .mode-button {
+      background: transparent;
+      color: #344054;
+      border-color: transparent;
+      font-weight: 700;
+    }
+    .mode-button.active {
+      color: #fff;
+      background: var(--accent-color, rgb(20, 111, 248));
+      border-color: var(--accent-color, rgb(20, 111, 248));
+    }
+    .search-panel.hidden { display: none; }
+    .form-note { margin: -2px 0 10px; color: #667085; font-size: 12px; line-height: 1.4; }
     .row { margin-bottom: 10px; }
     select, button {
       width: 100%;
@@ -120,10 +142,24 @@
     <h1 id="formTitle">KMC Chainsaw Chain Finder</h1>
 
     <div id="widget">
-      <div class="row"><select id="brand"><option value="">Select Brand</option></select></div>
-      <div class="row"><select id="model" disabled><option value="">Select Model</option></select></div>
-      <div class="row"><select id="barLength" disabled><option value="">Select Bar Length</option></select></div>
-      <div class="row"><button id="findBtn" disabled>Find Chains</button></div>
+      <div class="mode-switch" role="tablist" aria-label="Search method">
+        <button id="modeFitment" class="mode-button active" type="button" role="tab" aria-selected="true">Search by Chainsaw</button>
+        <button id="modeSpecs" class="mode-button" type="button" role="tab" aria-selected="false">Search by Specifications</button>
+      </div>
+      <div id="fitmentSearch" class="search-panel">
+        <div class="row"><select id="brand"><option value="">Select Brand</option></select></div>
+        <div class="row"><select id="model" disabled><option value="">Select Model</option></select></div>
+        <div class="row"><select id="barLength" disabled><option value="">Select Bar Length</option></select></div>
+        <div class="row"><button id="findBtn" disabled>Find Chains</button></div>
+      </div>
+      <div id="specSearch" class="search-panel hidden">
+        <p class="form-note">Use this option when you already know the chain specifications.</p>
+        <div class="row"><select id="specPitch"><option value="">Select Pitch</option></select></div>
+        <div class="row"><select id="specGauge" disabled><option value="">Select Gauge</option></select></div>
+        <div class="row"><select id="specLinks" disabled><option value="">Select Drive Links</option></select></div>
+        <div class="row"><select id="specCutter" disabled><option value="">Any Cutter Style</option></select></div>
+        <div class="row"><button id="findSpecBtn" disabled>Find Chains</button></div>
+      </div>
       <div id="results" class="results"></div>
     </div>
   </div>
@@ -136,6 +172,15 @@
       const modelSel = document.getElementById("model");
       const barSel = document.getElementById("barLength");
       const findBtn = document.getElementById("findBtn");
+      const modeFitment = document.getElementById("modeFitment");
+      const modeSpecs = document.getElementById("modeSpecs");
+      const fitmentSearch = document.getElementById("fitmentSearch");
+      const specSearch = document.getElementById("specSearch");
+      const specPitch = document.getElementById("specPitch");
+      const specGauge = document.getElementById("specGauge");
+      const specLinks = document.getElementById("specLinks");
+      const specCutter = document.getElementById("specCutter");
+      const findSpecBtn = document.getElementById("findSpecBtn");
       const results = document.getElementById("results");
       const formTitle = document.getElementById("formTitle");
       const defaults = {
@@ -170,6 +215,7 @@
       function applyConfig() {
         formTitle.textContent = config.form_title || defaults.form_title;
         findBtn.textContent = config.button_label || defaults.button_label;
+        findSpecBtn.textContent = config.button_label || defaults.button_label;
         document.documentElement.style.setProperty("--accent-color", config.accent_color || defaults.accent_color);
         document.documentElement.style.setProperty("--card-tint-percent", normalizeTintPercent(config.card_tint_percent));
       }
@@ -188,6 +234,77 @@
         const data = await getJson(`${API}/catalog/brands`);
         setOptions(brandSel, data.brands || [], "Select Brand");
       }
+
+      function setSearchMode(mode) {
+        const specsActive = mode === "specifications";
+        modeFitment.classList.toggle("active", !specsActive);
+        modeSpecs.classList.toggle("active", specsActive);
+        modeFitment.setAttribute("aria-selected", String(!specsActive));
+        modeSpecs.setAttribute("aria-selected", String(specsActive));
+        fitmentSearch.classList.toggle("hidden", specsActive);
+        specSearch.classList.toggle("hidden", !specsActive);
+        results.innerHTML = "";
+        if (specsActive && specPitch.options.length <= 1) loadSpecOptions().catch(showSearchError);
+      }
+
+      function showSearchError(err) {
+        results.innerHTML = `<div class="error">${escapeHtml(err && err.message || "Request failed")}</div>`;
+      }
+
+      async function loadSpecOptions(level = 1) {
+        const url = new URL(`${API}/catalog/spec-options`);
+        if (level > 1 && specPitch.value) url.searchParams.set("pitch", specPitch.value);
+        if (level > 2 && specGauge.value) url.searchParams.set("gauge", specGauge.value);
+        if (level > 3 && specLinks.value) url.searchParams.set("links", specLinks.value);
+        const data = await getJson(url.toString());
+        if (level === 1) {
+          setOptions(specPitch, data.pitches || [], "Select Pitch");
+          setOptions(specGauge, [], "Select Gauge");
+          setOptions(specLinks, [], "Select Drive Links");
+          setOptions(specCutter, [], "Any Cutter Style");
+        } else if (level === 2) {
+          setOptions(specGauge, data.gauges || [], "Select Gauge");
+          setOptions(specLinks, [], "Select Drive Links");
+          setOptions(specCutter, [], "Any Cutter Style");
+        } else if (level === 3) {
+          setOptions(specLinks, data.links || [], "Select Drive Links");
+          setOptions(specCutter, [], "Any Cutter Style");
+        } else {
+          setOptions(specCutter, data.chisel_styles || [], "Any Cutter Style");
+          specCutter.disabled = !(data.chisel_styles || []).length;
+        }
+        findSpecBtn.disabled = !(specPitch.value && specGauge.value && specLinks.value);
+      }
+
+      modeFitment.addEventListener("click", () => setSearchMode("fitment"));
+      modeSpecs.addEventListener("click", () => setSearchMode("specifications"));
+
+      specPitch.addEventListener("change", async function () {
+        results.innerHTML = "";
+        setOptions(specGauge, [], "Select Gauge");
+        setOptions(specLinks, [], "Select Drive Links");
+        setOptions(specCutter, [], "Any Cutter Style");
+        findSpecBtn.disabled = true;
+        if (!specPitch.value) return;
+        try { await loadSpecOptions(2); } catch (err) { showSearchError(err); }
+      });
+
+      specGauge.addEventListener("change", async function () {
+        results.innerHTML = "";
+        setOptions(specLinks, [], "Select Drive Links");
+        setOptions(specCutter, [], "Any Cutter Style");
+        findSpecBtn.disabled = true;
+        if (!specPitch.value || !specGauge.value) return;
+        try { await loadSpecOptions(3); } catch (err) { showSearchError(err); }
+      });
+
+      specLinks.addEventListener("change", async function () {
+        results.innerHTML = "";
+        setOptions(specCutter, [], "Any Cutter Style");
+        findSpecBtn.disabled = !(specPitch.value && specGauge.value && specLinks.value);
+        if (findSpecBtn.disabled) return;
+        try { await loadSpecOptions(4); } catch (err) { showSearchError(err); }
+      });
 
       brandSel.addEventListener("change", async function () {
         resetFrom(2);
@@ -232,51 +349,54 @@
           url.searchParams.set("barLength", barSel.value);
 
           const data = await getJson(url.toString());
-          const chains = data.chains || [];
-
-          if (!chains.length) {
-            results.innerHTML = renderNoMatchCard(data.match_keys || []);
-          } else {
-            results.innerHTML = chains.map((c) => `
-              ${c.url ? `
-                <a class="card card-link" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">
-                  <div class="card-columns">
-                    <div class="card-col">
-                      <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(c.pitch || "N/A")}</span></div>
-                      <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(c.gauge || "N/A")}</span></div>
-                      <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(c.chisel_style || "N/A")}</span></div>
-                    </div>
-                    <div class="card-col">
-                      <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(c.ansi_low_kickback || "N/A")}</span></div>
-                      <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(c.profile_class || "N/A")}</span></div>
-                      <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(c.kerf_type || "N/A")}</span></div>
-                      <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(c.sequence_type || "N/A")}</span></div>
-                    </div>
-                  </div>
-                </a>
-              ` : `
-                <div class="card">
-                  <div class="card-columns">
-                    <div class="card-col">
-                      <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(c.pitch || "N/A")}</span></div>
-                      <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(c.gauge || "N/A")}</span></div>
-                      <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(c.chisel_style || "N/A")}</span></div>
-                    </div>
-                    <div class="card-col">
-                      <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(c.ansi_low_kickback || "N/A")}</span></div>
-                      <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(c.profile_class || "N/A")}</span></div>
-                      <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(c.kerf_type || "N/A")}</span></div>
-                      <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(c.sequence_type || "N/A")}</span></div>
-                    </div>
-                  </div>
-                </div>
-              `}
-            `).join("");
-          }
+          renderSearchResults(data);
         } catch (err) {
-          results.innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+          showSearchError(err);
         }
       });
+
+      findSpecBtn.addEventListener("click", async function () {
+        results.innerHTML = "";
+        try {
+          const url = new URL(`${API}/catalog/spec-results`);
+          url.searchParams.set("pitch", specPitch.value);
+          url.searchParams.set("gauge", specGauge.value);
+          url.searchParams.set("links", specLinks.value);
+          if (specCutter.value) url.searchParams.set("chiselStyle", specCutter.value);
+          renderSearchResults(await getJson(url.toString()));
+        } catch (err) {
+          showSearchError(err);
+        }
+      });
+
+      function renderSearchResults(data) {
+        const chains = Array.isArray(data && data.chains) ? data.chains : [];
+        if (!chains.length) {
+          results.innerHTML = renderNoMatchCard(data && data.match_keys || []);
+          return;
+        }
+        results.innerHTML = chains.map((chain) => renderChainCard(chain)).join("");
+      }
+
+      function renderChainCard(chain) {
+        const content = `<div class="card-columns">
+          <div class="card-col">
+            <div class="card-row"><strong>Pitch</strong><span>${escapeHtml(chain.pitch || "N/A")}</span></div>
+            <div class="card-row"><strong>Gauge</strong><span>${escapeHtml(chain.gauge || "N/A")}</span></div>
+            <div class="card-row"><strong>Drive Links</strong><span>${escapeHtml(chain.links || "N/A")}</span></div>
+            <div class="card-row"><strong>Chisel Style</strong><span>${escapeHtml(chain.chisel_style || "N/A")}</span></div>
+          </div>
+          <div class="card-col">
+            <div class="card-row"><strong>ANSI Low Kickback</strong><span>${escapeHtml(chain.ansi_low_kickback || "N/A")}</span></div>
+            <div class="card-row"><strong>Profile Class</strong><span>${escapeHtml(chain.profile_class || "N/A")}</span></div>
+            <div class="card-row"><strong>Kerf Type</strong><span>${escapeHtml(chain.kerf_type || "N/A")}</span></div>
+            <div class="card-row"><strong>Sequence Type</strong><span>${escapeHtml(chain.sequence_type || "N/A")}</span></div>
+          </div>
+        </div>`;
+        return chain.url
+          ? `<a class="card card-link" href="${escapeHtml(chain.url)}" target="_blank" rel="noopener">${content}</a>`
+          : `<div class="card">${content}</div>`;
+      }
 
       function escapeHtml(value) {
         return String(value == null ? "" : value)

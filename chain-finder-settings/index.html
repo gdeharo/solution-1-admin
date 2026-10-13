@@ -93,6 +93,7 @@
     .import-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
     .import-actions button { width: auto; }
     .status-ready { color: #067647; font-weight: 700; }
+    .status-warning { color: #b54708; font-weight: 700; }
     .status-blocked { color: #b42318; font-weight: 700; }
     .status-duplicate { color: #815000; font-weight: 700; }
     .progress-line { height: 8px; border-radius: 999px; overflow: hidden; background: #e7ecf3; margin: 8px 0; }
@@ -320,7 +321,7 @@
         <button id="btnRefreshImports" class="secondary">Refresh History</button>
       </div>
       <h2>Import Data</h2>
-      <p class="muted">Analyze first. No database records are changed until Import Ready Rows is selected.</p>
+      <p class="muted">Analyze first. No database records are changed until Import Ready Rows is selected. Compatible cutter-style variants are informational and do not block the remaining fitments.</p>
       <h3>Templates</h3>
       <div class="import-actions">
         <button class="secondary" data-template="bar-lengths">Chainsaw Fitments Template</button>
@@ -348,6 +349,7 @@
       <div class="analytics-grid">
         <div class="analytics-card"><div class="label">Rows</div><div class="value" id="importCountTotal">0</div></div>
         <div class="analytics-card"><div class="label">Ready</div><div class="value" id="importCountReady">0</div></div>
+        <div class="analytics-card"><div class="label">Compatible Variants</div><div class="value" id="importCountVariants">0</div></div>
         <div class="analytics-card"><div class="label">Existing</div><div class="value" id="importCountExisting">0</div></div>
         <div class="analytics-card"><div class="label">File Duplicates</div><div class="value" id="importCountFileDuplicates">0</div></div>
         <div class="analytics-card"><div class="label">Blocked</div><div class="value" id="importCountBlocked">0</div></div>
@@ -574,6 +576,7 @@
       importProgressText: document.getElementById("importProgressText"),
       importCountTotal: document.getElementById("importCountTotal"),
       importCountReady: document.getElementById("importCountReady"),
+      importCountVariants: document.getElementById("importCountVariants"),
       importCountExisting: document.getElementById("importCountExisting"),
       importCountFileDuplicates: document.getElementById("importCountFileDuplicates"),
       importCountBlocked: document.getElementById("importCountBlocked"),
@@ -1259,14 +1262,13 @@
       ui.tableSearchSources.innerHTML = sourceHead + sourceBody;
 
       const logRows = Array.isArray(rows.rows) ? rows.rows : [];
-      const logHead = "<tr><th>When</th><th>Source</th><th>Location</th><th>Brand</th><th>Model</th><th>Bar Length</th><th>Matches</th><th>Part References</th></tr>";
+      const logHead = "<tr><th>When</th><th>Source</th><th>Location</th><th>Search Type</th><th>Search</th><th>Matches</th><th>Part References</th></tr>";
       const logBody = logRows.map((r) => `<tr>
         <td>${escapeHtml(formatIsoLocal(r.timestamp_iso))}</td>
         <td>${escapeHtml(r.source)}</td>
         <td>${escapeHtml(formatSearchLocation(r))}</td>
-        <td>${escapeHtml(r.brand)}</td>
-        <td>${escapeHtml(r.model)}</td>
-        <td>${escapeHtml(r.bar_length)}</td>
+        <td>${escapeHtml(r.search_mode === "specification" ? "Specifications" : "Chainsaw")}</td>
+        <td>${escapeHtml(formatSearchRequest(r))}</td>
         <td>${escapeHtml(r.match_count)}</td>
         <td>${escapeHtml(r.matched_part_references || "")}</td>
       </tr>`).join("");
@@ -1279,6 +1281,19 @@
       const denominator = Number(total || 0);
       if (!denominator) return "0%";
       return `${(Number(value || 0) * 100 / denominator).toFixed(1)}%`;
+    }
+
+    function formatSearchRequest(row) {
+      if (row && row.search_mode === "specification") {
+        return [
+          row.query_pitch && `Pitch ${row.query_pitch}`,
+          row.query_gauge && `Gauge ${row.query_gauge}`,
+          row.query_links && `${row.query_links} links`,
+          row.query_chisel_style && row.query_chisel_style,
+        ].filter(Boolean).join(" / ");
+      }
+      return [row && row.brand, row && row.model, row && row.bar_length && `${row.bar_length}\"`]
+        .filter(Boolean).join(" / ");
     }
 
     function formatSpecificationValues(value) {
@@ -2186,6 +2201,7 @@
       const counts = preview.counts || {};
       ui.importCountTotal.textContent = Number(counts.total || 0).toLocaleString();
       ui.importCountReady.textContent = Number(counts.ready || 0).toLocaleString();
+      ui.importCountVariants.textContent = Number(counts.compatible_variant || 0).toLocaleString();
       ui.importCountExisting.textContent = Number(counts.duplicate_existing || 0).toLocaleString();
       ui.importCountFileDuplicates.textContent = Number(counts.duplicate_file || 0).toLocaleString();
       ui.importCountBlocked.textContent = Number(counts.blocked || 0).toLocaleString();
@@ -2207,6 +2223,7 @@
 
     function importStatusClass(status) {
       if (status === "ready") return "status-ready";
+      if (status === "compatible_variant") return "status-warning";
       if (status === "blocked") return "status-blocked";
       return "status-duplicate";
     }
@@ -2214,6 +2231,7 @@
     function importStatusLabel(status) {
       return {
         ready: "Ready",
+        compatible_variant: "Compatible Variant",
         blocked: "Needs Review",
         duplicate_existing: "Already Exists",
         duplicate_file: "File Duplicate",
@@ -2254,7 +2272,7 @@
           default_brand: ui.importDefaultBrand.value.trim(),
           total_rows: Number(counts.total || ready.length),
           ready_rows: ready.length,
-          skipped_rows: Number(counts.duplicate_existing || 0) + Number(counts.duplicate_file || 0),
+          skipped_rows: Number(counts.compatible_variant || 0) + Number(counts.duplicate_existing || 0) + Number(counts.duplicate_file || 0),
           blocked_rows: Number(counts.blocked || 0),
         });
         const batchId = Number(started.batch_id || 0);
@@ -2349,7 +2367,7 @@
       state.importFilename = "";
       if (ui.importFile) ui.importFile.value = "";
       if (ui.btnCommitImport) ui.btnCommitImport.disabled = true;
-      [ui.importCountTotal, ui.importCountReady, ui.importCountExisting, ui.importCountFileDuplicates, ui.importCountBlocked].forEach((el) => {
+      [ui.importCountTotal, ui.importCountReady, ui.importCountVariants, ui.importCountExisting, ui.importCountFileDuplicates, ui.importCountBlocked].forEach((el) => {
         if (el) el.textContent = "0";
       });
       ui.importReviewNote.textContent = "Select a file and analyze it.";

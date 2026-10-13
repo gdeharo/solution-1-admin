@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-10-13-search-dashboard-specs-v2";
+const WORKER_BUILD = "2026-10-13-import-spec-search-v3";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -171,6 +171,75 @@ export default {
         return json({ brand, model, bar_lengths: lengths });
       }
 
+      if (path === "/catalog/spec-options" && request.method === "GET") {
+        await ensureD1CatalogTables(env);
+        const pitch = (url.searchParams.get("pitch") || "").trim();
+        const gauge = (url.searchParams.get("gauge") || "").trim();
+        const links = (url.searchParams.get("links") || "").trim();
+        const rows = await env.DB.prepare(
+          `SELECT pitch, gauge, links, chisel_style
+           FROM kmc_chains
+           WHERE is_active = 1`
+        ).all();
+        const products = rows.results || [];
+        const pitchRows = products;
+        const gaugeRows = pitch ? products.filter((row) => eqNorm(row.pitch, pitch)) : products;
+        const linkRows = gaugeRows.filter((row) => !gauge || eqNorm(row.gauge, gauge));
+        const cutterRows = linkRows.filter((row) => !links || sameDriveLinks(row.links, links));
+        return json({
+          pitches: uniqueSorted(pitchRows.map((row) => toStr(row.pitch)).filter(Boolean)),
+          gauges: uniqueSorted(gaugeRows.map((row) => toStr(row.gauge)).filter(Boolean)),
+          links: uniqueSortedByNumericPrefix(linkRows.map((row) => toStr(row.links)).filter(Boolean)),
+          chisel_styles: uniqueSorted(cutterRows.map((row) => toStr(row.chisel_style)).filter(Boolean)),
+        });
+      }
+
+      if (path === "/catalog/spec-results" && request.method === "GET") {
+        await ensureD1CatalogTables(env);
+        const pitch = (url.searchParams.get("pitch") || "").trim();
+        const gauge = (url.searchParams.get("gauge") || "").trim();
+        const links = (url.searchParams.get("links") || "").trim();
+        const chiselStyle = (url.searchParams.get("chiselStyle") || "").trim();
+        const shouldLog = (url.searchParams.get("log") || "1") !== "0";
+        if (!pitch || !gauge || !links) {
+          return json({ error: "Missing required params: pitch, gauge, links" }, 400);
+        }
+
+        const settings = await getSettingsMap(env);
+        const chainBrandFallback = settings.chain_brand_fallback || "KMC";
+        const kmcRes = await env.DB.prepare(
+          `SELECT gauge, pitch, chisel_style, ansi_low_kickback, profile_class, kerf_type, sequence_type,
+                  links, part_reference, upc, url
+           FROM kmc_chains
+           WHERE is_active = 1`
+        ).all();
+        const matchKeys = [{ chainTypeCode: "", pitch, gauge, driveLinks: links }];
+        const chains = buildKmcChainResults(kmcRes.results || [], matchKeys, chainBrandFallback, chiselStyle);
+        const payload = {
+          query: { mode: "specification", pitch, gauge, links, chisel_style: chiselStyle },
+          match_keys: matchKeys,
+          result_count: chains.length,
+          chains,
+        };
+        if (shouldLog) {
+          await appendSearchLog(env, {
+            brand: "",
+            model: "",
+            barLength: "",
+            matchKeys,
+            chains,
+            searchMode: "specification",
+            queryPitch: pitch,
+            queryGauge: gauge,
+            queryLinks: links,
+            queryChiselStyle: chiselStyle,
+            ...getSearchRequestMetadata(request),
+          });
+          payload.logged = true;
+        }
+        return json(payload);
+      }
+
       if (path === "/catalog/results" && request.method === "GET") {
         await ensureD1CatalogTables(env);
         const brand = (url.searchParams.get("brand") || "").trim();
@@ -214,49 +283,7 @@ export default {
         }
 
         const uniqueKeys = dedupePathKeys(pathKeys);
-        const results = [];
-
-        for (const key of uniqueKeys) {
-          for (const kmc of kmcRows) {
-            if (!eqNorm(kmc.pitch, key.pitch)) continue;
-            if (!eqNorm(kmc.gauge, key.gauge)) continue;
-            if (!sameDriveLinks(kmc.links, key.driveLinks)) continue;
-            const pitch = toStr(kmc.pitch);
-            const gauge = toStr(kmc.gauge);
-            const chiselStyle = toStr(kmc.chisel_style);
-            const ansiLowKickback = toStr(kmc.ansi_low_kickback);
-            const profileClass = toStr(kmc.profile_class);
-            const kerfType = toStr(kmc.kerf_type);
-            const sequenceType = toStr(kmc.sequence_type);
-            const chainModel =
-              pitch && gauge
-                ? `Pitch ${pitch} / Gauge ${gauge}`
-                : pitch
-                  ? `Pitch ${pitch}`
-                  : gauge
-                    ? `Gauge ${gauge}`
-                    : "";
-
-            results.push({
-              chain_brand: chainBrandFallback,
-              chain_model: chainModel,
-              chain_type: "",
-              pitch,
-              gauge,
-              chisel_style: chiselStyle,
-              ansi_low_kickback: ansiLowKickback,
-              profile_class: profileClass,
-              kerf_type: kerfType,
-              sequence_type: sequenceType,
-              links: toStr(kmc.links),
-              part_reference: toStr(kmc.part_reference),
-              upc: toStr(kmc.upc),
-              url: toStr(kmc.url),
-            });
-          }
-        }
-
-        const uniqueResults = dedupeByKey(results, (r) => `${r.part_reference}|${r.pitch}|${r.gauge}|${r.links}|${r.url}`);
+        const uniqueResults = buildKmcChainResults(kmcRows, uniqueKeys, chainBrandFallback);
 
         const payload = {
           query: { brand, model, bar_length: barLength },
@@ -523,7 +550,7 @@ export default {
                       SUM(CASE WHEN match_count > 0 THEN 1 ELSE 0 END) AS successful,
                       SUM(CASE WHEN match_count = 0 THEN 1 ELSE 0 END) AS gaps
                FROM search_log
-               WHERE timestamp_iso >= ?
+               WHERE timestamp_iso >= ? AND COALESCE(search_mode, 'fitment') = 'fitment'
                GROUP BY brand
                ORDER BY searches DESC, brand
                LIMIT 10`
@@ -548,6 +575,7 @@ export default {
                       ), '') AS gauge
                FROM search_log log
                WHERE log.timestamp_iso >= ? AND log.match_count = 0
+                 AND COALESCE(log.search_mode, 'fitment') = 'fitment'
                GROUP BY log.brand, log.model, log.bar_length
                ORDER BY searches DESC, log.brand, log.model, log.bar_length
                LIMIT 10`
@@ -654,7 +682,7 @@ export default {
                         AND lower(trim(fit.bar_length)) = lower(trim(log.bar_length))
                     ), '') AS gauge
              FROM search_log log
-             WHERE log.timestamp_iso >= ?
+             WHERE log.timestamp_iso >= ? AND COALESCE(log.search_mode, 'fitment') = 'fitment'
              GROUP BY log.brand, log.model, log.bar_length
              ORDER BY searches DESC, total_matches DESC, log.brand, log.model, log.bar_length
              LIMIT ?`
@@ -737,7 +765,8 @@ export default {
           const rows = await env.DB.prepare(
             `SELECT id, timestamp_iso, brand, model, bar_length, match_count,
                     matched_part_references, matched_urls, chain_type_codes, drive_links,
-                    source_id, city, region, country
+                    source_id, city, region, country, search_mode, query_pitch,
+                    query_gauge, query_links, query_chisel_style
              FROM search_log
              WHERE ${where.join(" AND ")}
              ORDER BY timestamp_iso DESC, id DESC
@@ -764,6 +793,11 @@ export default {
               city: toStr(r.city),
               region: toStr(r.region),
               country: toStr(r.country),
+              search_mode: toStr(r.search_mode) || "fitment",
+              query_pitch: toStr(r.query_pitch),
+              query_gauge: toStr(r.query_gauge),
+              query_links: toStr(r.query_links),
+              query_chisel_style: toStr(r.query_chisel_style),
             })),
           });
         }
@@ -1275,8 +1309,9 @@ async function appendSearchLog(env, data) {
     `INSERT INTO search_log (
       timestamp_iso, brand, model, bar_length, match_keys, chain_type_codes, drive_links,
       match_count, matched_part_references, matched_urls, client_ip, user_agent,
-      source_id, city, region, country, timezone
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      source_id, city, region, country, timezone, search_mode, query_pitch, query_gauge,
+      query_links, query_chisel_style
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       nowIso,
@@ -1295,7 +1330,12 @@ async function appendSearchLog(env, data) {
       toStr(data.city),
       toStr(data.region),
       toStr(data.country),
-      toStr(data.timezone)
+      toStr(data.timezone),
+      toStr(data.searchMode || "fitment"),
+      toStr(data.queryPitch),
+      toStr(data.queryGauge),
+      toStr(data.queryLinks),
+      toStr(data.queryChiselStyle)
     )
     .run();
 }
@@ -1532,8 +1572,11 @@ async function ensureD1CatalogTables(env) {
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     )`
   ).run();
+  // The original index omitted pitch and gauge, which rejected legitimate fitment variants.
+  await env.DB.prepare(`DROP INDEX IF EXISTS ux_bar_lengths_fitment`).run();
   await env.DB.prepare(
-    `CREATE UNIQUE INDEX IF NOT EXISTS ux_bar_lengths_fitment ON bar_lengths(chainsaw_brand, chainsaw_model, bar_length, drive_links)`
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_bar_lengths_fitment_v2
+     ON bar_lengths(chainsaw_brand, chainsaw_model, bar_length, pitch, gauge, drive_links)`
   ).run();
   await env.DB.prepare(
     `CREATE INDEX IF NOT EXISTS idx_bar_lengths_brand_model ON bar_lengths(chainsaw_brand, chainsaw_model)`
@@ -1581,6 +1624,11 @@ async function ensureD1CatalogTables(env) {
       region TEXT,
       country TEXT,
       timezone TEXT,
+      search_mode TEXT NOT NULL DEFAULT 'fitment',
+      query_pitch TEXT,
+      query_gauge TEXT,
+      query_links TEXT,
+      query_chisel_style TEXT,
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     )`
   ).run();
@@ -1590,6 +1638,11 @@ async function ensureD1CatalogTables(env) {
     region: "TEXT",
     country: "TEXT",
     timezone: "TEXT",
+    search_mode: "TEXT NOT NULL DEFAULT 'fitment'",
+    query_pitch: "TEXT",
+    query_gauge: "TEXT",
+    query_links: "TEXT",
+    query_chisel_style: "TEXT",
   });
   await env.DB.prepare(
     `CREATE INDEX IF NOT EXISTS idx_search_log_timestamp ON search_log(created_at DESC)`
@@ -1689,7 +1742,7 @@ async function previewCatalogImport(env, input) {
   ]);
 
   const context = buildImportContext(barRes.results || [], kmcRes.results || [], lookupRes.results || []);
-  const seenFitments = new Set();
+  const seenFitments = new Map();
   const seenParts = new Set();
   const seenUpcs = new Set();
   const reviewedRows = rows.map((row, index) =>
@@ -1699,7 +1752,7 @@ async function previewCatalogImport(env, input) {
       seenUpcs,
     })
   );
-  const counts = { total: reviewedRows.length, ready: 0, duplicate_existing: 0, duplicate_file: 0, blocked: 0 };
+  const counts = { total: reviewedRows.length, ready: 0, compatible_variant: 0, duplicate_existing: 0, duplicate_file: 0, blocked: 0 };
   for (const row of reviewedRows) {
     if (Object.prototype.hasOwnProperty.call(counts, row.status)) counts[row.status] += 1;
     else counts.blocked += 1;
@@ -1744,7 +1797,7 @@ function buildImportContext(barRows, kmcRows, lookupRows) {
     const brandKey = importComparable("Chainsaw Brand", brand);
     if (!modelByBrand.has(brandKey)) modelByBrand.set(brandKey, new Map());
     modelByBrand.get(brandKey).set(importModelKey(model), model);
-    existingFitments.add(importFitmentKey(brand, model, row.bar_length, row.drive_links));
+    existingFitments.add(importFitmentKey(brand, model, row.bar_length, row.pitch, row.gauge, row.drive_links));
   }
   const kmcByPart = new Map();
   const existingParts = new Set();
@@ -1783,6 +1836,7 @@ function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, 
   const linksInput = importCell(row, ["Drive Links", "DL", "Links", "Link Count"]);
   const partInput = importCell(row, ["KMC Part#", "KMC Part", "Part Reference"]);
   const urlInput = importCell(row, ["KMC Chain URL", "URL", "Column1"]);
+  const cutterInput = importCell(row, ["Cutter Type", "Chisel Style"]);
   const missing = [];
   if (!brandInput) missing.push("Chainsaw Brand");
   if (!modelInput) missing.push("Chainsaw Model");
@@ -1813,7 +1867,7 @@ function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, 
     }
   }
 
-  const fitmentKey = importFitmentKey(brand, model, barLength, driveLinks);
+  const fitmentKey = importFitmentKey(brand, model, barLength, pitch, gauge, driveLinks);
   const normalized = {
     chainsaw_brand: brand,
     chainsaw_model: model,
@@ -1833,9 +1887,20 @@ function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, 
     return importReviewResult(sourceRowNumber, "duplicate_existing", "Fitment already exists", normalized, row);
   }
   if (seen.seenFitments.has(fitmentKey)) {
+    const previousCutter = seen.seenFitments.get(fitmentKey);
+    const currentCutter = importComparable("Chisel Style", cutterInput);
+    if (previousCutter && currentCutter && previousCutter !== currentCutter) {
+      return importReviewResult(
+        sourceRowNumber,
+        "compatible_variant",
+        `Compatible cutter-style option (${toStr(cutterInput).trim()}). One fitment record is sufficient; KMC product cutter style remains product-specific.`,
+        normalized,
+        row
+      );
+    }
     return importReviewResult(sourceRowNumber, "duplicate_file", "Duplicate fitment within this file", normalized, row);
   }
-  seen.seenFitments.add(fitmentKey);
+  seen.seenFitments.set(fitmentKey, importComparable("Chisel Style", cutterInput));
   return importReviewResult(sourceRowNumber, "ready", importType === "combined-fitments" ? "Ready as Chainsaw List fitment" : "Ready", normalized, row);
 }
 
@@ -1941,8 +2006,15 @@ function normalizeImportInteger(value) {
   return Number.isInteger(number) && number > 0 ? String(number) : "";
 }
 
-function importFitmentKey(brand, model, barLength, driveLinks) {
-  return `${importComparable("Chainsaw Brand", brand)}|${importModelKey(model)}|${normalizeImportNumber(barLength)}|${normalizeImportInteger(driveLinks)}`;
+function importFitmentKey(brand, model, barLength, pitch, gauge, driveLinks) {
+  return [
+    importComparable("Chainsaw Brand", brand),
+    importModelKey(model),
+    normalizeImportNumber(barLength),
+    importComparable("Pitch", pitch),
+    importComparable("Gauge", gauge),
+    normalizeImportInteger(driveLinks),
+  ].join("|");
 }
 
 function importKmcSignature(row) {
@@ -4060,6 +4132,45 @@ function assertGoogleConfig(env) {
 
 function dedupePathKeys(keys) {
   return dedupeByKey(keys, (k) => `${norm(k.pitch)}|${norm(k.gauge)}|${norm(k.driveLinks)}`);
+}
+
+function buildKmcChainResults(kmcRows, matchKeys, chainBrandFallback, chiselStyleFilter = "") {
+  const results = [];
+  for (const key of matchKeys || []) {
+    for (const kmc of kmcRows || []) {
+      if (!eqNorm(kmc.pitch, key.pitch)) continue;
+      if (!eqNorm(kmc.gauge, key.gauge)) continue;
+      if (!sameDriveLinks(kmc.links, key.driveLinks)) continue;
+      if (chiselStyleFilter && !eqNorm(kmc.chisel_style, chiselStyleFilter)) continue;
+      const pitch = toStr(kmc.pitch);
+      const gauge = toStr(kmc.gauge);
+      const chiselStyle = toStr(kmc.chisel_style);
+      const chainModel = pitch && gauge
+        ? `Pitch ${pitch} / Gauge ${gauge}`
+        : pitch
+          ? `Pitch ${pitch}`
+          : gauge
+            ? `Gauge ${gauge}`
+            : "";
+      results.push({
+        chain_brand: chainBrandFallback,
+        chain_model: chainModel,
+        chain_type: "",
+        pitch,
+        gauge,
+        chisel_style: chiselStyle,
+        ansi_low_kickback: toStr(kmc.ansi_low_kickback),
+        profile_class: toStr(kmc.profile_class),
+        kerf_type: toStr(kmc.kerf_type),
+        sequence_type: toStr(kmc.sequence_type),
+        links: toStr(kmc.links),
+        part_reference: toStr(kmc.part_reference),
+        upc: toStr(kmc.upc),
+        url: toStr(kmc.url),
+      });
+    }
+  }
+  return dedupeByKey(results, (row) => `${row.part_reference}|${row.pitch}|${row.gauge}|${row.links}|${row.url}`);
 }
 
 function buildChainTypeMap(rows) {
