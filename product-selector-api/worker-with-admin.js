@@ -2,7 +2,7 @@ let googleTokenCache = {
   accessToken: null,
   expiresAtMs: 0,
 };
-const WORKER_BUILD = "2026-10-13-multi-cutter-search-v4";
+const WORKER_BUILD = "2026-10-13-fitment-cut-type-v5";
 let spreadsheetMetaCache = {
   meta: null,
   loadedAtMs: 0,
@@ -88,6 +88,7 @@ const SHEET_ENTITY_CONFIG = {
       "Pitch",
       "Bar Length",
       "Drive Links",
+      "Cut Type",
       "Name",
       "KMC Chain URL",
     ],
@@ -1568,6 +1569,7 @@ async function ensureD1CatalogTables(env) {
       gauge TEXT NOT NULL,
       pitch TEXT NOT NULL,
       drive_links TEXT NOT NULL,
+      cut_type TEXT,
       name TEXT,
       kmc_chain_url TEXT,
       is_active INTEGER NOT NULL DEFAULT 1,
@@ -1678,7 +1680,7 @@ async function ensureD1CatalogTables(env) {
   ).run();
   await ensureD1Columns(env, "import_batches", { processed_rows: "INTEGER NOT NULL DEFAULT 0" });
   await ensureD1Columns(env, "kmc_chains", { import_batch_id: "INTEGER" });
-  await ensureD1Columns(env, "bar_lengths", { import_batch_id: "INTEGER" });
+  await ensureD1Columns(env, "bar_lengths", { import_batch_id: "INTEGER", cut_type: "TEXT" });
   await env.DB.prepare(
     `CREATE INDEX IF NOT EXISTS idx_kmc_chains_import_batch ON kmc_chains(import_batch_id)`
   ).run();
@@ -1878,6 +1880,7 @@ function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, 
     gauge,
     pitch,
     drive_links: driveLinks,
+    cut_type: normalizeFitmentCutType(cutterInput),
     name: `${model} - ${barLength}`,
     kmc_chain_url: "",
   };
@@ -1890,9 +1893,11 @@ function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, 
     return importReviewResult(sourceRowNumber, "duplicate_existing", "Fitment already exists", normalized, row);
   }
   if (seen.seenFitments.has(fitmentKey)) {
-    const previousCutter = seen.seenFitments.get(fitmentKey);
+    const previous = seen.seenFitments.get(fitmentKey);
+    const previousCutter = previous.cutter;
     const currentCutter = importComparable("Chisel Style", cutterInput);
     if (previousCutter && currentCutter && previousCutter !== currentCutter) {
+      previous.normalized.cut_type = combineFitmentCutTypes(previous.normalized.cut_type, normalized.cut_type);
       return importReviewResult(
         sourceRowNumber,
         "compatible_variant",
@@ -1903,7 +1908,10 @@ function reviewFitmentImportRow(importType, row, sourceRowNumber, defaultBrand, 
     }
     return importReviewResult(sourceRowNumber, "duplicate_file", "Duplicate fitment within this file", normalized, row);
   }
-  seen.seenFitments.set(fitmentKey, importComparable("Chisel Style", cutterInput));
+  seen.seenFitments.set(fitmentKey, {
+    cutter: importComparable("Chisel Style", cutterInput),
+    normalized,
+  });
   return importReviewResult(sourceRowNumber, "ready", importType === "combined-fitments" ? "Ready as Chainsaw List fitment" : "Ready", normalized, row);
 }
 
@@ -2020,6 +2028,26 @@ function importFitmentKey(brand, model, barLength, pitch, gauge, driveLinks) {
   ].join("|");
 }
 
+function normalizeFitmentCutType(value) {
+  const clean = toStr(value).trim();
+  if (!clean) return "";
+  const comparable = importComparable("Chisel Style", clean);
+  const hasFull = comparable.includes("full");
+  const hasSemi = comparable.includes("semi");
+  if (hasFull && hasSemi) return "Full / Semi";
+  if (hasFull) return "Full";
+  if (hasSemi) return "Semi";
+  return clean;
+}
+
+function combineFitmentCutTypes(first, second) {
+  const values = [normalizeFitmentCutType(first), normalizeFitmentCutType(second)].filter(Boolean);
+  const hasFull = values.some((value) => importComparable("Chisel Style", value).includes("full"));
+  const hasSemi = values.some((value) => importComparable("Chisel Style", value).includes("semi"));
+  if (hasFull && hasSemi) return "Full / Semi";
+  return values[0] || "";
+}
+
 function importKmcSignature(row) {
   return [row.gauge, row.pitch, row.chisel_style, row.ansi_low_kickback, row.profile_class, row.kerf_type, row.sequence_type, row.links]
     .map((value) => norm(value)).join("|");
@@ -2128,11 +2156,11 @@ async function appendCatalogImportRows(env, batchId, input) {
       statements.push(env.DB.prepare(
         `INSERT OR IGNORE INTO bar_lengths (
           chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links,
-          name, kmc_chain_url, is_active, created_at, updated_at, import_batch_id
-        ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+          cut_type, name, kmc_chain_url, is_active, created_at, updated_at, import_batch_id
+        ) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`
       ).bind(
         row.chainsaw_brand, row.chainsaw_model, row.gauge, row.pitch, row.bar_length,
-        row.drive_links, row.name, toStr(row.kmc_chain_url).trim(), nowTs, nowTs, batchId
+        row.drive_links, toStr(row.cut_type).trim(), row.name, toStr(row.kmc_chain_url).trim(), nowTs, nowTs, batchId
       ));
     }
   }
@@ -2323,7 +2351,7 @@ async function loadAdminEntityRows(env, entity) {
   }
   if (entity === "bar-lengths") {
     const res = await env.DB.prepare(
-      `SELECT id, chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links, name, kmc_chain_url
+      `SELECT id, chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links, cut_type, name, kmc_chain_url
        FROM bar_lengths
        WHERE is_active = 1
        ORDER BY chainsaw_brand, chainsaw_model, bar_length, drive_links`
@@ -2336,6 +2364,7 @@ async function loadAdminEntityRows(env, entity) {
       Pitch: toStr(r.pitch),
       "Bar Length": toStr(r.bar_length),
       "Drive Links": toStr(r.drive_links),
+      "Cut Type": toStr(r.cut_type),
       Name: toStr(r.name),
       "KMC Chain URL": toStr(r.kmc_chain_url),
       __row: Number(r.id),
@@ -2484,7 +2513,7 @@ async function upsertAdminEntityRow(env, entity, row, rowNumber) {
       await env.DB.prepare(
         `UPDATE bar_lengths
          SET chainsaw_brand = ?, chainsaw_model = ?, chain_type_code = ?, gauge = ?, pitch = ?,
-             bar_length = ?, drive_links = ?, name = ?, kmc_chain_url = ?, updated_at = ?, is_active = 1
+             bar_length = ?, drive_links = ?, cut_type = ?, name = ?, kmc_chain_url = ?, updated_at = ?, is_active = 1
          WHERE id = ?`
       ).bind(
         toStr(row["Chainsaw Brand"]).trim(),
@@ -2494,6 +2523,7 @@ async function upsertAdminEntityRow(env, entity, row, rowNumber) {
         toStr(row.Pitch).trim(),
         toStr(row["Bar Length"]).trim(),
         toStr(row["Drive Links"]).trim(),
+        normalizeFitmentCutType(row["Cut Type"]),
         toStr(row.Name).trim(),
         toStr(row["KMC Chain URL"]).trim(),
         nowTs,
@@ -2505,8 +2535,8 @@ async function upsertAdminEntityRow(env, entity, row, rowNumber) {
     const insert = await env.DB.prepare(
       `INSERT INTO bar_lengths (
         chainsaw_brand, chainsaw_model, chain_type_code, gauge, pitch, bar_length, drive_links,
-        name, kmc_chain_url, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+        cut_type, name, kmc_chain_url, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
     ).bind(
       toStr(row["Chainsaw Brand"]).trim(),
       toStr(row["Chainsaw Model"]).trim(),
@@ -2515,6 +2545,7 @@ async function upsertAdminEntityRow(env, entity, row, rowNumber) {
       toStr(row.Pitch).trim(),
       toStr(row["Bar Length"]).trim(),
       toStr(row["Drive Links"]).trim(),
+      normalizeFitmentCutType(row["Cut Type"]),
       toStr(row.Name).trim(),
       toStr(row["KMC Chain URL"]).trim(),
       nowTs,
@@ -2759,13 +2790,14 @@ async function replaceD1CatalogData(env, payload) {
   for (const row of payload.barRows || []) {
     await env.DB.prepare(
       `INSERT INTO bar_lengths (
-        chainsaw_brand, chainsaw_model, bar_length, chain_type_code, gauge, pitch, drive_links, name, kmc_chain_url,
+        chainsaw_brand, chainsaw_model, bar_length, chain_type_code, gauge, pitch, drive_links, cut_type, name, kmc_chain_url,
         is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      ON CONFLICT(chainsaw_brand, chainsaw_model, bar_length, drive_links) DO UPDATE SET
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      ON CONFLICT(chainsaw_brand, chainsaw_model, bar_length, pitch, gauge, drive_links) DO UPDATE SET
         chain_type_code = excluded.chain_type_code,
         gauge = excluded.gauge,
         pitch = excluded.pitch,
+        cut_type = excluded.cut_type,
         name = excluded.name,
         kmc_chain_url = excluded.kmc_chain_url,
         is_active = 1,
@@ -2779,6 +2811,7 @@ async function replaceD1CatalogData(env, payload) {
         row.gauge,
         row.pitch,
         row.drive_links,
+        row.cut_type,
         row.name,
         row.kmc_chain_url,
         nowTs,
@@ -2902,6 +2935,7 @@ function buildD1BarRows(rows) {
       gauge: toStr(row.Gauge).trim(),
       pitch: toStr(row.Pitch).trim(),
       drive_links: driveLinks,
+      cut_type: normalizeFitmentCutType(row["Cut Type"] || row["Cutter Type"] || row["Chisel Style"]),
       name: toStr(row.Name).trim(),
       kmc_chain_url: toStr(row["KMC Chain URL"]).trim(),
     });
@@ -2909,9 +2943,9 @@ function buildD1BarRows(rows) {
   return dedupeByKey(
     out,
     (r) =>
-      `${norm(r.chainsaw_brand)}|${norm(r.chainsaw_model)}|${norm(r.bar_length)}|${normalizeDriveLinks(
-        r.drive_links
-      )}`
+      `${norm(r.chainsaw_brand)}|${norm(r.chainsaw_model)}|${norm(r.bar_length)}|${norm(r.pitch)}|${norm(
+        r.gauge
+      )}|${normalizeDriveLinks(r.drive_links)}`
   );
 }
 

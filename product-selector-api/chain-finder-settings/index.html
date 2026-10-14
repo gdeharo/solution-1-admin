@@ -432,7 +432,7 @@
       },
       "bar-lengths": {
         title: "Chainsaw List",
-        fields: ["Chainsaw Brand", "Chainsaw Model", "Bar Length", "Chain Type Code", "Gauge", "Pitch", "Drive Links", "Name", "KMC Chain URL"],
+        fields: ["Chainsaw Brand", "Chainsaw Model", "Bar Length", "Chain Type Code", "Gauge", "Pitch", "Drive Links", "Cut Type", "Name", "KMC Chain URL"],
       },
     };
 
@@ -1706,6 +1706,9 @@
       if (slug === "kmc-chains" && fieldName === "Links") {
         return `<input id="${id}" type="number" step="1" placeholder="${escapeHtml(fieldName)}" />`;
       }
+      if (slug === "bar-lengths" && fieldName === "Cut Type") {
+        return `<select id="${id}"><option value="">Select Cut Type</option><option value="Full">Full</option><option value="Semi">Semi</option><option value="Full / Semi">Full / Semi</option></select>`;
+      }
       if (slug === "bar-lengths" && fieldName === "Name") {
         return `<input id="${id}" placeholder="${escapeHtml(fieldName)}" readonly />`;
       }
@@ -2405,6 +2408,7 @@
             ["Gauge", "Yes", "Existing gauge", "Examples: .043\", .050\", .058\", .063\".", ".050\""],
             ["Pitch", "Yes", "Existing pitch", "Examples: 3/8\" LP, 3/8\", .325\", .404\".", ".325\""],
             ["Drive Links", "Yes", "Positive whole number", "Also accepted as DL or Links during column mapping.", "62"],
+            ["Cut Type", "No", "Full, Semi, or Full / Semi", "Informational only; it does not restrict compatibility matching.", "Semi"],
           ],
         },
         "kmc-chains": {
@@ -2429,7 +2433,7 @@
             ["Chainsaw Brand", "Conditional", "Existing canonical brand", "May be omitted when Default Brand is entered before analysis.", "Stihl"],
             ["Model/Parts#", "Yes", "Text", "Imported as Chainsaw Model.", "MS 250"],
             ["Bar Length", "Yes", "Positive number", "Bar length in inches.", "16"],
-            ["Cutter Type", "No", "Text", "Used for review only; does not overwrite KMC product data.", "SEMI"],
+            ["Cutter Type", "No", "Full, Semi, or both", "Imported into Chainsaw List as Cut Type; it does not restrict compatibility matching.", "SEMI"],
             ["Pitch", "Yes", "Existing pitch", "Spacing and common decimal forms are normalized.", ".325\""],
             ["Gauge", "Yes", "Existing gauge", "Metric text such as .050 (1.3mm) is normalized.", ".050 (1.3mm)"],
             ["DL", "Yes", "Positive whole number", "Imported as Drive Links.", "62"],
